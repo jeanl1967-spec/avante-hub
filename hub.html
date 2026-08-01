@@ -315,6 +315,17 @@
         <h1>Promo Hooks</h1>
         <p>Paste your own booking link and landing page link for each promo, then copy them out to use in your ads</p>
       </div>
+      <div class="card" id="storefrontCard" style="margin-bottom:28px; display:none;">
+        <div class="link-box show" style="margin-top:0;">
+          <div class="label">Your affiliate storefront — share this one link with your clients</div>
+          <div class="url" id="storefrontUrl"></div>
+          <div class="btn-row">
+            <button class="btn-secondary" id="storefrontCopyBtn">Copy</button>
+            <button class="btn-outline" id="storefrontOpenBtn">Open</button>
+          </div>
+        </div>
+        <div class="hint" style="margin-top:10px;">This page shows every active hook below in one place, plus quick links to browse other categories. It updates automatically whenever you save a hook.</div>
+      </div>
       <div class="hook-grid" id="hook-grid"></div>
     </section>
 
@@ -495,6 +506,23 @@
         banner.append(' — your links are saved in this browser.');
         banner.style.display = 'block';
       }
+    })();
+
+    // ---------- Storefront link (all hooks, one URL, for clients) ----------
+    (function(){
+      var card = document.getElementById('storefrontCard');
+      if(!AFF_ID) return;
+      var url = new URL('landing.html', window.location.href);
+      url.searchParams.set('aff', AFF_ID);
+      var urlStr = url.toString();
+      document.getElementById('storefrontUrl').textContent = urlStr;
+      card.style.display = 'block';
+      document.getElementById('storefrontCopyBtn').addEventListener('click', function(){
+        copyText(urlStr, document.getElementById('storefrontUrl'));
+      });
+      document.getElementById('storefrontOpenBtn').addEventListener('click', function(){
+        window.open(urlStr, '_blank', 'noopener');
+      });
     })();
 
     // ---------- Accommodation Link Builder ----------

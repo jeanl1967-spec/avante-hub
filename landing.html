@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avante Travel — Special Offers</title>
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --teal:#0DCDC2;
+    --teal-dark:#0aa89f;
+    --navy:#0e2f44;
+    --ink:#333333;
+    --muted:#808080;
+    --mint:#f4fbfa;
+    --line:#e3e9e8;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Noto Sans', sans-serif;
+    color:var(--ink);
+    background:#ffffff;
+  }
+  h1,h2,h3,.brand,.tab{ font-family:'Montserrat', sans-serif; }
+
+  .topbar{
+    background:var(--teal);
+    color:#fff;
+    font-size:12.5px;
+    padding:6px 24px;
+    text-align:right;
+  }
+
+  header.hub-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:18px 32px;
+    border-bottom:1px solid var(--line);
+    flex-wrap:wrap;
+    gap:16px;
+  }
+  .brand{
+    font-weight:800;
+    font-size:22px;
+    color:var(--teal);
+    letter-spacing:0.01em;
+    line-height:1.1;
+  }
+  .brand span{ display:block; color:var(--navy); font-size:14px; font-weight:600; letter-spacing:0.08em;}
+
+  nav.tabs{
+    display:flex;
+    gap:4px;
+    flex-wrap:wrap;
+  }
+  .tab{
+    appearance:none;
+    border:none;
+    background:transparent;
+    color:var(--navy);
+    font-weight:600;
+    font-size:13.5px;
+    padding:10px 16px;
+    border-radius:8px;
+    cursor:pointer;
+    transition:background .15s ease, color .15s ease;
+    text-decoration:none;
+    display:inline-block;
+  }
+  .tab:hover{ background:var(--mint); }
+  .tab.disabled{ opacity:0.4; cursor:default; pointer-events:none; }
+
+  main{
+    max-width:960px;
+    margin:0 auto;
+    padding:40px 20px 80px;
+  }
+
+  .hero{ text-align:center; margin-bottom:32px; }
+  .hero h1{ color:var(--teal); text-transform:uppercase; font-size:26px; margin:0 0 6px; }
+  .hero p{ color:var(--muted); margin:0; font-size:14.5px; }
+
+  .promo-grid{
+    display:grid;
+    grid-template-columns:repeat(2, 1fr);
+    gap:20px;
+  }
+  @media (max-width:640px){
+    .promo-grid{ grid-template-columns:1fr; }
+  }
+
+  .promo-card{
+    background:#fff;
+    border:1.5px solid var(--line);
+    border-radius:14px;
+    padding:20px 22px 24px;
+    box-shadow:0 8px 24px rgba(14,47,68,0.05);
+    text-align:center;
+  }
+  .promo-card-image{
+    display:none;
+    width:100%;
+    height:150px;
+    object-fit:cover;
+    border-radius:10px;
+    margin-bottom:16px;
+  }
+  .promo-card-image.show{ display:block; }
+
+  .cta{
+    display:block;
+    width:100%;
+    padding:13px;
+    background:var(--teal);
+    color:#fff;
+    border:none;
+    border-radius:8px;
+    font-size:14.5px;
+    font-weight:700;
+    font-family:'Montserrat', sans-serif;
+    cursor:pointer;
+    text-decoration:none;
+    box-sizing:border-box;
+  }
+  .cta:hover{ background:var(--teal-dark); }
+
+  .cta-outline{
+    display:inline-block;
+    margin-top:12px;
+    padding:9px 18px;
+    background:#fff;
+    color:var(--teal-dark);
+    border:1.5px solid var(--teal);
+    border-radius:8px;
+    font-size:12.5px;
+    font-weight:700;
+    font-family:'Montserrat', sans-serif;
+    cursor:pointer;
+    text-decoration:none;
+  }
+  .cta-outline:hover{ background:var(--mint); }
+
+  .placeholder{
+    text-align:center;
+    padding:56px 24px;
+    background:var(--mint);
+    border-radius:14px;
+    border:1.5px dashed #bfe6e2;
+  }
+  .placeholder .badge{
+    display:inline-block;
+    background:var(--teal);
+    color:#fff;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    padding:5px 12px;
+    border-radius:100px;
+    margin-bottom:14px;
+  }
+  .placeholder h3{ color:var(--navy); margin:0 0 8px; font-size:19px; }
+  .placeholder p{ color:var(--muted); margin:0; font-size:13.5px; max-width:420px; margin:0 auto; }
+</style>
+</head>
+<body>
+
+  <div class="topbar">Avante Travel</div>
+
+  <header class="hub-header">
+    <div class="brand">AVANTE<span>TRAVEL</span></div>
+    <nav class="tabs">
+      <a class="tab" href="#promotions">Promotions</a>
+      <a class="tab" id="tab-accommodation" href="#" target="_blank" rel="noopener">Accommodation</a>
+      <a class="tab" id="tab-flights" href="#" target="_blank" rel="noopener">Flights</a>
+      <a class="tab" id="tab-activities" href="#" target="_blank" rel="noopener">Activities</a>
+      <a class="tab" id="tab-car" href="#" target="_blank" rel="noopener">Car Hire</a>
+      <a class="tab" id="tab-tutorials" href="#" target="_blank" rel="noopener">Tutorials</a>
+    </nav>
+  </header>
+
+  <main id="promotions">
+    <div class="hero">
+      <h1>Special Offers</h1>
+      <p>Brought to you by Avante Travel</p>
+    </div>
+    <div id="content">
+      <div class="placeholder">
+        <div class="badge">Loading</div>
+        <h3>Fetching current offers&hellip;</h3>
+        <p>One moment please.</p>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // ---------- Header nav links ----------
+    // Jean will supply the real destination URL for each of these categories.
+    // Until then, the tab is shown but disabled (greyed out, not clickable).
+    var CATEGORY_LINKS = {
+      accommodation: '',
+      flights: '',
+      activities: '',
+      car: '',
+      tutorials: ''
+    };
+    Object.keys(CATEGORY_LINKS).forEach(function(key){
+      var el = document.getElementById('tab-' + key);
+      var url = CATEGORY_LINKS[key];
+      if(url){
+        el.href = url;
+      }else{
+        el.removeAttribute('href');
+        el.removeAttribute('target');
+        el.classList.add('disabled');
+        el.setAttribute('aria-disabled', 'true');
+        el.title = 'Coming soon';
+      }
+    });
+
+    // ---------- Promotions grid ----------
+    var params = new URLSearchParams(window.location.search);
+    var aff = (params.get('aff') || '').trim();
+    var content = document.getElementById('content');
+    var HOOK_COUNT = 6;
+
+    function escapeHtml(s){
+      var d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+    function isSafeUrl(u){
+      return typeof u === 'string' && /^https?:\/\//i.test(u);
+    }
+    function renderMessage(title, body){
+      content.innerHTML =
+        '<div class="placeholder">' +
+          '<div class="badge">Unavailable</div>' +
+          '<h3>' + escapeHtml(title) + '</h3>' +
+          '<p>' + escapeHtml(body) + '</p>' +
+        '</div>';
+    }
+
+    if(!aff){
+      renderMessage('This link is incomplete', 'Please check the link you were given, or contact the person who shared it with you.');
+    } else {
+      var requests = [];
+      for(var i = 1; i <= HOOK_COUNT; i++){
+        (function(n){
+          requests.push(
+            fetch('/api/hook?aff=' + encodeURIComponent(aff) + '&hook=' + n)
+              .then(function(r){ return r.json(); })
+              .then(function(data){ return { n: n, data: data }; })
+              .catch(function(){ return { n: n, data: null }; })
+          );
+        })(i);
+      }
+
+      Promise.all(requests).then(function(results){
+        var active = results.filter(function(r){
+          return r.data && (isSafeUrl(r.data.booking) || isSafeUrl(r.data.landing));
+        });
+
+        if(!active.length){
+          renderMessage('No active offers right now', 'Please check back again soon.');
+          return;
+        }
+
+        var html = '<div class="promo-grid">';
+        active.forEach(function(r){
+          html += '<div class="promo-card">';
+          html += '<img class="promo-card-image" id="promoImg' + r.n + '" alt="">';
+          if(isSafeUrl(r.data.booking)){
+            html += '<a class="cta" href="' + escapeHtml(r.data.booking) + '" target="_blank" rel="noopener">Book Now</a>';
+          }
+          if(isSafeUrl(r.data.landing)){
+            html += '<a class="cta-outline" href="' + escapeHtml(r.data.landing) + '" target="_blank" rel="noopener">See full details</a>';
+          }
+          html += '</div>';
+        });
+        html += '</div>';
+        content.innerHTML = html;
+
+        active.forEach(function(r){
+          var img = document.getElementById('promoImg' + r.n);
+          img.onload = function(){ img.classList.add('show'); };
+          img.onerror = function(){ img.classList.remove('show'); };
+          img.src = '/api/hook-image?aff=' + encodeURIComponent(aff) + '&hook=' + r.n;
+        });
+      });
+    }
+  </script>
+
+</body>
+</html>
