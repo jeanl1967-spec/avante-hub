@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avante Travel Hub — Affiliate Tools</title>
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --teal:#0DCDC2;
+    --teal-dark:#0aa89f;
+    --navy:#0e2f44;
+    --ink:#333333;
+    --muted:#808080;
+    --mint:#f4fbfa;
+    --line:#e3e9e8;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Noto Sans', sans-serif;
+    color:var(--ink);
+    background:#ffffff;
+  }
+  h1,h2,h3,.brand,.tab,button{ font-family:'Montserrat', sans-serif; }
+
+  .topbar{
+    background:var(--teal);
+    color:#fff;
+    font-size:12.5px;
+    padding:6px 24px;
+    text-align:right;
+  }
+
+  header.hub-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:18px 32px;
+    border-bottom:1px solid var(--line);
+    flex-wrap:wrap;
+    gap:16px;
+  }
+  .brand{
+    font-weight:800;
+    font-size:22px;
+    color:var(--teal);
+    letter-spacing:0.01em;
+    line-height:1.1;
+  }
+  .brand span{ display:block; color:var(--navy); font-size:14px; font-weight:600; letter-spacing:0.08em;}
+
+  .aff-banner{
+    background:var(--mint);
+    color:var(--navy);
+    text-align:center;
+    font-size:12.5px;
+    padding:9px 16px;
+    border-bottom:1px solid var(--line);
+    display:none;
+  }
+  .aff-banner strong{ color:var(--teal-dark); }
+
+  nav.tabs{
+    display:flex;
+    gap:4px;
+    flex-wrap:wrap;
+  }
+  .tab{
+    appearance:none;
+    border:none;
+    background:transparent;
+    color:var(--navy);
+    font-weight:600;
+    font-size:13.5px;
+    padding:10px 16px;
+    border-radius:8px;
+    cursor:pointer;
+    transition:background .15s ease, color .15s ease;
+  }
+  .tab:hover{ background:var(--mint); }
+  .tab.active{ background:var(--teal); color:#fff; }
+
+  main{
+    max-width:760px;
+    margin:0 auto;
+    padding:40px 20px 80px;
+  }
+  .panel{ display:none; }
+  .panel.active{ display:block; }
+
+  .hero{
+    text-align:center;
+    margin-bottom:28px;
+  }
+  .hero h1{
+    color:var(--teal);
+    text-transform:uppercase;
+    font-size:26px;
+    margin:0 0 6px;
+  }
+  .hero p{
+    color:var(--muted);
+    margin:0;
+    font-size:14.5px;
+  }
+
+  /* ---- shared card/tool styling ---- */
+  .card{
+    background:#fff;
+    border:1.5px solid var(--line);
+    border-radius:14px;
+    padding:28px 30px 32px;
+    box-shadow:0 10px 30px rgba(14,47,68,0.06);
+  }
+  label{
+    display:block;
+    font-size:11.5px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    color:var(--teal-dark);
+    margin:16px 0 6px;
+  }
+  label:first-child{ margin-top:0; }
+  input{
+    width:100%;
+    padding:10px 12px;
+    border:1.5px solid #dcdcdc;
+    border-radius:8px;
+    font-size:14px;
+    font-family:'Noto Sans', sans-serif;
+    color:var(--navy);
+    background:var(--mint);
+  }
+  input:focus{ outline:none; border-color:var(--teal); }
+  .row{ display:flex; gap:12px; }
+  .row > div{ flex:1; }
+  .hint{ font-size:11.5px; color:var(--muted); margin-top:5px; }
+
+  button.primary{
+    margin-top:22px;
+    width:100%;
+    padding:13px;
+    background:var(--teal);
+    color:#fff;
+    border:none;
+    border-radius:8px;
+    font-size:14.5px;
+    font-weight:700;
+    cursor:pointer;
+  }
+  button.primary:hover{ background:var(--teal-dark); }
+
+  .status{
+    margin-top:12px;
+    padding:10px 13px;
+    border-radius:8px;
+    font-size:12.5px;
+    display:none;
+    background:#fdeceb;
+    color:#c0453a;
+    border:1px solid #f3cfc9;
+  }
+  .status.show{ display:block; }
+
+  .link-box{
+    margin-top:18px;
+    padding:16px;
+    background:var(--mint);
+    border:1.5px dashed #bfe6e2;
+    border-radius:10px;
+    display:none;
+  }
+  .link-box.show{ display:block; }
+  .link-box .label{ font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--teal-dark); font-weight:700; margin-bottom:6px;}
+  .link-box .url{ font-size:12.5px; word-break:break-all; line-height:1.5; color:var(--navy); }
+
+  .btn-row{ display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  .btn-secondary{
+    width:auto; margin-top:0;
+    padding:9px 18px; font-size:12.5px;
+    background:var(--navy); color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer;
+  }
+  .btn-secondary:hover{ background:#0a2333; }
+  .btn-outline{
+    width:auto; margin-top:0;
+    padding:9px 18px; font-size:12.5px;
+    background:#fff; color:var(--teal-dark); border:1.5px solid var(--teal); border-radius:8px; font-weight:700; cursor:pointer;
+  }
+  .btn-outline:hover{ background:var(--mint); }
+
+  iframe.preview{
+    width:100%; height:900px; border:1.5px solid var(--line);
+    display:none; margin-top:16px; border-radius:10px;
+  }
+  iframe.preview.show{ display:block; }
+
+  /* ---- coming soon / tutorials placeholders ---- */
+  .placeholder{
+    text-align:center;
+    padding:56px 24px;
+    background:var(--mint);
+    border-radius:14px;
+    border:1.5px dashed #bfe6e2;
+  }
+  .placeholder .badge{
+    display:inline-block;
+    background:var(--teal);
+    color:#fff;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    padding:5px 12px;
+    border-radius:100px;
+    margin-bottom:14px;
+  }
+  .placeholder h3{ color:var(--navy); margin:0 0 8px; font-size:19px; }
+  .placeholder p{ color:var(--muted); margin:0; font-size:13.5px; max-width:420px; margin:0 auto; }
+
+  /* ---- home / hook grid ---- */
+  main.wide{ max-width:960px; }
+  .hook-grid{
+    display:grid;
+    grid-template-columns:repeat(2, 1fr);
+    gap:18px;
+  }
+  @media (max-width:640px){
+    .hook-grid{ grid-template-columns:1fr; }
+  }
+  .hook-card{
+    background:#fff;
+    border:1.5px solid var(--line);
+    border-radius:14px;
+    padding:20px 22px 24px;
+    box-shadow:0 8px 24px rgba(14,47,68,0.05);
+  }
+  .hook-badge{
+    display:inline-block;
+    background:var(--mint);
+    color:var(--teal-dark);
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    padding:4px 10px;
+    border-radius:100px;
+    margin-bottom:10px;
+  }
+  .hook-placeholder{
+    height:64px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    text-align:center;
+    background:var(--mint);
+    border:1.5px dashed #bfe6e2;
+    border-radius:10px;
+    color:var(--muted);
+    font-size:12px;
+    margin-bottom:4px;
+  }
+  .hook-card label{ font-size:11px; margin:12px 0 5px; }
+  .hook-card input{ padding:8px 10px; font-size:13px; }
+  .hook-card button.primary{ margin-top:16px; padding:10px; font-size:13px; }
+  .hook-card .link-box{ margin-top:14px; padding:13px; }
+  .hook-card .link-box .label{ font-size:10.5px; }
+  .hook-card .link-box .url{ font-size:11.5px; }
+  .hook-row + .hook-row{ margin-top:14px; }
+
+  .toast{
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--navy); color:#fff; padding:10px 20px; border-radius:8px; font-size:13px;
+    opacity:0; transition:all 0.25s ease; pointer-events:none; z-index:9999;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+  <div class="topbar">Avante Travel &middot; Affiliate Hub</div>
+
+  <header class="hub-header">
+    <div class="brand">AVANTE<span>TRAVEL &middot; AFFILIATE HUB</span></div>
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-panel="home">Home</button>
+      <button class="tab" data-panel="accom">Accommodation Link Builder</button>
+      <button class="tab" data-panel="flight">Your Flight Link</button>
+      <button class="tab" data-panel="activity">Your Activity Link</button>
+      <button class="tab" data-panel="car">Your Car Link</button>
+      <button class="tab" data-panel="tutorials">Tutorials</button>
+    </nav>
+  </header>
+
+  <div class="aff-banner" id="affBanner"></div>
+
+  <main class="wide">
+
+    <!-- ===================== HOME ===================== -->
+    <section class="panel active" id="panel-home">
+      <div class="hero">
+        <h1>Promo Hooks</h1>
+        <p>Paste your own booking link and landing page link for each promo, then copy them out to use in your ads</p>
+      </div>
+      <div class="hook-grid" id="hook-grid"></div>
+    </section>
+
+    <!-- ===================== ACCOMMODATION ===================== -->
+    <section class="panel" id="panel-accom">
+      <div class="hero">
+        <h1>Accommodation Link Builder</h1>
+        <p>No login required — build a shareable booking link for social media, in seconds</p>
+      </div>
+      <div class="card">
+        <label for="a-baseUrl">Your booking link URL</label>
+        <input id="a-baseUrl" placeholder="e.g. https://stock.stocknetwork.co.za/ui/your-own-guid-here">
+        <div class="hint">Your own personal StockNetwork booking link — the one issued to you, not anyone else's. Paste it here once; every link this builds will use it.</div>
+
+        <label for="a-area">Destination or property name</label>
+        <input id="a-area" placeholder="e.g. Plettenberg Bay, or a specific resort name">
+        <div class="hint">Leave blank for a link showing everything available for these dates.</div>
+
+        <div class="row">
+          <div>
+            <label for="a-checkIn">Check-in date</label>
+            <input type="date" id="a-checkIn">
+          </div>
+          <div>
+            <label for="a-checkOut">Check-out date</label>
+            <input type="date" id="a-checkOut">
+          </div>
+        </div>
+
+        <button class="primary" id="a-generateBtn">Generate link</button>
+        <div class="status" id="a-errorStatus"></div>
+
+        <div class="link-box" id="a-linkBox">
+          <div class="label">Your shareable link</div>
+          <div class="url" id="a-finalUrl"></div>
+          <div class="btn-row">
+            <button class="btn-secondary" id="a-copyBtn">Copy link</button>
+            <button class="btn-outline" id="a-previewBtn">Show preview</button>
+          </div>
+          <iframe class="preview" id="a-previewFrame" title="Accommodation booking preview"></iframe>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== FLIGHT ===================== -->
+    <section class="panel" id="panel-flight">
+      <div class="hero">
+        <h1>Your Flight Link</h1>
+        <p>Paste your personal Travelstart affiliate link once — get a clean, shareable button</p>
+      </div>
+      <div class="card">
+        <label for="f-flightUrl">Your Travelstart affiliate link</label>
+        <input id="f-flightUrl" placeholder="e.g. https://www.travelstart.co.za/lp/retargeting-search-widget?affid=...">
+        <div class="hint">Your own personal Travelstart flight search link. Note: Travelstart's widget can't be shown in an inline preview here — it always opens in a new tab, on their site.</div>
+
+        <button class="primary" id="f-generateBtn">Generate link</button>
+        <div class="status" id="f-errorStatus"></div>
+
+        <div class="link-box" id="f-linkBox">
+          <div class="label">Your shareable link</div>
+          <div class="url" id="f-finalUrl"></div>
+          <div class="btn-row">
+            <button class="btn-secondary" id="f-copyBtn">Copy link</button>
+            <button class="btn-outline" id="f-openBtn">Open flight search</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== ACTIVITY (placeholder) ===================== -->
+    <section class="panel" id="panel-activity">
+      <div class="hero">
+        <h1>Your Activity Link</h1>
+      </div>
+      <div class="placeholder">
+        <div class="badge">Coming soon</div>
+        <h3>Activity booking links aren't live yet</h3>
+        <p>We're working on bringing activity and experience bookings into the Hub. Check back soon.</p>
+      </div>
+    </section>
+
+    <!-- ===================== CAR (placeholder) ===================== -->
+    <section class="panel" id="panel-car">
+      <div class="hero">
+        <h1>Your Car Link</h1>
+      </div>
+      <div class="placeholder">
+        <div class="badge">Coming soon</div>
+        <h3>Car hire links aren't live yet</h3>
+        <p>We're working on bringing car hire bookings into the Hub. Check back soon.</p>
+      </div>
+    </section>
+
+    <!-- ===================== TUTORIALS (placeholder) ===================== -->
+    <section class="panel" id="panel-tutorials">
+      <div class="hero">
+        <h1>Tutorials</h1>
+      </div>
+      <div class="placeholder">
+        <div class="badge">Coming soon</div>
+        <h3>Guides and walkthroughs are on the way</h3>
+        <p>Step-by-step tutorials on using the Hub and growing your affiliate sales will appear here.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="toast" id="toast">Link copied to your clipboard</div>
+
+  <script>
+    // ---------- tab switching ----------
+    document.querySelectorAll('.tab').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        document.querySelectorAll('.tab').forEach(function(b){ b.classList.remove('active'); });
+        document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
+        btn.classList.add('active');
+        document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
+      });
+    });
+
+    // ---------- shared toast + copy helpers ----------
+    var toast = document.getElementById('toast');
+    function showToast(msg){
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(function(){ toast.classList.remove('show'); }, 2200);
+    }
+    function copyText(text, sourceEl){
+      function fallbackCopy(){
+        var range = document.createRange();
+        range.selectNodeContents(sourceEl);
+        var sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        var ok = false;
+        try { ok = document.execCommand('copy'); } catch(e) { ok = false; }
+        showToast(ok ? 'Link copied to your clipboard' : 'Link selected — press Ctrl/Cmd+C to copy');
+      }
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        var settled = false;
+        var timer = setTimeout(function(){ if(!settled){ settled = true; fallbackCopy(); } }, 1200);
+        navigator.clipboard.writeText(text).then(function(){
+          if(!settled){ settled = true; clearTimeout(timer); showToast('Link copied to your clipboard'); }
+        }).catch(function(){
+          if(!settled){ settled = true; clearTimeout(timer); fallbackCopy(); }
+        });
+      }else{
+        fallbackCopy();
+      }
+    }
+
+    // ---------- Affiliate personalization ----------
+    // Give an affiliate a link like yoursite/hub.html?aff=<their-booking-link-id>
+    // (the same ID that's the last part of their own StockNetwork booking link).
+    // Every tab then pre-fills with that ID and remembers what they enter, in
+    // this browser only — no login, no server, just localStorage keyed by ID.
+    var AFF_ID = new URLSearchParams(window.location.search).get('aff') || '';
+    var STOCKNETWORK_BASE = 'https://stock.stocknetwork.co.za/ui/';
+
+    function affKey(key){ return 'avante-hub:' + AFF_ID + ':' + key; }
+    function affSave(key, value){
+      if(!AFF_ID) return;
+      try{ localStorage.setItem(affKey(key), value); }catch(e){}
+    }
+    function affLoad(key){
+      if(!AFF_ID) return '';
+      try{ return localStorage.getItem(affKey(key)) || ''; }catch(e){ return ''; }
+    }
+
+    (function(){
+      var banner = document.getElementById('affBanner');
+      if(AFF_ID){
+        banner.textContent = '';
+        banner.append('Personalized Hub for affiliate ');
+        var strong = document.createElement('strong');
+        strong.textContent = AFF_ID;
+        banner.appendChild(strong);
+        banner.append(' — your links are saved in this browser.');
+        banner.style.display = 'block';
+      }
+    })();
+
+    // ---------- Accommodation Link Builder ----------
+    (function(){
+      var currentLink = '';
+      var previewLoaded = false;
+      var checkInEl = document.getElementById('a-checkIn');
+      var checkOutEl = document.getElementById('a-checkOut');
+      var baseUrlEl = document.getElementById('a-baseUrl');
+
+      var savedBase = affLoad('bookingUrl');
+      if(savedBase){
+        baseUrlEl.value = savedBase;
+      }else if(AFF_ID){
+        baseUrlEl.value = STOCKNETWORK_BASE + AFF_ID;
+      }
+      baseUrlEl.addEventListener('change', function(){
+        affSave('bookingUrl', baseUrlEl.value.trim());
+      });
+
+      var today = new Date();
+      var tomorrow = new Date(today.getTime() + 86400000);
+      var checkoutDefault = new Date(today.getTime() + 3 * 86400000);
+      function fmt(d){ return d.toISOString().slice(0, 10); }
+      checkInEl.min = fmt(tomorrow);
+      checkInEl.value = fmt(tomorrow);
+      checkOutEl.value = fmt(checkoutDefault);
+
+      function buildLink(){
+        var baseUrl = document.getElementById('a-baseUrl').value.trim().replace(/\/$/, '');
+        var area = document.getElementById('a-area').value.trim();
+        var checkIn = checkInEl.value;
+        var checkOut = checkOutEl.value;
+        var errorEl = document.getElementById('a-errorStatus');
+        errorEl.className = 'status';
+        errorEl.textContent = '';
+
+        if(!baseUrl){
+          errorEl.textContent = 'Paste your booking link URL first (the one issued to you by StockNetwork).';
+          errorEl.className = 'status show';
+          return;
+        }
+        if(!checkIn || !checkOut){
+          errorEl.textContent = 'Please choose check-in and check-out dates.';
+          errorEl.className = 'status show';
+          return;
+        }
+        if(checkOut <= checkIn){
+          errorEl.textContent = 'Check-out must be after check-in.';
+          errorEl.className = 'status show';
+          return;
+        }
+
+        var params = new URLSearchParams({ CheckInDT: checkIn, CheckOutDT: checkOut });
+        if(area) params.set('Filter', area);
+        currentLink = baseUrl + '?' + params.toString();
+
+        document.getElementById('a-finalUrl').textContent = currentLink;
+        document.getElementById('a-linkBox').classList.add('show');
+
+        var frame = document.getElementById('a-previewFrame');
+        frame.classList.remove('show');
+        frame.removeAttribute('src');
+        previewLoaded = false;
+        document.getElementById('a-previewBtn').textContent = 'Show preview';
+      }
+
+      function togglePreview(){
+        var frame = document.getElementById('a-previewFrame');
+        var btn = document.getElementById('a-previewBtn');
+        if(frame.classList.contains('show')){
+          frame.classList.remove('show');
+          btn.textContent = 'Show preview';
+        }else{
+          if(!previewLoaded){
+            frame.src = currentLink;
+            previewLoaded = true;
+          }
+          frame.classList.add('show');
+          btn.textContent = 'Hide preview';
+        }
+      }
+
+      document.getElementById('a-generateBtn').addEventListener('click', buildLink);
+      document.getElementById('a-previewBtn').addEventListener('click', togglePreview);
+      document.getElementById('a-copyBtn').addEventListener('click', function(){
+        if(!currentLink) return;
+        copyText(currentLink, document.getElementById('a-finalUrl'));
+      });
+    })();
+
+    // ---------- Flight Link ----------
+    (function(){
+      var currentLink = '';
+      var flightUrlEl = document.getElementById('f-flightUrl');
+
+      function buildLink(){
+        var url = flightUrlEl.value.trim();
+        var errorEl = document.getElementById('f-errorStatus');
+        errorEl.className = 'status';
+        errorEl.textContent = '';
+
+        if(!url){
+          errorEl.textContent = 'Paste your Travelstart affiliate link first.';
+          errorEl.className = 'status show';
+          return;
+        }
+        if(!/^https?:\/\//i.test(url)){
+          errorEl.textContent = 'That doesn\'t look like a valid link — it should start with https://';
+          errorEl.className = 'status show';
+          return;
+        }
+
+        currentLink = url;
+        document.getElementById('f-finalUrl').textContent = currentLink;
+        document.getElementById('f-linkBox').classList.add('show');
+        affSave('flightUrl', url);
+      }
+
+      var savedFlight = affLoad('flightUrl');
+      if(savedFlight){
+        flightUrlEl.value = savedFlight;
+        buildLink();
+      }
+
+      document.getElementById('f-generateBtn').addEventListener('click', buildLink);
+      document.getElementById('f-copyBtn').addEventListener('click', function(){
+        if(!currentLink) return;
+        copyText(currentLink, document.getElementById('f-finalUrl'));
+      });
+      document.getElementById('f-openBtn').addEventListener('click', function(){
+        if(!currentLink) return;
+        window.open(currentLink, '_blank', 'noopener');
+      });
+    })();
+
+    // ---------- Home: Promo Hooks ----------
+    (function(){
+      var grid = document.getElementById('hook-grid');
+      var HOOK_COUNT = 6;
+      var html = '';
+      for(var i = 1; i <= HOOK_COUNT; i++){
+        html +=
+          '<div class="hook-card">' +
+            '<div class="hook-badge">Hook ' + i + '</div>' +
+            '<div class="hook-placeholder">Ad creative placeholder</div>' +
+            '<label for="h' + i + '-booking">Booking link</label>' +
+            '<input id="h' + i + '-booking" placeholder="Your StockNetwork booking link for this promo">' +
+            '<label for="h' + i + '-landing">Landing page link</label>' +
+            '<input id="h' + i + '-landing" placeholder="Link to the promo\'s landing page">' +
+            '<div class="hint">We\'ll automatically tag this with your affiliate ID (taken from the end of your booking link) so you can tell who sent the traffic.</div>' +
+            '<button class="primary" data-hook-save="' + i + '">Save hook</button>' +
+            '<div class="status" id="h' + i + '-errorStatus"></div>' +
+            '<div class="link-box" id="h' + i + '-linkBox">' +
+              '<div class="hook-row" id="h' + i + '-bookingRow" style="display:none;">' +
+                '<div class="label">Booking link</div>' +
+                '<div class="url" id="h' + i + '-bookingUrl"></div>' +
+                '<div class="btn-row">' +
+                  '<button class="btn-secondary" data-copy="h' + i + '-bookingUrl">Copy</button>' +
+                '</div>' +
+              '</div>' +
+              '<div class="hook-row" id="h' + i + '-landingRow" style="display:none;">' +
+                '<div class="label">Landing page link</div>' +
+                '<div class="url" id="h' + i + '-landingUrl"></div>' +
+                '<div class="btn-row">' +
+                  '<button class="btn-secondary" data-copy="h' + i + '-landingUrl">Copy</button>' +
+                  '<button class="btn-outline" data-open="h' + i + '-landingUrl">Open</button>' +
+                '</div>' +
+              '</div>' +
+            '</div>' +
+          '</div>';
+      }
+      grid.innerHTML = html;
+
+      function isValidUrl(v){ return /^https?:\/\//i.test(v); }
+
+      // Pull the affiliate's own ID off the end of their booking link, e.g.
+      // https://stock.stocknetwork.co.za/ui/c2fef00f-7330-4eb3-b993-f5f43fc73dff
+      // -> "c2fef00f-7330-4eb3-b993-f5f43fc73dff" (query string, if any, is ignored).
+      function extractAffiliateId(bookingUrl){
+        try{
+          var u = new URL(bookingUrl);
+          var parts = u.pathname.split('/').filter(Boolean);
+          return parts.length ? parts[parts.length - 1] : '';
+        }catch(e){
+          return '';
+        }
+      }
+
+      // Append ?aff=<id> (or &aff=<id> if the landing link already has query
+      // params) so the landing page can tell which affiliate sent the click.
+      function tagLandingUrl(landingUrl, affId){
+        if(!affId) return landingUrl;
+        try{
+          var u = new URL(landingUrl);
+          u.searchParams.set('aff', affId);
+          return u.toString();
+        }catch(e){
+          return landingUrl;
+        }
+      }
+
+      function saveHook(n){
+        var p = 'h' + n + '-';
+        var booking = document.getElementById(p + 'booking').value.trim();
+        var landing = document.getElementById(p + 'landing').value.trim();
+        var errorEl = document.getElementById(p + 'errorStatus');
+        errorEl.className = 'status';
+        errorEl.textContent = '';
+
+        if(!booking && !landing){
+          errorEl.textContent = 'Add at least one link — your booking link or the landing page link.';
+          errorEl.className = 'status show';
+          return;
+        }
+        if(booking && !isValidUrl(booking)){
+          errorEl.textContent = 'The booking link should start with https://';
+          errorEl.className = 'status show';
+          return;
+        }
+        if(landing && !isValidUrl(landing)){
+          errorEl.textContent = 'The landing page link should start with https://';
+          errorEl.className = 'status show';
+          return;
+        }
+
+        var affId = booking ? extractAffiliateId(booking) : AFF_ID;
+
+        var bookingRow = document.getElementById(p + 'bookingRow');
+        var landingRow = document.getElementById(p + 'landingRow');
+        if(booking){
+          document.getElementById(p + 'bookingUrl').textContent = booking;
+          bookingRow.style.display = 'block';
+        }else{
+          bookingRow.style.display = 'none';
+        }
+        if(landing){
+          document.getElementById(p + 'landingUrl').textContent = tagLandingUrl(landing, affId);
+          landingRow.style.display = 'block';
+        }else{
+          landingRow.style.display = 'none';
+        }
+
+        document.getElementById(p + 'linkBox').classList.add('show');
+        affSave('hook' + n + 'booking', booking);
+        affSave('hook' + n + 'landing', landing);
+      }
+
+      // Pre-fill every hook from what this affiliate saved last time (or, for
+      // the booking link, derive it from their ID even on a first visit) and
+      // show the saved result immediately.
+      for(var hi = 1; hi <= HOOK_COUNT; hi++){
+        var bEl = document.getElementById('h' + hi + '-booking');
+        var lEl = document.getElementById('h' + hi + '-landing');
+        var savedB = affLoad('hook' + hi + 'booking');
+        var savedL = affLoad('hook' + hi + 'landing');
+        if(savedB){
+          bEl.value = savedB;
+        }else if(AFF_ID){
+          bEl.value = STOCKNETWORK_BASE + AFF_ID;
+        }
+        if(savedL) lEl.value = savedL;
+        if(savedB || savedL) saveHook(hi);
+      }
+
+      grid.addEventListener('click', function(e){
+        var saveN = e.target.getAttribute('data-hook-save');
+        if(saveN){
+          saveHook(saveN);
+          return;
+        }
+
+        var copyId = e.target.getAttribute('data-copy');
+        if(copyId){
+          var el = document.getElementById(copyId);
+          copyText(el.textContent, el);
+          return;
+        }
+
+        var openId = e.target.getAttribute('data-open');
+        if(openId){
+          var url = document.getElementById(openId).textContent;
+          if(url) window.open(url, '_blank', 'noopener');
+        }
+      });
+    })();
+  </script>
+
+</body>
+</html>
