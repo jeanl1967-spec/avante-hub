@@ -653,6 +653,14 @@
                   '<button class="btn-outline" data-open="h' + i + '-landingUrl">Open</button>' +
                 '</div>' +
               '</div>' +
+              '<div class="hook-row" id="h' + i + '-clientRow" style="display:none;">' +
+                '<div class="label">Client link — share this with your customers</div>' +
+                '<div class="url" id="h' + i + '-clientUrl"></div>' +
+                '<div class="btn-row">' +
+                  '<button class="btn-secondary" data-copy="h' + i + '-clientUrl">Copy</button>' +
+                  '<button class="btn-outline" data-open="h' + i + '-clientUrl">Open</button>' +
+                '</div>' +
+              '</div>' +
             '</div>' +
           '</div>';
       }
@@ -710,10 +718,11 @@
           return;
         }
 
-        var affId = booking ? extractAffiliateId(booking) : AFF_ID;
+        var affId = (booking ? extractAffiliateId(booking) : '') || AFF_ID;
 
         var bookingRow = document.getElementById(p + 'bookingRow');
         var landingRow = document.getElementById(p + 'landingRow');
+        var clientRow = document.getElementById(p + 'clientRow');
         if(booking){
           document.getElementById(p + 'bookingUrl').textContent = booking;
           bookingRow.style.display = 'block';
@@ -730,6 +739,26 @@
         document.getElementById(p + 'linkBox').classList.add('show');
         affSave('hook' + n + 'booking', booking);
         affSave('hook' + n + 'landing', landing);
+
+        // Give this affiliate a single client-facing URL for this hook — a
+        // read-only page their customers can open on any device. Requires an
+        // affiliate ID (from the booking link, or from ?aff= on the Hub URL)
+        // because the backend stores hook data keyed by affiliate + hook number.
+        if(affId){
+          var clientUrl = new URL('promo.html', window.location.href);
+          clientUrl.searchParams.set('aff', affId);
+          clientUrl.searchParams.set('hook', n);
+          document.getElementById(p + 'clientUrl').textContent = clientUrl.toString();
+          clientRow.style.display = 'block';
+
+          fetch('/api/hook?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ booking: booking, landing: landing })
+          }).catch(function(){ /* saved to this browser regardless; backend sync is best-effort */ });
+        }else{
+          clientRow.style.display = 'none';
+        }
       }
 
       // Pre-fill every hook from what this affiliate saved last time (or, for
