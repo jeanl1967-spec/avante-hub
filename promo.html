@@ -100,6 +100,16 @@
   }
   .cta-outline:hover{ background:var(--mint); }
 
+  .promo-image{
+    display:none;
+    width:100%;
+    max-height:280px;
+    object-fit:cover;
+    border-radius:10px;
+    margin-bottom:22px;
+  }
+  .promo-image.show{ display:block; }
+
   .placeholder{
     text-align:center;
     padding:56px 24px;
@@ -176,6 +186,7 @@
 
       var html = '<div class="hero"><h1>Special Offer</h1><p>Brought to you by Avante Travel</p></div>';
       html += '<div class="card">';
+      html += '<img class="promo-image" id="promoImage" alt="">';
       if(hasBooking){
         html += '<a class="cta" href="' + escapeHtml(data.booking) + '" target="_blank" rel="noopener">Book Now</a>';
       }
@@ -184,6 +195,11 @@
       }
       html += '</div>';
       content.innerHTML = html;
+
+      var imgEl = document.getElementById('promoImage');
+      imgEl.onload = function(){ imgEl.classList.add('show'); };
+      imgEl.onerror = function(){ imgEl.classList.remove('show'); };
+      imgEl.src = '/api/hook-image?aff=' + encodeURIComponent(aff) + '&hook=' + encodeURIComponent(hook);
     }
 
     if(!aff || !hook){

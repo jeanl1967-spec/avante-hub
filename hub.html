@@ -262,6 +262,17 @@
     font-size:12px;
     margin-bottom:4px;
   }
+  .hook-image-wrap{ margin-bottom:8px; }
+  .hook-image{
+    display:none;
+    width:100%;
+    height:120px;
+    object-fit:cover;
+    border-radius:10px;
+    border:1.5px solid var(--line);
+  }
+  .hook-image.show{ display:block; }
+  .hook-image-wrap.has-image .hook-placeholder{ display:none; }
   .hook-card label{ font-size:11px; margin:12px 0 5px; }
   .hook-card input{ padding:8px 10px; font-size:13px; }
   .hook-card button.primary{ margin-top:16px; padding:10px; font-size:13px; }
@@ -629,7 +640,15 @@
         html +=
           '<div class="hook-card">' +
             '<div class="hook-badge">Hook ' + i + '</div>' +
-            '<div class="hook-placeholder">Ad creative placeholder</div>' +
+            '<div class="hook-image-wrap" id="h' + i + '-imageWrap">' +
+              '<img class="hook-image" id="h' + i + '-image" alt="Hook ' + i + ' creative">' +
+              '<div class="hook-placeholder" id="h' + i + '-placeholder">Ad creative placeholder</div>' +
+            '</div>' +
+            '<input type="file" accept="image/*" id="h' + i + '-imageInput" style="display:none;">' +
+            '<div class="btn-row" style="margin-top:0;">' +
+              '<button type="button" class="btn-outline" data-upload-image="' + i + '">Upload image</button>' +
+            '</div>' +
+            '<div class="status" id="h' + i + '-imageStatus"></div>' +
             '<label for="h' + i + '-booking">Booking link</label>' +
             '<input id="h' + i + '-booking" placeholder="Your StockNetwork booking link for this promo">' +
             '<label for="h' + i + '-landing">Landing page link</label>' +
@@ -666,6 +685,8 @@
       }
       grid.innerHTML = html;
 
+      var IMAGE_MAX_BYTES = 4 * 1024 * 1024; // 4MB
+
       function isValidUrl(v){ return /^https?:\/\//i.test(v); }
 
       // Pull the affiliate's own ID off the end of their booking link, e.g.
@@ -692,6 +713,66 @@
         }catch(e){
           return landingUrl;
         }
+      }
+
+      // Point the hook's preview image at the shared backend for this
+      // affiliate + hook number. onerror just falls back to the placeholder,
+      // so this is safe to call even when no image has been uploaded yet.
+      function setHookImageSrc(n, affId){
+        var img = document.getElementById('h' + n + '-image');
+        var placeholder = document.getElementById('h' + n + '-placeholder');
+        if(!affId){
+          img.classList.remove('show');
+          img.removeAttribute('src');
+          placeholder.style.display = 'flex';
+          return;
+        }
+        img.onload = function(){ img.classList.add('show'); placeholder.style.display = 'none'; };
+        img.onerror = function(){ img.classList.remove('show'); placeholder.style.display = 'flex'; };
+        img.src = '/api/hook-image?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n) + '&t=' + Date.now();
+      }
+
+      function uploadHookImage(n, file){
+        var statusEl = document.getElementById('h' + n + '-imageStatus');
+        statusEl.className = 'status';
+        statusEl.textContent = '';
+
+        var bookingVal = document.getElementById('h' + n + '-booking').value.trim();
+        var affId = (bookingVal ? extractAffiliateId(bookingVal) : '') || AFF_ID;
+        if(!affId){
+          statusEl.textContent = 'Add your booking link above (or open the Hub using your own personalized link) before uploading an image.';
+          statusEl.className = 'status show';
+          return;
+        }
+        if(!/^image\//.test(file.type)){
+          statusEl.textContent = 'Please choose an image file (JPG, PNG, GIF, or WebP).';
+          statusEl.className = 'status show';
+          return;
+        }
+        if(file.size > IMAGE_MAX_BYTES){
+          statusEl.textContent = 'That image is too large — please use one under 4MB.';
+          statusEl.className = 'status show';
+          return;
+        }
+
+        var img = document.getElementById('h' + n + '-image');
+        var placeholder = document.getElementById('h' + n + '-placeholder');
+        var previewUrl = URL.createObjectURL(file);
+        img.onerror = null;
+        img.onload = function(){ img.classList.add('show'); placeholder.style.display = 'none'; };
+        img.src = previewUrl;
+
+        fetch('/api/hook-image?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), {
+          method: 'POST',
+          headers: { 'content-type': file.type },
+          body: file
+        }).then(function(res){
+          if(!res.ok) throw new Error('upload failed');
+          showToast('Image uploaded');
+        }).catch(function(){
+          statusEl.textContent = 'The preview looks fine here, but we couldn\'t save the image to the server — please try again.';
+          statusEl.className = 'status show';
+        });
       }
 
       function saveHook(n){
@@ -759,6 +840,8 @@
         }else{
           clientRow.style.display = 'none';
         }
+
+        setHookImageSrc(n, affId);
       }
 
       // Pre-fill every hook from what this affiliate saved last time (or, for
@@ -775,13 +858,24 @@
           bEl.value = STOCKNETWORK_BASE + AFF_ID;
         }
         if(savedL) lEl.value = savedL;
-        if(savedB || savedL) saveHook(hi);
+        if(savedB || savedL){
+          saveHook(hi);
+        }else{
+          var affIdForImage = (bEl.value.trim() ? extractAffiliateId(bEl.value.trim()) : '') || AFF_ID;
+          setHookImageSrc(hi, affIdForImage);
+        }
       }
 
       grid.addEventListener('click', function(e){
         var saveN = e.target.getAttribute('data-hook-save');
         if(saveN){
           saveHook(saveN);
+          return;
+        }
+
+        var uploadN = e.target.getAttribute('data-upload-image');
+        if(uploadN){
+          document.getElementById('h' + uploadN + '-imageInput').click();
           return;
         }
 
@@ -796,6 +890,14 @@
         if(openId){
           var url = document.getElementById(openId).textContent;
           if(url) window.open(url, '_blank', 'noopener');
+        }
+      });
+
+      grid.addEventListener('change', function(e){
+        var m = e.target.id && e.target.id.match(/^h(\d+)-imageInput$/);
+        if(m && e.target.files && e.target.files[0]){
+          uploadHookImage(m[1], e.target.files[0]);
+          e.target.value = '';
         }
       });
     })();
