@@ -73,6 +73,19 @@
   .tab:hover{ background:var(--mint); }
   .tab.disabled{ opacity:0.4; cursor:default; pointer-events:none; }
 
+  @media (max-width: 900px){
+    nav.tabs{
+      flex-wrap:nowrap;
+      overflow-x:auto;
+      -webkit-overflow-scrolling:touch;
+      width:100%;
+      padding-bottom:4px;
+    }
+    .tab{ flex:none; white-space:nowrap; }
+  }
+  nav.tabs::-webkit-scrollbar{ height:4px; }
+  nav.tabs::-webkit-scrollbar-thumb{ background:var(--line); border-radius:10px; }
+
   main{
     max-width:960px;
     margin:0 auto;
@@ -164,6 +177,14 @@
   }
   .placeholder h3{ color:var(--navy); margin:0 0 8px; font-size:19px; }
   .placeholder p{ color:var(--muted); margin:0; font-size:13.5px; max-width:420px; margin:0 auto; }
+
+  @media (max-width: 700px){
+    header.hub-header{ padding:14px 16px; }
+    .brand{ font-size:19px; }
+    main{ padding:24px 16px 56px; }
+    .hero h1{ font-size:21px; }
+    .promo-card-image{ height:120px; }
+  }
 </style>
 </head>
 <body>
