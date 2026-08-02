@@ -281,6 +281,117 @@
   .hook-card .link-box .url{ font-size:11.5px; }
   .hook-row + .hook-row{ margin-top:14px; }
 
+  /* ---- home / how the program works ---- */
+  .program-intro{
+    text-align:center;
+    color:var(--ink);
+    font-size:14.5px;
+    max-width:640px;
+    margin:0 auto 32px;
+    line-height:1.6;
+  }
+  .feature-list{
+    display:flex;
+    flex-direction:column;
+    gap:14px;
+    margin-bottom:32px;
+  }
+  .feature-card{
+    display:flex;
+    gap:16px;
+    background:#fff;
+    border:1.5px solid var(--line);
+    border-left:4px solid var(--teal);
+    border-radius:12px;
+    padding:18px 20px;
+    box-shadow:0 6px 18px rgba(14,47,68,0.05);
+  }
+  .feature-num{
+    flex:none;
+    width:32px; height:32px;
+    border-radius:50%;
+    background:var(--teal);
+    color:#fff;
+    font-weight:800;
+    font-size:14px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .feature-card h3{ margin:0 0 5px; font-size:15.5px; color:var(--navy); }
+  .feature-card p{ margin:0; font-size:13px; color:var(--muted); line-height:1.55; }
+  .feature-card strong{ color:var(--navy); }
+
+  .commission-banner{
+    text-align:center;
+    background:linear-gradient(135deg, var(--teal), var(--teal-dark));
+    color:#fff;
+    border-radius:16px;
+    padding:32px 20px;
+    margin-bottom:32px;
+  }
+  .commission-banner .big{ font-size:52px; font-weight:800; font-family:'Montserrat',sans-serif; line-height:1; margin:4px 0; }
+  .commission-banner .small{ font-size:13px; letter-spacing:0.08em; text-transform:uppercase; font-weight:700; opacity:0.9; }
+
+  .section-heading{ color:var(--navy); font-size:18px; margin:0 0 14px; text-align:center; }
+
+  .fee-table-wrap{ overflow-x:auto; margin-bottom:24px; border-radius:12px; border:1.5px solid var(--line); }
+  table.fee-table{ width:100%; border-collapse:collapse; font-size:12.5px; min-width:520px; }
+  table.fee-table th{ background:var(--navy); color:#fff; text-align:left; padding:10px 14px; font-size:11px; letter-spacing:0.04em; text-transform:uppercase; }
+  table.fee-table td{ padding:10px 14px; border-top:1px solid var(--line); color:var(--ink); }
+  table.fee-table tr:nth-child(even) td{ background:var(--mint); }
+  table.fee-table td.net{ font-weight:700; color:var(--teal-dark); }
+  table.fee-table tr.highlight td{ background:#fff6da; }
+
+  .pro-tip{
+    background:#fff6da;
+    border:1.5px solid #f0d98a;
+    border-radius:10px;
+    padding:14px 18px;
+    font-size:13px;
+    color:#7a5b00;
+    margin-bottom:32px;
+  }
+
+  .blueprint-grid{
+    display:grid;
+    grid-template-columns:repeat(3, 1fr);
+    gap:14px;
+    margin-bottom:32px;
+  }
+  @media (max-width:640px){ .blueprint-grid{ grid-template-columns:1fr; } }
+  .blueprint-card{
+    background:#fff;
+    border:1.5px solid var(--line);
+    border-radius:12px;
+    padding:20px 16px;
+    text-align:center;
+  }
+  .blueprint-card.dark{ background:var(--navy); border-color:var(--navy); }
+  .blueprint-card .stat{ font-size:26px; font-weight:800; font-family:'Montserrat',sans-serif; color:var(--teal-dark); margin-bottom:6px; }
+  .blueprint-card.dark .stat{ color:var(--teal); }
+  .blueprint-card .stat-label{ font-size:11.5px; color:var(--muted); line-height:1.5; }
+  .blueprint-card.dark .stat-label{ color:#c7d6de; }
+
+  .cta-banner{
+    text-align:center;
+    background:var(--navy);
+    color:#fff;
+    border-radius:14px;
+    padding:26px 20px;
+  }
+  .cta-banner p{ margin:0 0 14px; font-size:14.5px; }
+  .cta-banner button{
+    background:var(--teal);
+    color:#fff;
+    border:none;
+    padding:12px 26px;
+    border-radius:8px;
+    font-family:'Montserrat',sans-serif;
+    font-weight:700;
+    font-size:14px;
+    cursor:pointer;
+  }
+  .cta-banner button:hover{ background:var(--teal-dark); }
+
   .toast{
     position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px);
     background:var(--navy); color:#fff; padding:10px 20px; border-radius:8px; font-size:13px;
@@ -297,6 +408,7 @@
     <div class="brand">AVANTE<span>TRAVEL &middot; AFFILIATE HUB</span></div>
     <nav class="tabs" id="tabs">
       <button class="tab active" data-panel="home">Home</button>
+      <button class="tab" data-panel="marketing">Affiliate Marketing</button>
       <button class="tab" data-panel="accom">Accommodation Link Builder</button>
       <button class="tab" data-panel="flight">Your Flight Link</button>
       <button class="tab" data-panel="activity">Your Activity Link</button>
@@ -309,10 +421,117 @@
 
   <main class="wide">
 
-    <!-- ===================== HOME ===================== -->
+    <!-- ===================== HOME (how the program works) ===================== -->
     <section class="panel active" id="panel-home">
       <div class="hero">
-        <h1>Promo Hooks</h1>
+        <h1>Welcome to Avante</h1>
+        <p>Your luxury travel business-in-a-box — here's exactly how the affiliate program works</p>
+      </div>
+
+      <p class="program-intro">Everything you need to launch a highly profitable travel business is completely built and ready for you from day one. There's no inventory to buy, no website to build, and no corporate red tape.</p>
+
+      <div class="feature-list">
+        <div class="feature-card">
+          <div class="feature-num">1</div>
+          <div>
+            <h3>Your Personalized Booking Platform</h3>
+            <p>You get immediate access to your own unique, high-tech Avante Agent Portal. Any client who clicks your link is automatically tracked to your profile, so you get credited for every booking they make across Avante's entire live inventory.</p>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-num">2</div>
+          <div>
+            <h3>Ready-to-Use High-Converting Ads</h3>
+            <p>No marketing experience? No problem. You get <strong>Done-For-You Campaign Assets</strong> — professionally designed Canva templates, pre-written social captions, and copy-and-paste WhatsApp scripts proven to turn casual inquiries into confirmed bookings.</p>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-num">3</div>
+          <div>
+            <h3>Bulletproof Payment &amp; Booking Infrastructure</h3>
+            <p>You focus on the introduction; we handle the machinery. Avante provides a fully integrated <strong>secure payment gateway</strong>, manages the live reservation system, secures the dates, and issues the guest's official check-in vouchers.</p>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-num">4</div>
+          <div>
+            <h3>Direct Access to the Creative Stock Vault</h3>
+            <p>Want to build custom campaigns? You get full access to our <strong>Media Asset Vault</strong> — high-resolution resort photography, drone footage, and promo videos — paired with your Link Builder tool to create links tailored to your audience.</p>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-num">5</div>
+          <div>
+            <h3>Industry-Leading 15% Commission</h3>
+            <p>One of the most lucrative payout structures in the travel industry. You earn up to <strong>15% commission</strong> on your total booking volume — and because these are high-ticket luxury getaways, a single booking can mean thousands of Rands in profit.</p>
+          </div>
+        </div>
+        <div class="feature-card">
+          <div class="feature-num">6</div>
+          <div>
+            <h3>Monthly Zero-Risk Financial Structure</h3>
+            <p>A true partnership — Avante absorbs the operational risk so you can focus on scaling your audience. <strong>Your upfront cost: R0.</strong> No sign-up fees, no software subscriptions, no hidden capital requirements.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="commission-banner">
+        <div class="small">Earn</div>
+        <div class="big">15%</div>
+        <div class="small">Commission</div>
+      </div>
+
+      <h2 class="section-heading">The Payout Math (Resets Monthly)</h2>
+      <p class="program-intro" style="margin-bottom:16px;">The 15% commission on your first R1,967 of sales each month covers platform hosting. From R1,967 to R10,000 you keep the full 15% fee-free. Between R10,000 and R50,000, a standard 2.5% transaction fee applies. Above R50,000 in a single month, fees cap completely.</p>
+
+      <div class="fee-table-wrap">
+        <table class="fee-table">
+          <thead>
+            <tr><th>Monthly sales volume</th><th>Gross commission (15%)</th><th>Avante cost / fees</th><th>Comms earned (net)</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>R1,967 (Monthly setup)</td><td>R295.05</td><td>R295.05</td><td class="net">R0.00</td></tr>
+            <tr><td>R10,000 (Initial goal)</td><td>R1,500.00</td><td>R295.05</td><td class="net">R1,204.95</td></tr>
+            <tr><td>R20,000</td><td>R3,000.00</td><td>R545.05</td><td class="net">R2,454.95</td></tr>
+            <tr><td>R30,000</td><td>R4,500.00</td><td>R795.05</td><td class="net">R3,704.95</td></tr>
+            <tr><td>R40,000</td><td>R6,000.00</td><td>R1,045.05</td><td class="net">R4,954.95</td></tr>
+            <tr class="highlight"><td>R50,000 (Fee cap hit!)</td><td>R7,500.00</td><td>R1,295.05</td><td class="net">R6,204.95</td></tr>
+            <tr><td>R70,000</td><td>R10,500.00</td><td>R1,295.05</td><td class="net">R9,204.95</td></tr>
+            <tr><td>R100,000</td><td>R15,000.00</td><td>R1,295.05</td><td class="net">R13,704.95</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pro-tip">💡 <strong>Pro tip:</strong> once you cross R50,000 in a single month, every booking you make until the end of the month is 100% fee-free!</div>
+
+      <h2 class="section-heading">🎁 The Onboarding Sweetener: The 10% Cash Blueprint</h2>
+      <p class="program-intro" style="margin-bottom:16px;">You don't need massive corporate funnels or paid advertising to build an empire — just the natural traffic already on your phone.</p>
+
+      <div class="blueprint-grid">
+        <div class="blueprint-card">
+          <div class="stat">1,000</div>
+          <div class="stat-label">Your Network — casual contacts viewing your WhatsApp status &amp; social feeds over a year.</div>
+        </div>
+        <div class="blueprint-card">
+          <div class="stat">100</div>
+          <div class="stat-label">The 10% Shift — just 1 in 10 friends booking exactly one weekend trip or villa getaway per year (avg spend: R5,000).</div>
+        </div>
+        <div class="blueprint-card dark">
+          <div class="stat">R61,959.36</div>
+          <div class="stat-label">The Lazy Payout — pure net take-home cash paid straight to your bank account, after all platform costs.</div>
+        </div>
+      </div>
+
+      <div class="cta-banner">
+        <p>Grab your link, share it with your network, and start earning. Let's build your travel empire! 🚀</p>
+        <button type="button" id="goToMarketingBtn">Get your link</button>
+      </div>
+    </section>
+
+    <!-- ===================== AFFILIATE MARKETING (promo hooks + storefront) ===================== -->
+    <section class="panel" id="panel-marketing">
+      <div class="hero">
+        <h1>Affiliate Marketing</h1>
         <p>Paste your own booking link and landing page link for each promo, then copy them out to use in your ads</p>
       </div>
       <div class="card" id="storefrontCard" style="margin-bottom:28px; display:none;">
@@ -445,6 +664,14 @@
         document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
       });
     });
+
+    var goToMarketingBtn = document.getElementById('goToMarketingBtn');
+    if(goToMarketingBtn){
+      goToMarketingBtn.addEventListener('click', function(){
+        var marketingTab = document.querySelector('.tab[data-panel="marketing"]');
+        if(marketingTab) marketingTab.click();
+      });
+    }
 
     // ---------- shared toast + copy helpers ----------
     var toast = document.getElementById('toast');
