@@ -4,6 +4,22 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Avante Travel Hub — Affiliate Tools</title>
+<script>
+  // ---------- Auth gate ----------
+  // Runs immediately, before the page renders, so an unauthenticated visitor
+  // never sees Hub content flash on screen. Each affiliate (identified by
+  // their "aff" ID) has their own login, checked against the /api/auth
+  // edge function; a successful login is remembered in this browser only.
+  (function(){
+    var aff = new URLSearchParams(window.location.search).get('aff') || '';
+    var authed = false;
+    try{ authed = !!aff && localStorage.getItem('avante-hub-auth:' + aff) === '1'; }catch(e){}
+    if(!authed){
+      var target = 'login.html' + (aff ? ('?aff=' + encodeURIComponent(aff)) : '');
+      window.location.replace(target);
+    }
+  })();
+</script>
 <link rel="preconnect" href="https://fonts.gstatic.com">
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -30,8 +46,59 @@
     color:#fff;
     font-size:12.5px;
     padding:6px 24px;
-    text-align:right;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
   }
+  .topbar-actions{ display:flex; gap:16px; }
+  .topbar-actions a{ color:#fff; text-decoration:none; opacity:0.9; cursor:pointer; }
+  .topbar-actions a:hover{ text-decoration:underline; opacity:1; }
+
+  .modal-overlay{
+    display:none;
+    position:fixed; inset:0;
+    background:rgba(14,47,68,0.45);
+    align-items:center; justify-content:center;
+    padding:20px;
+    z-index:100;
+  }
+  .modal-overlay.show{ display:flex; }
+  .modal-card{
+    width:100%; max-width:360px;
+    background:#fff;
+    border-radius:14px;
+    padding:26px 24px 24px;
+    box-shadow:0 20px 60px rgba(14,47,68,0.25);
+  }
+  .modal-card h2{ margin:0 0 4px; font-size:17px; color:var(--navy); }
+  .modal-card .modal-sub{ margin:0 0 16px; font-size:12.5px; color:var(--muted); }
+  .modal-card label{
+    display:block; font-size:11px; font-weight:600; text-transform:uppercase;
+    letter-spacing:0.05em; color:var(--teal-dark); margin:12px 0 5px;
+  }
+  .modal-card label:first-of-type{ margin-top:0; }
+  .modal-card input{
+    width:100%; padding:10px 11px; border:1.5px solid var(--line); border-radius:8px;
+    font-size:13.5px; font-family:inherit; color:var(--navy); background:var(--mint);
+    box-sizing:border-box;
+  }
+  .modal-card input:focus{ outline:none; border-color:var(--teal); }
+  .modal-status{
+    margin-top:12px; padding:9px 12px; border-radius:8px; font-size:12px;
+    display:none; background:#fbeae8; color:#c0453a; border:1px solid #f0c8c2;
+  }
+  .modal-status.show{ display:block; }
+  .modal-actions{ display:flex; gap:10px; margin-top:20px; }
+  .modal-actions button{
+    flex:1; padding:10px; border-radius:8px; font-size:13px; font-weight:700;
+    cursor:pointer; border:1.5px solid transparent; font-family:'Montserrat', sans-serif;
+  }
+  .modal-btn-primary{ background:var(--teal); color:#fff; }
+  .modal-btn-primary:hover{ background:var(--teal-dark); }
+  .modal-btn-primary:disabled{ background:#bcd9d6; cursor:not-allowed; }
+  .modal-btn-secondary{ background:var(--mint); color:var(--navy); border-color:var(--line); }
 
   header.hub-header{
     display:flex;
@@ -448,7 +515,31 @@
 </head>
 <body>
 
-  <div class="topbar">Avante Travel &middot; Affiliate Hub</div>
+  <div class="topbar">
+    <span>Avante Travel &middot; Affiliate Hub</span>
+    <span class="topbar-actions">
+      <a id="changePasswordLink">Change Password</a>
+      <a id="logoutLink">Log Out</a>
+    </span>
+  </div>
+
+  <div class="modal-overlay" id="pwModalOverlay">
+    <div class="modal-card">
+      <h2>Change Password</h2>
+      <p class="modal-sub">Update the password for your affiliate login.</p>
+      <label for="pwOld">Current password</label>
+      <input id="pwOld" type="password" autocomplete="current-password">
+      <label for="pwNew">New password</label>
+      <input id="pwNew" type="password" autocomplete="new-password">
+      <label for="pwNew2">Confirm new password</label>
+      <input id="pwNew2" type="password" autocomplete="new-password">
+      <div class="modal-status" id="pwStatus"></div>
+      <div class="modal-actions">
+        <button type="button" class="modal-btn-secondary" id="pwCancelBtn">Cancel</button>
+        <button type="button" class="modal-btn-primary" id="pwSaveBtn">Save Password</button>
+      </div>
+    </div>
+  </div>
 
   <header class="hub-header">
     <div class="brand">AVANTE<span>TRAVEL &middot; AFFILIATE HUB</span></div>
@@ -781,6 +872,84 @@
         banner.append(' — your links are saved in this browser.');
         banner.style.display = 'block';
       }
+    })();
+
+    // ---------- Log out ----------
+    var logoutLink = document.getElementById('logoutLink');
+    if(logoutLink){
+      logoutLink.addEventListener('click', function(e){
+        e.preventDefault();
+        if(AFF_ID){
+          try{ localStorage.removeItem('avante-hub-auth:' + AFF_ID); }catch(err){}
+        }
+        window.location.href = 'login.html' + (AFF_ID ? ('?aff=' + encodeURIComponent(AFF_ID)) : '');
+      });
+    }
+
+    // ---------- Change password modal ----------
+    (function(){
+      var overlay = document.getElementById('pwModalOverlay');
+      var changeLink = document.getElementById('changePasswordLink');
+      var cancelBtn = document.getElementById('pwCancelBtn');
+      var saveBtn = document.getElementById('pwSaveBtn');
+      var oldInput = document.getElementById('pwOld');
+      var newInput = document.getElementById('pwNew');
+      var new2Input = document.getElementById('pwNew2');
+      var statusEl = document.getElementById('pwStatus');
+      if(!overlay || !changeLink) return;
+
+      function openModal(){
+        oldInput.value = ''; newInput.value = ''; new2Input.value = '';
+        statusEl.classList.remove('show');
+        overlay.classList.add('show');
+        oldInput.focus();
+      }
+      function closeModal(){ overlay.classList.remove('show'); }
+      function showModalError(msg){
+        statusEl.textContent = msg;
+        statusEl.classList.add('show');
+      }
+
+      changeLink.addEventListener('click', function(e){ e.preventDefault(); openModal(); });
+      cancelBtn.addEventListener('click', closeModal);
+      overlay.addEventListener('click', function(e){ if(e.target === overlay) closeModal(); });
+
+      saveBtn.addEventListener('click', function(){
+        var oldPw = oldInput.value;
+        var newPw = newInput.value;
+        var newPw2 = new2Input.value;
+        statusEl.classList.remove('show');
+
+        if(!AFF_ID){ showModalError('Missing affiliate ID.'); return; }
+        if(!oldPw){ showModalError('Enter your current password.'); return; }
+        if(!newPw || newPw.length < 4){ showModalError('New password must be at least 4 characters.'); return; }
+        if(newPw !== newPw2){ showModalError('New passwords do not match.'); return; }
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+
+        fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'change', aff: AFF_ID, oldPassword: oldPw, newPassword: newPw })
+        })
+          .then(function(r){ return r.json().then(function(data){ return { status: r.status, data: data }; }); })
+          .then(function(res){
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Password';
+            if(res.data && res.data.ok){
+              showToast('Password updated');
+              closeModal();
+            }else{
+              showModalError((res.data && res.data.error) || 'Could not update password.');
+            }
+          })
+          .catch(function(){
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Password';
+            showModalError('Something went wrong. Please try again.');
+          });
+      });
     })();
 
     // ---------- Storefront link (all hooks, one URL, for clients) ----------

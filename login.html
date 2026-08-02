@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avante Travel Hub — Log In</title>
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --teal:#0DCDC2;
+    --teal-dark:#0aa89f;
+    --navy:#0e2f44;
+    --ink:#333333;
+    --muted:#808080;
+    --mint:#f4fbfa;
+    --line:#e3e9e8;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Noto Sans', sans-serif;
+    color:var(--ink);
+    background:#ffffff;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+  }
+  h1,.brand,button{ font-family:'Montserrat', sans-serif; }
+
+  .topbar{
+    background:var(--teal);
+    color:#fff;
+    font-size:12.5px;
+    padding:6px 24px;
+    text-align:right;
+  }
+  header.hub-header{
+    display:flex;
+    align-items:center;
+    padding:18px 32px;
+    border-bottom:1px solid var(--line);
+  }
+  .brand{
+    font-weight:800;
+    font-size:22px;
+    color:var(--teal);
+    letter-spacing:0.01em;
+    line-height:1.1;
+  }
+  .brand span{ display:block; color:var(--navy); font-size:14px; font-weight:600; letter-spacing:0.08em;}
+
+  main{
+    flex:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:40px 20px;
+  }
+  .card{
+    width:100%;
+    max-width:380px;
+    background:#fff;
+    border:1.5px solid var(--line);
+    border-radius:14px;
+    padding:32px 30px 34px;
+    box-shadow:0 10px 30px rgba(14,47,68,0.06);
+  }
+  .card h1{ color:var(--navy); font-size:20px; margin:0 0 6px; text-align:center; }
+  .card .sub{ color:var(--muted); font-size:13px; text-align:center; margin:0 0 24px; }
+
+  label{
+    display:block;
+    font-size:11.5px;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    color:var(--teal-dark);
+    margin:14px 0 6px;
+  }
+  label:first-of-type{ margin-top:0; }
+  input{
+    width:100%;
+    padding:11px 12px;
+    border:1.5px solid var(--line);
+    border-radius:8px;
+    font-size:14px;
+    font-family:inherit;
+    color:var(--navy);
+    background:var(--mint);
+  }
+  input:focus{ outline:none; border-color:var(--teal); }
+
+  .hint{ font-size:11.5px; color:var(--muted); margin-top:6px; }
+
+  button.cta{
+    margin-top:22px;
+    width:100%;
+    padding:13px;
+    background:var(--teal);
+    color:#fff;
+    border:none;
+    border-radius:8px;
+    font-size:14.5px;
+    font-weight:700;
+    cursor:pointer;
+  }
+  button.cta:hover{ background:var(--teal-dark); }
+  button.cta:disabled{ background:#bcd9d6; cursor:not-allowed; }
+
+  .status{
+    margin-top:14px;
+    padding:10px 13px;
+    border-radius:8px;
+    font-size:12.5px;
+    display:none;
+    background:#fbeae8;
+    color:#c0453a;
+    border:1px solid #f0c8c2;
+  }
+  .status.show{ display:block; }
+
+  @media (max-width: 480px){
+    header.hub-header{ padding:14px 16px; }
+    .brand{ font-size:19px; }
+    main{ padding:24px 16px; }
+    .card{ padding:24px 20px 26px; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="topbar">Avante Travel &middot; Affiliate Hub</div>
+  <header class="hub-header">
+    <div class="brand">AVANTE<span>TRAVEL &middot; AFFILIATE HUB</span></div>
+  </header>
+
+  <main>
+    <div class="card">
+      <h1>Affiliate Log In</h1>
+      <p class="sub">Enter your affiliate number and password to access your Hub.</p>
+
+      <label for="affInput">Affiliate number</label>
+      <input id="affInput" placeholder="e.g. c2fef00f-7330-4eb3-b993-f5f43fc73dff" autocomplete="username">
+      <div class="hint">This is the same ID that's in your personal StockNetwork booking link.</div>
+
+      <label for="passInput">Password</label>
+      <input id="passInput" type="password" placeholder="Default: 1234" autocomplete="current-password">
+      <div class="hint">New here? Your default password is <strong>1234</strong> — you can change it once you're logged in.</div>
+
+      <button class="cta" id="loginBtn">Log In</button>
+      <div class="status" id="statusMsg"></div>
+    </div>
+  </main>
+
+  <script>
+    var params = new URLSearchParams(window.location.search);
+    var affPrefill = (params.get('aff') || '').trim();
+    var affInput = document.getElementById('affInput');
+    var passInput = document.getElementById('passInput');
+    var loginBtn = document.getElementById('loginBtn');
+    var statusMsg = document.getElementById('statusMsg');
+    if(affPrefill) affInput.value = affPrefill;
+
+    function showError(msg){
+      statusMsg.textContent = msg;
+      statusMsg.classList.add('show');
+    }
+
+    function doLogin(){
+      var aff = affInput.value.trim();
+      var password = passInput.value;
+      statusMsg.classList.remove('show');
+
+      if(!aff){
+        showError('Please enter your affiliate number.');
+        return;
+      }
+      if(!password){
+        showError('Please enter your password.');
+        return;
+      }
+
+      loginBtn.disabled = true;
+      loginBtn.textContent = 'Logging in…';
+
+      fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'login', aff: aff, password: password })
+      })
+        .then(function(r){ return r.json().then(function(data){ return { status: r.status, data: data }; }); })
+        .then(function(res){
+          loginBtn.disabled = false;
+          loginBtn.textContent = 'Log In';
+          if(res.data && res.data.ok){
+            try{ localStorage.setItem('avante-hub-auth:' + aff, '1'); }catch(e){}
+            window.location.href = 'hub.html?aff=' + encodeURIComponent(aff);
+          }else{
+            showError((res.data && res.data.error) || 'Login failed. Please check your details.');
+          }
+        })
+        .catch(function(){
+          loginBtn.disabled = false;
+          loginBtn.textContent = 'Log In';
+          showError('Something went wrong. Please try again.');
+        });
+    }
+
+    loginBtn.addEventListener('click', doLogin);
+    passInput.addEventListener('keydown', function(e){ if(e.key === 'Enter') doLogin(); });
+    affInput.addEventListener('keydown', function(e){ if(e.key === 'Enter') passInput.focus(); });
+  </script>
+
+</body>
+</html>
