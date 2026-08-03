@@ -732,6 +732,39 @@
           <iframe class="preview" id="a-previewFrame" title="Accommodation booking preview"></iframe>
         </div>
       </div>
+
+      <div class="card" style="margin-top:24px;">
+        <h2 class="section-heading" style="margin-top:0;">Resort Info Link</h2>
+        <p class="hint" style="margin:-6px 0 16px; text-align:center;">Send clients straight to one specific resort's info page — photos, description, and bookable units — instead of a general search.</p>
+
+        <label for="r-resortName">Resort name</label>
+        <input id="r-resortName" placeholder="e.g. Nonaka, or the exact resort name on StockNetwork">
+        <div class="hint">Uses the booking link URL entered above. Must match the resort's name on StockNetwork exactly.</div>
+
+        <div class="row">
+          <div>
+            <label for="r-checkIn">Check-in date</label>
+            <input type="date" id="r-checkIn">
+          </div>
+          <div>
+            <label for="r-checkOut">Check-out date</label>
+            <input type="date" id="r-checkOut">
+          </div>
+        </div>
+
+        <button class="primary" id="r-generateBtn">Generate resort link</button>
+        <div class="status" id="r-errorStatus"></div>
+
+        <div class="link-box" id="r-linkBox">
+          <div class="label">Your resort info link</div>
+          <div class="url" id="r-finalUrl"></div>
+          <div class="btn-row">
+            <button class="btn-secondary" id="r-copyBtn">Copy link</button>
+            <button class="btn-outline" id="r-previewBtn">Show preview</button>
+          </div>
+          <iframe class="preview" id="r-previewFrame" title="Resort info preview"></iframe>
+        </div>
+      </div>
     </section>
 
     <!-- ===================== FLIGHT ===================== -->
@@ -1061,6 +1094,93 @@
       document.getElementById('a-copyBtn').addEventListener('click', function(){
         if(!currentLink) return;
         copyText(currentLink, document.getElementById('a-finalUrl'));
+      });
+    })();
+
+    // ---------- Resort Info Link ----------
+    // StockNetwork has no separate API or ID-based URL for a resort's info
+    // page — the only way to deep-link to one is the same "Filter" query
+    // param the general Accommodation builder uses, matched against the
+    // resort's exact name. This section just makes that a dedicated,
+    // clearly-labeled flow instead of overloading the general search field.
+    (function(){
+      var currentLink = '';
+      var previewLoaded = false;
+      var checkInEl = document.getElementById('r-checkIn');
+      var checkOutEl = document.getElementById('r-checkOut');
+
+      var today = new Date();
+      var tomorrow = new Date(today.getTime() + 86400000);
+      var checkoutDefault = new Date(today.getTime() + 3 * 86400000);
+      function fmt(d){ return d.toISOString().slice(0, 10); }
+      checkInEl.min = fmt(tomorrow);
+      checkInEl.value = fmt(tomorrow);
+      checkOutEl.value = fmt(checkoutDefault);
+
+      function buildResortLink(){
+        var baseUrl = document.getElementById('a-baseUrl').value.trim().replace(/\/$/, '');
+        var resortName = document.getElementById('r-resortName').value.trim();
+        var checkIn = checkInEl.value;
+        var checkOut = checkOutEl.value;
+        var errorEl = document.getElementById('r-errorStatus');
+        errorEl.className = 'status';
+        errorEl.textContent = '';
+
+        if(!baseUrl){
+          errorEl.textContent = 'Paste your booking link URL in the field above first (the one issued to you by StockNetwork).';
+          errorEl.className = 'status show';
+          return;
+        }
+        if(!resortName){
+          errorEl.textContent = "Enter the resort's exact name — this link always points to one specific resort.";
+          errorEl.className = 'status show';
+          return;
+        }
+        if(!checkIn || !checkOut){
+          errorEl.textContent = 'Please choose check-in and check-out dates.';
+          errorEl.className = 'status show';
+          return;
+        }
+        if(checkOut <= checkIn){
+          errorEl.textContent = 'Check-out must be after check-in.';
+          errorEl.className = 'status show';
+          return;
+        }
+
+        var params = new URLSearchParams({ CheckInDT: checkIn, CheckOutDT: checkOut, Filter: resortName });
+        currentLink = baseUrl + '?' + params.toString();
+
+        document.getElementById('r-finalUrl').textContent = currentLink;
+        document.getElementById('r-linkBox').classList.add('show');
+
+        var frame = document.getElementById('r-previewFrame');
+        frame.classList.remove('show');
+        frame.removeAttribute('src');
+        previewLoaded = false;
+        document.getElementById('r-previewBtn').textContent = 'Show preview';
+      }
+
+      function toggleResortPreview(){
+        var frame = document.getElementById('r-previewFrame');
+        var btn = document.getElementById('r-previewBtn');
+        if(frame.classList.contains('show')){
+          frame.classList.remove('show');
+          btn.textContent = 'Show preview';
+        }else{
+          if(!previewLoaded){
+            frame.src = currentLink;
+            previewLoaded = true;
+          }
+          frame.classList.add('show');
+          btn.textContent = 'Hide preview';
+        }
+      }
+
+      document.getElementById('r-generateBtn').addEventListener('click', buildResortLink);
+      document.getElementById('r-previewBtn').addEventListener('click', toggleResortPreview);
+      document.getElementById('r-copyBtn').addEventListener('click', function(){
+        if(!currentLink) return;
+        copyText(currentLink, document.getElementById('r-finalUrl'));
       });
     })();
 
