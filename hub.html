@@ -331,7 +331,7 @@
     margin-bottom:10px;
   }
   .hook-placeholder{
-    height:64px;
+    height:220px;
     display:flex;
     align-items:center;
     justify-content:center;
@@ -347,8 +347,9 @@
   .hook-image{
     display:none;
     width:100%;
-    height:120px;
-    object-fit:cover;
+    height:220px;
+    object-fit:contain;
+    background:var(--mint);
     border-radius:10px;
     border:1.5px solid var(--line);
   }
@@ -504,7 +505,8 @@
     .commission-banner .big{ font-size:38px; }
     .feature-card{ padding:15px 16px; gap:12px; }
     .hook-grid{ gap:14px; }
-    .hook-image{ height:100px; }
+    .hook-image{ height:170px; }
+    .hook-placeholder{ height:170px; }
     table.fee-table{ font-size:11.5px; }
   }
   @media (max-width: 420px){
