@@ -745,6 +745,30 @@
           <iframe class="preview" id="a-previewFrame" title="Accommodation booking preview"></iframe>
         </div>
       </div>
+
+      <div class="card" style="margin-top:24px;">
+        <h2 class="section-heading" style="margin-top:0;">Resort Info Link</h2>
+        <p class="hint" style="margin:-6px 0 16px; text-align:center;">Send clients straight to one specific resort's info page — photos, description, and details — with no dates and no availability check involved.</p>
+
+        <label for="r-resortPicker">Select a resort</label>
+        <select id="r-resortPicker">
+          <option value="">— Select a resort —</option>
+        </select>
+        <div class="hint" id="r-resortListMeta">Loading resort list…</div>
+
+        <button class="primary" id="r-generateBtn">Generate resort link</button>
+        <div class="status" id="r-errorStatus"></div>
+
+        <div class="link-box" id="r-linkBox">
+          <div class="label">Your resort info link</div>
+          <div class="url" id="r-finalUrl"></div>
+          <div class="btn-row">
+            <button class="btn-secondary" id="r-copyBtn">Copy link</button>
+            <button class="btn-outline" id="r-previewBtn">Show preview</button>
+          </div>
+          <iframe class="preview" id="r-previewFrame" title="Resort info preview"></iframe>
+        </div>
+      </div>
     </section>
 
     <!-- ===================== FLIGHT ===================== -->
@@ -1077,15 +1101,54 @@
       });
     })();
 
-    // ---------- Resort dropdown + list updater ----------
+    // ---------- Shared resort list (used by both the Accommodation dropdown
+    // and the Resort Info Link below) ----------
     // StockNetwork has no ID-based lookup and no complete "all resorts" API —
     // a blank/default search only returns resorts with live availability, not
     // the full catalog. So the master resort list comes from a CSV you upload
-    // (via the button below), stored server-side and shared across every
-    // affiliate. Picking a resort here just fills in the "Destination or
-    // property name" field above, which still builds the link the same way.
-    (function(){
+    // (via "Update resort list" below), stored server-side and shared across
+    // every affiliate. It includes each resort's SiteID + ResortID, which is
+    // what makes the direct Resort Info Link below possible without ever
+    // touching the availability/date search.
+    var ResortData = (function(){
       var RESORTS_API = '/api/resorts';
+      var resorts = [];
+      var updatedAt = null;
+      var loaded = false;
+      var listeners = [];
+
+      function notify(){
+        listeners.forEach(function(fn){ fn(resorts, updatedAt); });
+      }
+
+      function set(newResorts, newUpdatedAt){
+        resorts = newResorts || [];
+        updatedAt = newUpdatedAt || null;
+        loaded = true;
+        notify();
+      }
+
+      function load(){
+        fetch(RESORTS_API)
+          .then(function(r){ return r.json(); })
+          .then(function(data){ set((data && data.resorts) || [], data && data.updatedAt); })
+          .catch(function(){ loaded = true; notify(); });
+      }
+
+      function subscribe(fn){
+        listeners.push(fn);
+        if(loaded) fn(resorts, updatedAt);
+      }
+
+      load();
+
+      return { set: set, subscribe: subscribe };
+    })();
+
+    // ---------- Accommodation resort dropdown + list updater ----------
+    // Picking a resort here just fills in the "Destination or property name"
+    // field above, which still builds the link the same way as before.
+    (function(){
       var picker = document.getElementById('a-resortPicker');
       var areaInput = document.getElementById('a-area');
       var metaEl = document.getElementById('a-resortListMeta');
@@ -1095,41 +1158,38 @@
 
       function populatePicker(resorts, updatedAt){
         resorts = resorts || [];
+        var seen = {};
+        var names = [];
+        resorts.forEach(function(r){
+          var key = (r && r.name || '').toLowerCase();
+          if(key && !seen[key]){ seen[key] = true; names.push(r.name); }
+        });
+
         picker.innerHTML = '';
         var placeholder = document.createElement('option');
         placeholder.value = '';
-        placeholder.textContent = resorts.length
-          ? '— Select a resort (' + resorts.length + ') —'
+        placeholder.textContent = names.length
+          ? '— Select a resort (' + names.length + ') —'
           : '— No resort list uploaded yet —';
         picker.appendChild(placeholder);
-        resorts.forEach(function(name){
+        names.forEach(function(name){
           var opt = document.createElement('option');
           opt.value = name;
           opt.textContent = name;
           picker.appendChild(opt);
         });
-        if(resorts.length && updatedAt){
+
+        if(names.length && updatedAt){
           var d = new Date(updatedAt);
-          metaEl.textContent = resorts.length + ' resorts loaded — list last updated ' + d.toLocaleDateString() + '.';
-        }else if(resorts.length){
-          metaEl.textContent = resorts.length + ' resorts loaded.';
+          metaEl.textContent = names.length + ' resorts loaded — list last updated ' + d.toLocaleDateString() + '.';
+        }else if(names.length){
+          metaEl.textContent = names.length + ' resorts loaded.';
         }else{
           metaEl.textContent = 'No resort list uploaded yet — use "Update resort list" below to add one.';
         }
       }
 
-      function loadResorts(){
-        metaEl.textContent = 'Loading resort list…';
-        fetch(RESORTS_API)
-          .then(function(r){ return r.json(); })
-          .then(function(data){
-            populatePicker((data && data.resorts) || [], data && data.updatedAt);
-          })
-          .catch(function(){
-            metaEl.textContent = "Couldn't load the resort list — you can still type a name above.";
-          });
-      }
-      loadResorts();
+      ResortData.subscribe(populatePicker);
 
       picker.addEventListener('change', function(){
         if(picker.value) areaInput.value = picker.value;
@@ -1155,7 +1215,7 @@
         uploadBtn.textContent = 'Uploading…';
 
         file.text().then(function(csvText){
-          return fetch(RESORTS_API, {
+          return fetch('/api/resorts', {
             method: 'POST',
             headers: { 'content-type': 'text/csv' },
             body: csvText
@@ -1167,7 +1227,7 @@
             uploadBtn.textContent = 'Update resort list';
             if(res.data && res.data.ok){
               showToast('Resort list updated (' + res.data.count + ' resorts)');
-              populatePicker(res.data.resorts, res.data.updatedAt);
+              ResortData.set(res.data.resorts, res.data.updatedAt);
             }else{
               statusEl.textContent = (res.data && res.data.error) || 'Could not update the resort list.';
               statusEl.className = 'status show';
@@ -1179,6 +1239,102 @@
             statusEl.textContent = 'Something went wrong reading or uploading that file.';
             statusEl.className = 'status show';
           });
+      });
+    })();
+
+    // ---------- Resort Info Link ----------
+    // Direct, ID-based deep link into StockNetwork's legacy resort info page:
+    // https://old.stocknetwork.co.za/ResortInfo.aspx?SiteID=...&ResortID=...
+    // Both IDs come straight from the resort list CSV (its SiteID/ResortID
+    // columns), so this never touches the search/availability engine and
+    // never depends on matching a resort's name exactly.
+    (function(){
+      var currentLink = '';
+      var previewLoaded = false;
+      var picker = document.getElementById('r-resortPicker');
+      var metaEl = document.getElementById('r-resortListMeta');
+      var resortIndex = {};
+
+      function populatePicker(resorts){
+        resorts = resorts || [];
+        var usable = resorts.filter(function(r){ return r && r.siteId && r.resortId; });
+
+        var nameCounts = {};
+        usable.forEach(function(r){
+          var key = r.name.toLowerCase();
+          nameCounts[key] = (nameCounts[key] || 0) + 1;
+        });
+
+        picker.innerHTML = '';
+        resortIndex = {};
+        var placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = usable.length
+          ? '— Select a resort (' + usable.length + ') —'
+          : '— No resort list uploaded yet —';
+        picker.appendChild(placeholder);
+
+        usable.forEach(function(r, i){
+          var key = r.name.toLowerCase();
+          var label = (nameCounts[key] > 1 && r.district) ? (r.name + ' — ' + r.district) : r.name;
+          var value = 'r' + i;
+          resortIndex[value] = r;
+          var opt = document.createElement('option');
+          opt.value = value;
+          opt.textContent = label;
+          picker.appendChild(opt);
+        });
+
+        metaEl.textContent = usable.length
+          ? usable.length + ' resorts available.'
+          : 'No resort list uploaded yet — use "Update resort list" in the Accommodation Link Builder above.';
+      }
+
+      ResortData.subscribe(populatePicker);
+
+      function buildResortLink(){
+        var errorEl = document.getElementById('r-errorStatus');
+        errorEl.className = 'status';
+        errorEl.textContent = '';
+
+        var selected = resortIndex[picker.value];
+        if(!selected){
+          errorEl.textContent = 'Please select a resort from the list first.';
+          errorEl.className = 'status show';
+          return;
+        }
+
+        var params = new URLSearchParams({ SiteID: selected.siteId, ResortID: selected.resortId });
+        currentLink = 'https://old.stocknetwork.co.za/ResortInfo.aspx?' + params.toString();
+
+        document.getElementById('r-finalUrl').textContent = currentLink;
+        document.getElementById('r-linkBox').classList.add('show');
+
+        var frame = document.getElementById('r-previewFrame');
+        frame.classList.remove('show');
+        frame.removeAttribute('src');
+        previewLoaded = false;
+        document.getElementById('r-previewBtn').textContent = 'Show preview';
+      }
+
+      function togglePreview(){
+        var frame = document.getElementById('r-previewFrame');
+        var btn = document.getElementById('r-previewBtn');
+        if(frame.classList.contains('show')){
+          frame.classList.remove('show');
+          btn.textContent = 'Show preview';
+        }else{
+          if(!previewLoaded){ frame.src = currentLink; previewLoaded = true; }
+          frame.classList.add('show');
+          btn.textContent = 'Hide preview';
+        }
+      }
+
+      document.getElementById('r-generateBtn').addEventListener('click', buildResortLink);
+      document.getElementById('r-previewBtn').addEventListener('click', togglePreview);
+      document.getElementById('r-copyBtn').addEventListener('click', function(){
+        if(!currentLink) return;
+        copyText(currentLink, document.getElementById('r-finalUrl'));
       });
     })();
 
