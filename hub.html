@@ -291,6 +291,23 @@
   }
   .shorten-copy-btn:hover{ background:#0a2333; }
 
+  .shortlink-row{
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:14px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .shortlink-row:last-child{ border-bottom:none; }
+  .shortlink-main{ min-width:0; flex:1; }
+  .shortlink-short{ font-size:13.5px; font-weight:700; color:var(--teal-dark); word-break:break-all; }
+  .shortlink-long{ font-size:11.5px; color:var(--muted); word-break:break-all; margin-top:2px; }
+  .shortlink-meta{ display:flex; align-items:center; gap:14px; flex-shrink:0; }
+  .shortlink-clicks{ font-size:11.5px; color:var(--muted); white-space:nowrap; }
+  .shortlink-clicks b{ color:var(--navy); }
+
   iframe.preview{
     width:100%; height:900px; border:1.5px solid var(--line);
     display:none; margin-top:16px; border-radius:10px;
@@ -579,6 +596,7 @@
       <button class="tab" data-panel="flight">Your Flight Link</button>
       <button class="tab" data-panel="activity">Your Activity Link</button>
       <button class="tab" data-panel="car">Your Car Link</button>
+      <button class="tab" data-panel="shortlinks">Your Short Links</button>
       <button class="tab" data-panel="tutorials">Tutorials</button>
     </nav>
   </header>
@@ -852,6 +870,21 @@
         <div class="badge">Coming soon</div>
         <h3>Car hire links aren't live yet</h3>
         <p>We're working on bringing car hire bookings into the Hub. Check back soon.</p>
+      </div>
+    </section>
+
+    <!-- ===================== SHORT LINKS ===================== -->
+    <section class="panel" id="panel-shortlinks">
+      <div class="hero">
+        <h1>Your Short Links</h1>
+        <p>Every branded go.avantetravel.co.za link you've created, in one place, with click counts</p>
+      </div>
+      <div class="card">
+        <div class="btn-row" style="margin-top:0;">
+          <button class="btn-outline" id="shortlinks-refreshBtn">Refresh</button>
+        </div>
+        <div class="status" id="shortlinks-status"></div>
+        <div id="shortlinks-list"></div>
       </div>
     </section>
 
@@ -1737,7 +1770,7 @@
           fetch('/api/shorten', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ url: longUrl })
+            body: JSON.stringify({ url: longUrl, aff: AFF_ID })
           })
             .then(function(r){ return r.json(); })
             .then(function(data){
@@ -1810,6 +1843,103 @@
           var clientRow = document.querySelector('#h' + n + '-clientRow .btn-row');
           LinkShortener.attach(clientRow, textOf('h' + n + '-clientUrl'));
         })(i);
+      }
+    })();
+
+    // ---------- Your Short Links (per-affiliate list) ----------
+    (function(){
+      var listEl = document.getElementById('shortlinks-list');
+      var statusEl = document.getElementById('shortlinks-status');
+      var refreshBtn = document.getElementById('shortlinks-refreshBtn');
+      var loaded = false;
+
+      function formatDate(iso){
+        if(!iso) return '';
+        var d = new Date(iso);
+        if(isNaN(d.getTime())) return '';
+        return d.toLocaleDateString();
+      }
+
+      function render(links){
+        listEl.innerHTML = '';
+        if(!links.length){
+          statusEl.textContent = 'You haven\'t shortened any links yet — use the "Shorten" button next to any link elsewhere in the Hub.';
+          statusEl.className = 'status show';
+          return;
+        }
+        statusEl.className = 'status';
+        statusEl.textContent = '';
+
+        links.forEach(function(link){
+          var row = document.createElement('div');
+          row.className = 'shortlink-row';
+
+          var main = document.createElement('div');
+          main.className = 'shortlink-main';
+
+          var shortEl = document.createElement('div');
+          shortEl.className = 'shortlink-short';
+          shortEl.textContent = link.shortUrl;
+
+          var longEl = document.createElement('div');
+          longEl.className = 'shortlink-long';
+          longEl.textContent = link.url;
+
+          main.appendChild(shortEl);
+          main.appendChild(longEl);
+
+          var meta = document.createElement('div');
+          meta.className = 'shortlink-meta';
+
+          var clicksEl = document.createElement('div');
+          clicksEl.className = 'shortlink-clicks';
+          clicksEl.innerHTML = '<b>' + (link.clicks || 0) + '</b> click' + (link.clicks === 1 ? '' : 's') +
+            (link.createdAt ? ' &middot; ' + formatDate(link.createdAt) : '');
+
+          var copyBtn = document.createElement('button');
+          copyBtn.type = 'button';
+          copyBtn.className = 'btn-secondary';
+          copyBtn.textContent = 'Copy';
+          copyBtn.addEventListener('click', function(){
+            copyText(link.shortUrl, shortEl);
+          });
+
+          meta.appendChild(clicksEl);
+          meta.appendChild(copyBtn);
+
+          row.appendChild(main);
+          row.appendChild(meta);
+          listEl.appendChild(row);
+        });
+      }
+
+      function load(){
+        if(!AFF_ID){
+          statusEl.textContent = 'Open the Hub using your personal affiliate link to see your short links here.';
+          statusEl.className = 'status show';
+          return;
+        }
+        statusEl.textContent = 'Loading…';
+        statusEl.className = 'status show';
+        fetch('/api/shorten?aff=' + encodeURIComponent(AFF_ID))
+          .then(function(r){ return r.json(); })
+          .then(function(data){
+            loaded = true;
+            render((data && data.links) || []);
+          })
+          .catch(function(){
+            statusEl.textContent = 'Could not load your short links right now — try refreshing.';
+            statusEl.className = 'status show';
+          });
+      }
+
+      refreshBtn.addEventListener('click', load);
+
+      var shortLinksTab = document.querySelector('.tab[data-panel="shortlinks"]');
+      if(shortLinksTab){
+        shortLinksTab.addEventListener('click', function(){
+          if(!loaded) load();
+        });
       }
     })();
   </script>
