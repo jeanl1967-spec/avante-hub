@@ -27,27 +27,48 @@ function parseCsvLine(line) {
   return result;
 }
 
-function parseResortNamesFromCsv(text) {
+// Parses the resort master CSV into { name, district, siteId, resortId } per
+// row. name/district/siteId/resortId are looked up by header name so the
+// parser doesn't break if StockNetwork reorders columns; siteId/resortId fall
+// back to the last two columns (their known position) if the headers aren't
+// found by name. Rows are kept even if they share a name with another row —
+// different physical properties can share a name, and each needs its own
+// SiteID/ResortID for the Resort Info Link to work. Only exact duplicate rows
+// (same name + siteId + resortId) are collapsed.
+function parseResortsFromCsv(text) {
   const lines = text.split(/\r\n|\r|\n/).filter((l) => l.trim().length > 0);
   if (lines.length === 0) return [];
 
-  const header = parseCsvLine(lines[0]);
-  let nameColIdx = header.findIndex((h) => h.trim().toLowerCase() === "resort");
-  if (nameColIdx === -1) nameColIdx = 0;
+  const header = parseCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+  const findCol = (name) => header.findIndex((h) => h === name);
+
+  let nameIdx = findCol("resort");
+  let districtIdx = findCol("district");
+  let siteIdIdx = findCol("siteid");
+  let resortIdIdx = findCol("resortid");
+  if (nameIdx === -1) nameIdx = 0;
+  if (resortIdIdx === -1) resortIdIdx = header.length - 1;
+  if (siteIdIdx === -1) siteIdIdx = header.length - 2;
 
   const seen = new Set();
-  const names = [];
+  const resorts = [];
   for (let i = 1; i < lines.length; i++) {
     const fields = parseCsvLine(lines[i]);
-    const name = (fields[nameColIdx] || "").trim();
-    const key = name.toLowerCase();
-    if (name && !seen.has(key)) {
-      seen.add(key);
-      names.push(name);
-    }
+    const name = (fields[nameIdx] || "").trim();
+    if (!name) continue;
+
+    const district = districtIdx > -1 ? (fields[districtIdx] || "").trim() : "";
+    const siteId = siteIdIdx > -1 ? (fields[siteIdIdx] || "").trim() : "";
+    const resortId = resortIdIdx > -1 ? (fields[resortIdIdx] || "").trim() : "";
+
+    const key = name.toLowerCase() + "|" + siteId + "|" + resortId;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    resorts.push({ name, district, siteId, resortId });
   }
-  names.sort((a, b) => a.localeCompare(b));
-  return names;
+
+  resorts.sort((a, b) => a.name.localeCompare(b.name) || a.district.localeCompare(b.district));
+  return resorts;
 }
 
 export default async (request, context) => {
@@ -82,7 +103,7 @@ export default async (request, context) => {
         });
       }
 
-      const resorts = parseResortNamesFromCsv(text);
+      const resorts = parseResortsFromCsv(text);
       if (!resorts.length) {
         return new Response(JSON.stringify({ ok: false, error: "Could not find any resort names in that file." }), {
           status: 400,
