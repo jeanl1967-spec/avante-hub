@@ -272,6 +272,25 @@
   }
   .btn-outline:hover{ background:var(--mint); }
 
+  .shorten-wrap{ display:inline-flex; flex-wrap:wrap; align-items:center; gap:10px; }
+  .shorten-result{
+    display:none;
+    align-items:center;
+    flex-wrap:wrap;
+    gap:8px;
+    background:var(--mint);
+    border:1.5px solid #bfe6e2;
+    border-radius:8px;
+    padding:7px 12px;
+  }
+  .shorten-result-url{ font-size:12.5px; font-weight:700; color:var(--teal-dark); word-break:break-all; }
+  .shorten-copy-btn{
+    width:auto; margin-top:0;
+    padding:5px 12px; font-size:11.5px;
+    background:var(--navy); color:#fff; border:none; border-radius:6px; font-weight:700; cursor:pointer;
+  }
+  .shorten-copy-btn:hover{ background:#0a2333; }
+
   iframe.preview{
     width:100%; height:900px; border:1.5px solid var(--line);
     display:none; margin-top:16px; border-radius:10px;
@@ -556,6 +575,7 @@
       <button class="tab active" data-panel="home">Home</button>
       <button class="tab" data-panel="marketing">Affiliate Marketing</button>
       <button class="tab" data-panel="accom">Accommodation Link Builder</button>
+      <button class="tab" data-panel="package">Build Your Package</button>
       <button class="tab" data-panel="flight">Your Flight Link</button>
       <button class="tab" data-panel="activity">Your Activity Link</button>
       <button class="tab" data-panel="car">Your Car Link</button>
@@ -796,6 +816,18 @@
             <button class="btn-outline" id="f-openBtn">Open flight search</button>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- ===================== BUILD YOUR PACKAGE (placeholder) ===================== -->
+    <section class="panel" id="panel-package">
+      <div class="hero">
+        <h1>Build Your Package</h1>
+      </div>
+      <div class="placeholder">
+        <div class="badge">Coming soon</div>
+        <h3>Package builder links aren't live yet</h3>
+        <p>Links for this section are on their way — check back soon.</p>
       </div>
     </section>
 
@@ -1661,6 +1693,124 @@
           e.target.value = '';
         }
       });
+    })();
+
+    // ---------- Link shortener (shared across every link the Hub builds) ----------
+    // Adds a small "Shorten" button + result wherever it's attached. Reads the
+    // long URL fresh at click time (via getLongUrl), so it works fine even for
+    // links that don't exist yet when the page first loads (e.g. hook links,
+    // which only get filled in after "Save hook" is clicked).
+    var LinkShortener = (function(){
+      function build(getLongUrl){
+        var wrap = document.createElement('span');
+        wrap.className = 'shorten-wrap';
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn-outline';
+        btn.textContent = 'Shorten';
+
+        var result = document.createElement('span');
+        result.className = 'shorten-result';
+
+        var urlSpan = document.createElement('span');
+        urlSpan.className = 'shorten-result-url';
+
+        var copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'shorten-copy-btn';
+        copyBtn.textContent = 'Copy';
+
+        result.appendChild(urlSpan);
+        result.appendChild(copyBtn);
+
+        btn.addEventListener('click', function(){
+          var longUrl = (getLongUrl() || '').trim();
+          if(!longUrl){
+            showToast('Generate the link first, then shorten it.');
+            return;
+          }
+          btn.disabled = true;
+          var original = btn.textContent;
+          btn.textContent = 'Shortening…';
+
+          fetch('/api/shorten', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ url: longUrl })
+          })
+            .then(function(r){ return r.json(); })
+            .then(function(data){
+              btn.disabled = false;
+              btn.textContent = original;
+              if(data && data.ok){
+                urlSpan.textContent = data.shortUrl;
+                result.classList.add('show');
+                result.style.display = 'inline-flex';
+              }else{
+                showToast((data && data.error) || 'Could not shorten that link.');
+              }
+            })
+            .catch(function(){
+              btn.disabled = false;
+              btn.textContent = original;
+              showToast('Something went wrong shortening that link.');
+            });
+        });
+
+        copyBtn.addEventListener('click', function(){
+          copyText(urlSpan.textContent, urlSpan);
+        });
+
+        wrap.appendChild(btn);
+        wrap.appendChild(result);
+        return wrap;
+      }
+
+      // Appends a shorten control into hostEl. getLongUrl is called fresh
+      // every time the button is clicked, so it always shortens the current
+      // link even if it was generated/changed after this was attached.
+      function attach(hostEl, getLongUrl){
+        if(!hostEl) return;
+        hostEl.appendChild(build(getLongUrl));
+      }
+
+      return { attach: attach };
+    })();
+
+    (function(){
+      function textOf(id){
+        return function(){
+          var el = document.getElementById(id);
+          return el ? el.textContent : '';
+        };
+      }
+
+      var aBtnRow = document.querySelector('#a-linkBox .btn-row');
+      LinkShortener.attach(aBtnRow, textOf('a-finalUrl'));
+
+      var rBtnRow = document.querySelector('#r-linkBox .btn-row');
+      LinkShortener.attach(rBtnRow, textOf('r-finalUrl'));
+
+      var fBtnRow = document.querySelector('#f-linkBox .btn-row');
+      LinkShortener.attach(fBtnRow, textOf('f-finalUrl'));
+
+      var storefrontBtnRow = document.querySelector('#storefrontCard .btn-row');
+      LinkShortener.attach(storefrontBtnRow, textOf('storefrontUrl'));
+
+      var HOOK_COUNT = 6;
+      for(var i = 1; i <= HOOK_COUNT; i++){
+        (function(n){
+          var bookingRow = document.querySelector('#h' + n + '-bookingRow .btn-row');
+          LinkShortener.attach(bookingRow, textOf('h' + n + '-bookingUrl'));
+
+          var landingRow = document.querySelector('#h' + n + '-landingRow .btn-row');
+          LinkShortener.attach(landingRow, textOf('h' + n + '-landingUrl'));
+
+          var clientRow = document.querySelector('#h' + n + '-clientRow .btn-row');
+          LinkShortener.attach(clientRow, textOf('h' + n + '-clientUrl'));
+        })(i);
+      }
     })();
   </script>
 
