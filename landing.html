@@ -116,9 +116,11 @@
   .promo-card-image{
     display:none;
     width:100%;
-    height:150px;
-    object-fit:cover;
+    height:220px;
+    object-fit:contain;
+    background:var(--mint);
     border-radius:10px;
+    border:1.5px solid var(--line);
     margin-bottom:16px;
   }
   .promo-card-image.show{ display:block; }
@@ -183,7 +185,7 @@
     .brand{ font-size:19px; }
     main{ padding:24px 16px 56px; }
     .hero h1{ font-size:21px; }
-    .promo-card-image{ height:120px; }
+    .promo-card-image{ height:170px; }
   }
 </style>
 </head>
