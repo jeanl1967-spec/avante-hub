@@ -739,18 +739,7 @@
 
         <label for="r-resortName">Resort name</label>
         <input id="r-resortName" placeholder="e.g. Nonaka, or the exact resort name on StockNetwork">
-        <div class="hint">Uses the booking link URL entered above. Must match the resort's name on StockNetwork exactly.</div>
-
-        <div class="row">
-          <div>
-            <label for="r-checkIn">Check-in date</label>
-            <input type="date" id="r-checkIn">
-          </div>
-          <div>
-            <label for="r-checkOut">Check-out date</label>
-            <input type="date" id="r-checkOut">
-          </div>
-        </div>
+        <div class="hint">Uses the booking link URL entered above. Must match the resort's name on StockNetwork exactly. No dates needed — this just links to the resort's info page.</div>
 
         <button class="primary" id="r-generateBtn">Generate resort link</button>
         <div class="status" id="r-errorStatus"></div>
@@ -1106,22 +1095,10 @@
     (function(){
       var currentLink = '';
       var previewLoaded = false;
-      var checkInEl = document.getElementById('r-checkIn');
-      var checkOutEl = document.getElementById('r-checkOut');
-
-      var today = new Date();
-      var tomorrow = new Date(today.getTime() + 86400000);
-      var checkoutDefault = new Date(today.getTime() + 3 * 86400000);
-      function fmt(d){ return d.toISOString().slice(0, 10); }
-      checkInEl.min = fmt(tomorrow);
-      checkInEl.value = fmt(tomorrow);
-      checkOutEl.value = fmt(checkoutDefault);
 
       function buildResortLink(){
         var baseUrl = document.getElementById('a-baseUrl').value.trim().replace(/\/$/, '');
         var resortName = document.getElementById('r-resortName').value.trim();
-        var checkIn = checkInEl.value;
-        var checkOut = checkOutEl.value;
         var errorEl = document.getElementById('r-errorStatus');
         errorEl.className = 'status';
         errorEl.textContent = '';
@@ -1136,18 +1113,8 @@
           errorEl.className = 'status show';
           return;
         }
-        if(!checkIn || !checkOut){
-          errorEl.textContent = 'Please choose check-in and check-out dates.';
-          errorEl.className = 'status show';
-          return;
-        }
-        if(checkOut <= checkIn){
-          errorEl.textContent = 'Check-out must be after check-in.';
-          errorEl.className = 'status show';
-          return;
-        }
 
-        var params = new URLSearchParams({ CheckInDT: checkIn, CheckOutDT: checkOut, Filter: resortName });
+        var params = new URLSearchParams({ Filter: resortName });
         currentLink = baseUrl + '?' + params.toString();
 
         document.getElementById('r-finalUrl').textContent = currentLink;
