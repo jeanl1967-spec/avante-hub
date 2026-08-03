@@ -1257,7 +1257,12 @@
 
       function populatePicker(resorts){
         resorts = resorts || [];
-        var usable = resorts.filter(function(r){ return r && r.siteId && r.resortId; });
+        // ResortID alone is enough to resolve the info page (confirmed live —
+        // https://old.stocknetwork.co.za/ResortInfo.aspx?ResortID=... works with
+        // no SiteID at all). SiteID is included in the link when the CSV has
+        // one, but its exact value doesn't need to match — two different
+        // SiteIDs against the same ResortID both loaded the same resort page.
+        var usable = resorts.filter(function(r){ return r && r.resortId; });
 
         var nameCounts = {};
         usable.forEach(function(r){
@@ -1304,7 +1309,8 @@
           return;
         }
 
-        var params = new URLSearchParams({ SiteID: selected.siteId, ResortID: selected.resortId });
+        var params = new URLSearchParams({ ResortID: selected.resortId });
+        if(selected.siteId) params.set('SiteID', selected.siteId);
         currentLink = 'https://old.stocknetwork.co.za/ResortInfo.aspx?' + params.toString();
 
         document.getElementById('r-finalUrl').textContent = currentLink;
