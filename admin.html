@@ -559,6 +559,28 @@
       return 'R' + n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
+    function copyToClipboard(text, successMsg){
+      function fallbackCopy(){
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        var ok = false;
+        try{ ok = document.execCommand('copy'); }catch(e){ ok = false; }
+        document.body.removeChild(ta);
+        showToast(ok ? successMsg : 'Could not copy — please copy manually');
+      }
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(text).then(function(){
+          showToast(successMsg);
+        }).catch(fallbackCopy);
+      }else{
+        fallbackCopy();
+      }
+    }
+
     // ---------- Log out ----------
     document.getElementById('logoutLink').addEventListener('click', function(e){
       e.preventDefault();
@@ -690,6 +712,20 @@
           });
         });
 
+        var welcomeBtn = document.createElement('button');
+        welcomeBtn.className = 'btn-outline btn-small';
+        welcomeBtn.textContent = 'Welcome Info';
+        welcomeBtn.addEventListener('click', function(){
+          var hubLink = window.location.origin + '/hub.html?aff=' + encodeURIComponent(a.affId);
+          var msg = 'Welcome to the Avante Travel Affiliate Hub' + (a.name ? ', ' + a.name : '') + '!\n\n' +
+            'Your personal Hub link:\n' + hubLink + '\n\n' +
+            'Log in with:\n' +
+            'Affiliate number: ' + a.affId + '\n' +
+            'Password: 1234 (default — you can change it once you\'re logged in, under "Change Password" in the top right)\n\n' +
+            'Once inside you\'ll find your booking links, flight link, and marketing tools all in one place.';
+          copyToClipboard(msg, 'Welcome message copied — paste it into an email');
+        });
+
         var editBtn = document.createElement('button');
         editBtn.className = 'btn-secondary btn-small';
         editBtn.textContent = 'Edit';
@@ -711,6 +747,7 @@
         });
 
         actionsWrap.appendChild(payoutsBtn);
+        actionsWrap.appendChild(welcomeBtn);
         actionsWrap.appendChild(editBtn);
         actionsWrap.appendChild(deleteBtn);
         tdActions.appendChild(actionsWrap);
