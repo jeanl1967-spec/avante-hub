@@ -816,24 +816,19 @@
     <section class="panel" id="panel-flight">
       <div class="hero">
         <h1>Your Flight Link</h1>
-        <p>Paste your personal Travelstart affiliate link once — get a clean, shareable button</p>
+        <p>Your personal flight booking link — every booking made through it is tracked back to you</p>
       </div>
       <div class="card">
-        <label for="f-flightUrl">Your Travelstart affiliate link</label>
-        <input id="f-flightUrl" placeholder="e.g. https://www.travelstart.co.za/lp/retargeting-search-widget?affid=...">
-        <div class="hint">Your own personal Travelstart flight search link. Note: Travelstart's widget can't be shown in an inline preview here — it always opens in a new tab, on their site.</div>
-
-        <button class="primary" id="f-generateBtn">Generate link</button>
         <div class="status" id="f-errorStatus"></div>
-
         <div class="link-box" id="f-linkBox">
-          <div class="label">Your shareable link</div>
+          <div class="label">Your shareable flight booking link</div>
           <div class="url" id="f-finalUrl"></div>
           <div class="btn-row">
             <button class="btn-secondary" id="f-copyBtn">Copy link</button>
             <button class="btn-outline" id="f-openBtn">Open flight search</button>
           </div>
         </div>
+        <div class="hint" style="margin-top:14px;">Share this link on social media, WhatsApp, or your website. Every flight booking made through it is tracked back to your affiliate ID, so we can calculate your share of the commission.</div>
       </div>
     </section>
 
@@ -961,6 +956,12 @@
     // this browser only — no login, no server, just localStorage keyed by ID.
     var AFF_ID = new URLSearchParams(window.location.search).get('aff') || '';
     var STOCKNETWORK_BASE = 'https://stock.stocknetwork.co.za/ui/';
+    // Avante's own Impact.com/Travelstart tracking link. Impact.com has no
+    // formal sub-affiliate feature, so each affiliate's flight link reuses
+    // this one base link with their affiliate ID appended as a Sub ID
+    // (subId1) — Impact.com records bookings against that value, visible
+    // under Reports -> Performance by Sub ID for revenue-share purposes.
+    var FLIGHT_BASE_URL = 'https://travelstart.zwjlk6.net/LPVYJM';
 
     function affKey(key){ return 'avante-hub:' + AFF_ID + ':' + key; }
     function affSave(key, value){
@@ -1413,40 +1414,24 @@
     })();
 
     // ---------- Flight Link ----------
+    // Auto-generated, not affiliate-entered: everyone shares the same
+    // Impact.com/Travelstart tracking link, with each affiliate's own ID
+    // appended as a Sub ID so bookings can be attributed and revenue shared.
     (function(){
       var currentLink = '';
-      var flightUrlEl = document.getElementById('f-flightUrl');
+      var errorEl = document.getElementById('f-errorStatus');
+      var linkBox = document.getElementById('f-linkBox');
 
-      function buildLink(){
-        var url = flightUrlEl.value.trim();
-        var errorEl = document.getElementById('f-errorStatus');
-        errorEl.className = 'status';
-        errorEl.textContent = '';
-
-        if(!url){
-          errorEl.textContent = 'Paste your Travelstart affiliate link first.';
-          errorEl.className = 'status show';
-          return;
-        }
-        if(!/^https?:\/\//i.test(url)){
-          errorEl.textContent = 'That doesn\'t look like a valid link — it should start with https://';
-          errorEl.className = 'status show';
-          return;
-        }
-
-        currentLink = url;
+      if(!AFF_ID){
+        errorEl.textContent = 'Open the Hub using your personal affiliate link to get your flight booking link.';
+        errorEl.className = 'status show';
+      }else{
+        var sep = FLIGHT_BASE_URL.indexOf('?') === -1 ? '?' : '&';
+        currentLink = FLIGHT_BASE_URL + sep + 'subId1=' + encodeURIComponent(AFF_ID);
         document.getElementById('f-finalUrl').textContent = currentLink;
-        document.getElementById('f-linkBox').classList.add('show');
-        affSave('flightUrl', url);
+        linkBox.classList.add('show');
       }
 
-      var savedFlight = affLoad('flightUrl');
-      if(savedFlight){
-        flightUrlEl.value = savedFlight;
-        buildLink();
-      }
-
-      document.getElementById('f-generateBtn').addEventListener('click', buildLink);
       document.getElementById('f-copyBtn').addEventListener('click', function(){
         if(!currentLink) return;
         copyText(currentLink, document.getElementById('f-finalUrl'));
