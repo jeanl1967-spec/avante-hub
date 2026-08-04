@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avante Travel — Admin</title>
+<script>
+  // ---------- Auth gate ----------
+  // Runs before the page renders, so the dashboard never flashes on screen
+  // for an unauthenticated visitor. A session token is issued by /api/admin
+  // on login/setup and kept only in sessionStorage (cleared when the tab
+  // closes), not localStorage — this is admin-level access to affiliate
+  // revenue data, so it shouldn't linger indefinitely on a shared machine.
+  (function(){
+    var token = '';
+    try{ token = sessionStorage.getItem('avante-admin-token') || ''; }catch(e){}
+    if(!token){
+      window.location.replace('admin-login.html');
+    }
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --teal:#0DCDC2;
+    --teal-dark:#0aa89f;
+    --navy:#0e2f44;
+    --ink:#333333;
+    --muted:#808080;
+    --mint:#f4fbfa;
+    --line:#e3e9e8;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Noto Sans', sans-serif;
+    color:var(--ink);
+    background:#ffffff;
+  }
+  h1,h2,h3,.brand,.tab,button{ font-family:'Montserrat', sans-serif; }
+
+  .topbar{
+    background:var(--navy);
+    color:#fff;
+    font-size:12.5px;
+    padding:6px 24px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .topbar-actions{ display:flex; gap:16px; }
+  .topbar-actions a{ color:#fff; text-decoration:none; opacity:0.9; cursor:pointer; }
+  .topbar-actions a:hover{ text-decoration:underline; opacity:1; }
+
+  .modal-overlay{
+    display:none;
+    position:fixed; inset:0;
+    background:rgba(14,47,68,0.45);
+    align-items:center; justify-content:center;
+    padding:20px;
+    z-index:100;
+    overflow-y:auto;
+  }
+  .modal-overlay.show{ display:flex; }
+  .modal-card{
+    width:100%; max-width:420px;
+    background:#fff;
+    border-radius:14px;
+    padding:26px 24px 24px;
+    box-shadow:0 20px 60px rgba(14,47,68,0.25);
+    margin:auto;
+  }
+  .modal-card h2{ margin:0 0 4px; font-size:17px; color:var(--navy); }
+  .modal-card .modal-sub{ margin:0 0 16px; font-size:12.5px; color:var(--muted); }
+  .modal-card label{
+    display:block; font-size:11px; font-weight:600; text-transform:uppercase;
+    letter-spacing:0.05em; color:var(--teal-dark); margin:12px 0 5px;
+  }
+  .modal-card label:first-of-type{ margin-top:0; }
+  .modal-card input, .modal-card select, .modal-card textarea{
+    width:100%; padding:10px 11px; border:1.5px solid var(--line); border-radius:8px;
+    font-size:13.5px; font-family:inherit; color:var(--navy); background:var(--mint);
+    box-sizing:border-box;
+  }
+  .modal-card textarea{ resize:vertical; min-height:60px; }
+  .modal-card input:focus, .modal-card select:focus, .modal-card textarea:focus{ outline:none; border-color:var(--teal); }
+  .modal-status{
+    margin-top:12px; padding:9px 12px; border-radius:8px; font-size:12px;
+    display:none; background:#fbeae8; color:#c0453a; border:1px solid #f0c8c2;
+  }
+  .modal-status.show{ display:block; }
+  .modal-actions{ display:flex; gap:10px; margin-top:20px; }
+  .modal-actions button{
+    flex:1; padding:10px; border-radius:8px; font-size:13px; font-weight:700;
+    cursor:pointer; border:1.5px solid transparent; font-family:'Montserrat', sans-serif;
+  }
+  .modal-btn-primary{ background:var(--teal); color:#fff; }
+  .modal-btn-primary:hover{ background:var(--teal-dark); }
+  .modal-btn-primary:disabled{ background:#bcd9d6; cursor:not-allowed; }
+  .modal-btn-secondary{ background:var(--mint); color:var(--navy); border-color:var(--line); }
+
+  header.hub-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:18px 32px;
+    border-bottom:1px solid var(--line);
+    flex-wrap:wrap;
+    gap:16px;
+  }
+  .brand{
+    font-weight:800;
+    font-size:22px;
+    color:var(--teal);
+    letter-spacing:0.01em;
+    line-height:1.1;
+  }
+  .brand span{ display:block; color:var(--navy); font-size:14px; font-weight:600; letter-spacing:0.08em;}
+
+  nav.tabs{ display:flex; gap:4px; flex-wrap:wrap; }
+  .tab{
+    appearance:none; border:none; background:transparent; color:var(--navy);
+    font-weight:600; font-size:13.5px; padding:10px 16px; border-radius:8px;
+    cursor:pointer; transition:background .15s ease, color .15s ease;
+  }
+  .tab:hover{ background:var(--mint); }
+  .tab.active{ background:var(--navy); color:#fff; }
+
+  @media (max-width: 900px){
+    nav.tabs{ flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; width:100%; padding-bottom:4px; scrollbar-width:thin; }
+    .tab{ flex:none; white-space:nowrap; }
+  }
+  nav.tabs::-webkit-scrollbar{ height:4px; }
+  nav.tabs::-webkit-scrollbar-thumb{ background:var(--line); border-radius:10px; }
+
+  main{ max-width:1080px; margin:0 auto; padding:36px 24px 80px; }
+  .panel{ display:none; }
+  .panel.active{ display:block; }
+
+  .hero{ margin-bottom:24px; }
+  .hero h1{ color:var(--navy); font-size:24px; margin:0 0 6px; }
+  .hero p{ color:var(--muted); margin:0; font-size:14px; }
+
+  .card{
+    background:#fff; border:1.5px solid var(--line); border-radius:14px;
+    padding:26px 28px 30px; box-shadow:0 10px 30px rgba(14,47,68,0.06);
+  }
+  .card + .card{ margin-top:20px; }
+  label{
+    display:block; font-size:11.5px; font-weight:700; text-transform:uppercase;
+    letter-spacing:0.06em; color:var(--teal-dark); margin:16px 0 6px;
+  }
+  label:first-child{ margin-top:0; }
+  input, select, textarea{
+    width:100%; padding:10px 12px; border:1.5px solid #dcdcdc; border-radius:8px;
+    font-size:14px; font-family:'Noto Sans', sans-serif; color:var(--navy); background:var(--mint);
+  }
+  textarea{ resize:vertical; min-height:60px; }
+  input:focus, select:focus, textarea:focus{ outline:none; border-color:var(--teal); }
+  .row{ display:flex; gap:12px; }
+  .row > div{ flex:1; }
+  .hint{ font-size:11.5px; color:var(--muted); margin-top:5px; }
+
+  button.primary{
+    margin-top:22px; width:auto; padding:12px 24px; background:var(--teal); color:#fff;
+    border:none; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer;
+  }
+  button.primary:hover{ background:var(--teal-dark); }
+  button.primary:disabled{ background:#bcd9d6; cursor:not-allowed; }
+
+  .status{
+    margin-top:12px; padding:10px 13px; border-radius:8px; font-size:12.5px;
+    display:none; background:#fdeceb; color:#c0453a; border:1px solid #f3cfc9;
+  }
+  .status.show{ display:block; }
+  .status.ok{ background:var(--mint); color:var(--teal-dark); border-color:#bfe6e2; }
+
+  .btn-row{ display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
+  .btn-secondary{
+    width:auto; margin-top:0; padding:9px 18px; font-size:12.5px;
+    background:var(--navy); color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer;
+  }
+  .btn-secondary:hover{ background:#0a2333; }
+  .btn-outline{
+    width:auto; margin-top:0; padding:9px 18px; font-size:12.5px;
+    background:#fff; color:var(--teal-dark); border:1.5px solid var(--teal); border-radius:8px; font-weight:700; cursor:pointer;
+  }
+  .btn-outline:hover{ background:var(--mint); }
+  .btn-danger{
+    width:auto; margin-top:0; padding:7px 14px; font-size:11.5px;
+    background:#fff; color:#c0453a; border:1.5px solid #f0c8c2; border-radius:8px; font-weight:700; cursor:pointer;
+  }
+  .btn-danger:hover{ background:#fdeceb; }
+  .btn-small{ padding:6px 12px; font-size:11px; }
+
+  /* ---- summary stat cards ---- */
+  .stat-grid{
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin-bottom:22px;
+  }
+  @media (max-width:700px){ .stat-grid{ grid-template-columns:repeat(2, 1fr); } }
+  .stat-card{
+    background:var(--mint); border:1.5px solid #bfe6e2; border-radius:12px; padding:16px 18px;
+  }
+  .stat-card .num{ font-size:22px; font-weight:800; color:var(--navy); font-family:'Montserrat',sans-serif; }
+  .stat-card .lbl{ font-size:11px; color:var(--teal-dark); text-transform:uppercase; letter-spacing:0.05em; font-weight:700; margin-top:4px; }
+  .stat-card.outstanding{ background:#fff6da; border-color:#f0d98a; }
+  .stat-card.outstanding .num{ color:#7a5b00; }
+  .stat-card.outstanding .lbl{ color:#7a5b00; }
+
+  /* ---- tables ---- */
+  .table-wrap{ overflow-x:auto; border-radius:12px; border:1.5px solid var(--line); }
+  table.data-table{ width:100%; border-collapse:collapse; font-size:13px; min-width:640px; }
+  table.data-table th{
+    background:var(--navy); color:#fff; text-align:left; padding:10px 14px;
+    font-size:10.5px; letter-spacing:0.04em; text-transform:uppercase; white-space:nowrap;
+  }
+  table.data-table td{ padding:10px 14px; border-top:1px solid var(--line); color:var(--ink); vertical-align:middle; }
+  table.data-table tr:nth-child(even) td{ background:var(--mint); }
+  .badge{
+    display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:0.04em;
+    text-transform:uppercase; padding:3px 9px; border-radius:100px;
+  }
+  .badge.active{ background:#e3f7e6; color:#2a8f45; }
+  .badge.inactive{ background:#f1f1f1; color:var(--muted); }
+  .badge.paid{ background:#e3f7e6; color:#2a8f45; }
+  .badge.unpaid{ background:#fff6da; color:#7a5b00; }
+  .row-actions{ display:flex; gap:6px; flex-wrap:wrap; }
+
+  .empty-state{
+    text-align:center; padding:36px 20px; color:var(--muted); font-size:13.5px;
+  }
+
+  /* ---- tutorial ---- */
+  .tutorial-step{
+    display:flex; gap:16px; background:#fff; border:1.5px solid var(--line);
+    border-left:4px solid var(--teal); border-radius:12px; padding:18px 20px; margin-bottom:14px;
+  }
+  .tutorial-step .num{
+    flex:none; width:30px; height:30px; border-radius:50%; background:var(--teal); color:#fff;
+    font-weight:800; font-size:13px; display:flex; align-items:center; justify-content:center;
+  }
+  .tutorial-step h3{ margin:0 0 5px; font-size:15px; color:var(--navy); }
+  .tutorial-step p{ margin:0; font-size:13px; color:var(--ink); line-height:1.6; }
+  .tutorial-step code{ background:var(--mint); padding:1px 6px; border-radius:4px; font-size:12px; color:var(--teal-dark); }
+  .tutorial-note{
+    background:#fff6da; border:1.5px solid #f0d98a; border-radius:10px; padding:14px 18px;
+    font-size:13px; color:#7a5b00; margin-top:6px;
+  }
+
+  .toast{
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--navy); color:#fff; padding:10px 20px; border-radius:8px; font-size:13px;
+    opacity:0; transition:all 0.25s ease; pointer-events:none; z-index:9999;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  @media (max-width: 700px){
+    header.hub-header{ padding:14px 16px; gap:10px; }
+    .brand{ font-size:19px; }
+    .brand span{ font-size:11.5px; }
+    main{ padding:24px 16px 56px; }
+    .hero h1{ font-size:20px; }
+    .card{ padding:20px 16px 24px; }
+    .row{ flex-direction:column; }
+  }
+  @media (max-width: 480px){
+    .topbar{ padding:6px 16px; font-size:11.5px; gap:8px; }
+    .topbar-actions{ gap:12px; }
+    .modal-card{ padding:22px 18px 20px; }
+    .modal-card h2{ font-size:16px; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <span>Avante Travel &middot; Admin</span>
+    <span class="topbar-actions">
+      <a id="changePasswordLink">Change Password</a>
+      <a id="logoutLink">Log Out</a>
+    </span>
+  </div>
+
+  <div class="modal-overlay" id="pwModalOverlay">
+    <div class="modal-card">
+      <h2>Change Admin Password</h2>
+      <p class="modal-sub">Update the password used to log into this admin panel.</p>
+      <label for="pwOld">Current password</label>
+      <input id="pwOld" type="password" autocomplete="current-password">
+      <label for="pwNew">New password</label>
+      <input id="pwNew" type="password" autocomplete="new-password">
+      <label for="pwNew2">Confirm new password</label>
+      <input id="pwNew2" type="password" autocomplete="new-password">
+      <div class="modal-status" id="pwStatus"></div>
+      <div class="modal-actions">
+        <button type="button" class="modal-btn-secondary" id="pwCancelBtn">Cancel</button>
+        <button type="button" class="modal-btn-primary" id="pwSaveBtn">Save Password</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="affModalOverlay">
+    <div class="modal-card">
+      <h2 id="affModalTitle">Add Affiliate</h2>
+      <p class="modal-sub">This ID must match the affiliate's own Hub link ID exactly.</p>
+      <label for="affIdInput">Affiliate ID</label>
+      <input id="affIdInput" placeholder="e.g. c2fef00f-7330-4eb3-b993-f5f43fc73dff">
+      <label for="affNameInput">Name</label>
+      <input id="affNameInput" placeholder="e.g. Jane Smith">
+      <label for="affEmailInput">Email (optional)</label>
+      <input id="affEmailInput" placeholder="e.g. jane@example.com">
+      <label for="affShareInput">Revenue share (%)</label>
+      <input id="affShareInput" type="number" min="0" max="100" step="0.5" placeholder="e.g. 50">
+      <label for="affStatusInput">Status</label>
+      <select id="affStatusInput">
+        <option value="active">Active</option>
+        <option value="inactive">Inactive</option>
+      </select>
+      <label for="affNotesInput">Notes (optional)</label>
+      <textarea id="affNotesInput" placeholder="Anything worth remembering about this affiliate"></textarea>
+      <div class="modal-status" id="affModalStatus"></div>
+      <div class="modal-actions">
+        <button type="button" class="modal-btn-secondary" id="affCancelBtn">Cancel</button>
+        <button type="button" class="modal-btn-primary" id="affSaveBtn">Save Affiliate</button>
+      </div>
+    </div>
+  </div>
+
+  <header class="hub-header">
+    <div class="brand">AVANTE<span>TRAVEL &middot; ADMIN</span></div>
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-panel="affiliates">Affiliates</button>
+      <button class="tab" data-panel="payouts">Payouts</button>
+      <button class="tab" data-panel="tutorial">How Payouts Work</button>
+    </nav>
+  </header>
+
+  <main>
+
+    <!-- ===================== AFFILIATES ===================== -->
+    <section class="panel active" id="panel-affiliates">
+      <div class="hero">
+        <h1>Manage Affiliates</h1>
+        <p>Every affiliate you're tracking, their revenue share, and how much you currently owe them</p>
+      </div>
+      <div class="card">
+        <div class="btn-row" style="margin-top:0;">
+          <button class="primary" style="margin-top:0;" id="addAffiliateBtn">+ Add Affiliate</button>
+          <button class="btn-outline" id="refreshAffiliatesBtn">Refresh</button>
+        </div>
+        <div class="status" id="affiliatesStatus"></div>
+        <div style="margin-top:18px;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Affiliate</th>
+                  <th>ID</th>
+                  <th>Share</th>
+                  <th>Status</th>
+                  <th>Outstanding</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="affiliatesTableBody"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="affiliatesEmpty" style="display:none;">No affiliates added yet — click "+ Add Affiliate" to add your first one.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== PAYOUTS ===================== -->
+    <section class="panel" id="panel-payouts">
+      <div class="hero">
+        <h1>Payouts</h1>
+        <p>Log each affiliate's revenue for a period — their share is calculated automatically</p>
+      </div>
+      <div class="card">
+        <label for="payoutAffPicker">Select an affiliate</label>
+        <select id="payoutAffPicker">
+          <option value="">— Select an affiliate —</option>
+        </select>
+        <div class="status" id="payoutsStatus"></div>
+      </div>
+
+      <div id="payoutsDetail" style="display:none;">
+        <div class="card" style="margin-top:20px;">
+          <div class="stat-grid">
+            <div class="stat-card">
+              <div class="num" id="statRevenue">R0.00</div>
+              <div class="lbl">Total revenue logged</div>
+            </div>
+            <div class="stat-card">
+              <div class="num" id="statShare">0%</div>
+              <div class="lbl">Current share</div>
+            </div>
+            <div class="stat-card">
+              <div class="num" id="statPaid">R0.00</div>
+              <div class="lbl">Total paid out</div>
+            </div>
+            <div class="stat-card outstanding">
+              <div class="num" id="statOutstanding">R0.00</div>
+              <div class="lbl">Outstanding</div>
+            </div>
+          </div>
+
+          <label for="entryPeriod">Period</label>
+          <input id="entryPeriod" placeholder="e.g. August 2026">
+          <div class="row">
+            <div>
+              <label for="entryRevenue">Revenue for this period (R)</label>
+              <input id="entryRevenue" type="number" min="0" step="0.01" placeholder="e.g. 12000">
+            </div>
+            <div>
+              <label for="entryNote">Note (optional)</label>
+              <input id="entryNote" placeholder="e.g. Impact.com SubID report">
+            </div>
+          </div>
+          <button class="primary" id="addEntryBtn">Add Revenue Entry</button>
+          <div class="status" id="entryStatus"></div>
+        </div>
+
+        <div class="card" style="margin-top:20px;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Period</th>
+                  <th>Revenue</th>
+                  <th>Share</th>
+                  <th>Owed</th>
+                  <th>Note</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="entriesTableBody"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="entriesEmpty" style="display:none;">No revenue entries logged for this affiliate yet.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== TUTORIAL ===================== -->
+    <section class="panel" id="panel-tutorial">
+      <div class="hero">
+        <h1>How Payouts Work</h1>
+        <p>Where the numbers come from, and how to get each affiliate paid</p>
+      </div>
+
+      <div class="tutorial-step">
+        <div class="num">1</div>
+        <div>
+          <h3>Add the affiliate here first</h3>
+          <p>On the <strong>Affiliates</strong> tab, add each affiliate with their exact Hub affiliate ID (the same ID that's in their personal Hub link and their flight/booking links) and set their revenue share percentage — the cut they get of the bookings they drive.</p>
+        </div>
+      </div>
+
+      <div class="tutorial-step">
+        <div class="num">2</div>
+        <div>
+          <h3>Pull flight booking numbers from Impact.com</h3>
+          <p>Log into <code>app.impact.com</code>, then in the top navigation go to <strong>Reports → More Reports → Performance by Sub ID and Shared ID</strong> (or <strong>Reports → Advanced Action Listing</strong> for a booking-by-booking view). Every affiliate's flight bookings are tagged with their Hub affiliate ID as the Sub ID, since the Hub's "Your Flight Link" appends it automatically. Filter or group by Sub ID to see each affiliate's revenue for the period.</p>
+        </div>
+      </div>
+
+      <div class="tutorial-step">
+        <div class="num">3</div>
+        <div>
+          <h3>Pull accommodation numbers from StockNetwork</h3>
+          <p>Accommodation bookings run through each affiliate's own personal StockNetwork booking link rather than through Impact.com, so check StockNetwork's own reporting for booking revenue per affiliate over the same period.</p>
+        </div>
+      </div>
+
+      <div class="tutorial-step">
+        <div class="num">4</div>
+        <div>
+          <h3>Log the revenue on the Payouts tab</h3>
+          <p>Select the affiliate, enter a period label (e.g. "August 2026") and the total revenue they generated in that period, then click <strong>Add Revenue Entry</strong>. The amount you owe them is calculated automatically using their current revenue share percentage.</p>
+        </div>
+      </div>
+
+      <div class="tutorial-step">
+        <div class="num">5</div>
+        <div>
+          <h3>Pay them, then mark it paid</h3>
+          <p>Once you've paid an affiliate (EFT, etc.), find that entry in their Payouts table and click <strong>Mark Paid</strong>. This updates their outstanding balance so you always know who's still owed money at a glance.</p>
+        </div>
+      </div>
+
+      <div class="tutorial-note">
+        💡 If you enter more than one revenue entry for the same period by mistake, just delete the wrong one from the entries table — deleting an entry automatically reverses its effect on that affiliate's totals.
+      </div>
+    </section>
+
+  </main>
+
+  <div class="toast" id="toast">Saved</div>
+
+  <script>
+    // ---------- Auth / token helpers ----------
+    var ADMIN_TOKEN = '';
+    try{ ADMIN_TOKEN = sessionStorage.getItem('avante-admin-token') || ''; }catch(e){}
+
+    function goToLogin(){
+      try{ sessionStorage.removeItem('avante-admin-token'); }catch(e){}
+      window.location.href = 'admin-login.html';
+    }
+
+    function adminGet(resource, extraParams){
+      var params = new URLSearchParams(extraParams || {});
+      params.set('resource', resource);
+      params.set('token', ADMIN_TOKEN);
+      return fetch('/api/admin?' + params.toString())
+        .then(function(r){
+          if(r.status === 401){ goToLogin(); return Promise.reject(new Error('unauthenticated')); }
+          return r.json();
+        });
+    }
+
+    function adminPost(action, extraBody){
+      var body = Object.assign({ action: action, token: ADMIN_TOKEN }, extraBody || {});
+      return fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(function(r){
+        if(r.status === 401){ goToLogin(); return Promise.reject(new Error('unauthenticated')); }
+        return r.json().then(function(data){ return { status: r.status, data: data }; });
+      });
+    }
+
+    // ---------- tab switching ----------
+    document.querySelectorAll('.tab').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        document.querySelectorAll('.tab').forEach(function(b){ b.classList.remove('active'); });
+        document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
+        btn.classList.add('active');
+        document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
+        if(btn.dataset.panel === 'payouts') populatePayoutPicker();
+      });
+    });
+
+    // ---------- toast ----------
+    var toast = document.getElementById('toast');
+    function showToast(msg){
+      toast.textContent = msg;
+      toast.classList.add('show');
+      setTimeout(function(){ toast.classList.remove('show'); }, 2200);
+    }
+
+    function money(n){
+      n = Number(n) || 0;
+      return 'R' + n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    // ---------- Log out ----------
+    document.getElementById('logoutLink').addEventListener('click', function(e){
+      e.preventDefault();
+      adminPost('logout').catch(function(){}).then(function(){ goToLogin(); });
+    });
+
+    // ---------- Change password modal ----------
+    (function(){
+      var overlay = document.getElementById('pwModalOverlay');
+      var changeLink = document.getElementById('changePasswordLink');
+      var cancelBtn = document.getElementById('pwCancelBtn');
+      var saveBtn = document.getElementById('pwSaveBtn');
+      var oldInput = document.getElementById('pwOld');
+      var newInput = document.getElementById('pwNew');
+      var new2Input = document.getElementById('pwNew2');
+      var statusEl = document.getElementById('pwStatus');
+
+      function openModal(){
+        oldInput.value = ''; newInput.value = ''; new2Input.value = '';
+        statusEl.classList.remove('show');
+        overlay.classList.add('show');
+        oldInput.focus();
+      }
+      function closeModal(){ overlay.classList.remove('show'); }
+      function showModalError(msg){ statusEl.textContent = msg; statusEl.classList.add('show'); }
+
+      changeLink.addEventListener('click', function(e){ e.preventDefault(); openModal(); });
+      cancelBtn.addEventListener('click', closeModal);
+      overlay.addEventListener('click', function(e){ if(e.target === overlay) closeModal(); });
+
+      saveBtn.addEventListener('click', function(){
+        var oldPw = oldInput.value;
+        var newPw = newInput.value;
+        var newPw2 = new2Input.value;
+        statusEl.classList.remove('show');
+
+        if(!oldPw){ showModalError('Enter your current password.'); return; }
+        if(!newPw || newPw.length < 6){ showModalError('New password must be at least 6 characters.'); return; }
+        if(newPw !== newPw2){ showModalError('New passwords do not match.'); return; }
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+        adminPost('changePassword', { oldPassword: oldPw, newPassword: newPw })
+          .then(function(res){
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Password';
+            if(res.data && res.data.ok){
+              showToast('Password updated');
+              closeModal();
+            }else{
+              showModalError((res.data && res.data.error) || 'Could not update password.');
+            }
+          })
+          .catch(function(){
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Password';
+          });
+      });
+    })();
+
+    // ---------- Affiliates directory ----------
+    var affiliatesCache = [];
+
+    function loadAffiliates(){
+      var statusEl = document.getElementById('affiliatesStatus');
+      statusEl.className = 'status';
+      return adminGet('affiliates')
+        .then(function(data){
+          if(data && data.ok){
+            affiliatesCache = data.affiliates || [];
+            renderAffiliatesTable();
+          }else{
+            statusEl.textContent = (data && data.error) || 'Could not load affiliates.';
+            statusEl.className = 'status show';
+          }
+        })
+        .catch(function(){
+          statusEl.textContent = 'Could not reach the server.';
+          statusEl.className = 'status show';
+        });
+    }
+
+    function renderAffiliatesTable(){
+      var body = document.getElementById('affiliatesTableBody');
+      var empty = document.getElementById('affiliatesEmpty');
+      body.innerHTML = '';
+
+      if(!affiliatesCache.length){
+        empty.style.display = 'block';
+        return;
+      }
+      empty.style.display = 'none';
+
+      affiliatesCache.forEach(function(a){
+        var outstanding = (a.totalOwed || 0) - (a.totalPaid || 0);
+        var tr = document.createElement('tr');
+
+        var tdName = document.createElement('td');
+        tdName.textContent = a.name || '(no name)';
+        var tdId = document.createElement('td');
+        tdId.textContent = a.affId;
+        tdId.style.fontSize = '11px';
+        tdId.style.color = 'var(--muted)';
+        tdId.style.wordBreak = 'break-all';
+        var tdShare = document.createElement('td');
+        tdShare.textContent = (a.revenueSharePct || 0) + '%';
+        var tdStatus = document.createElement('td');
+        var badge = document.createElement('span');
+        badge.className = 'badge ' + (a.status === 'inactive' ? 'inactive' : 'active');
+        badge.textContent = a.status === 'inactive' ? 'Inactive' : 'Active';
+        tdStatus.appendChild(badge);
+        var tdOutstanding = document.createElement('td');
+        tdOutstanding.textContent = money(outstanding);
+        tdOutstanding.style.fontWeight = '700';
+        tdOutstanding.style.color = outstanding > 0 ? '#7a5b00' : 'var(--navy)';
+
+        var tdActions = document.createElement('td');
+        var actionsWrap = document.createElement('div');
+        actionsWrap.className = 'row-actions';
+
+        var payoutsBtn = document.createElement('button');
+        payoutsBtn.className = 'btn-outline btn-small';
+        payoutsBtn.textContent = 'Payouts';
+        payoutsBtn.addEventListener('click', function(){
+          document.querySelector('.tab[data-panel="payouts"]').click();
+          populatePayoutPicker(function(){
+            document.getElementById('payoutAffPicker').value = a.affId;
+            document.getElementById('payoutAffPicker').dispatchEvent(new Event('change'));
+          });
+        });
+
+        var editBtn = document.createElement('button');
+        editBtn.className = 'btn-secondary btn-small';
+        editBtn.textContent = 'Edit';
+        editBtn.addEventListener('click', function(){ openAffiliateModal(a); });
+
+        var deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn-danger btn-small';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.addEventListener('click', function(){
+          if(!window.confirm('Remove ' + (a.name || a.affId) + ' and all their logged payout history? This cannot be undone.')) return;
+          adminPost('deleteAffiliate', { affId: a.affId }).then(function(res){
+            if(res.data && res.data.ok){
+              showToast('Affiliate removed');
+              loadAffiliates();
+            }else{
+              showToast((res.data && res.data.error) || 'Could not remove affiliate.');
+            }
+          });
+        });
+
+        actionsWrap.appendChild(payoutsBtn);
+        actionsWrap.appendChild(editBtn);
+        actionsWrap.appendChild(deleteBtn);
+        tdActions.appendChild(actionsWrap);
+
+        tr.appendChild(tdName);
+        tr.appendChild(tdId);
+        tr.appendChild(tdShare);
+        tr.appendChild(tdStatus);
+        tr.appendChild(tdOutstanding);
+        tr.appendChild(tdActions);
+        body.appendChild(tr);
+      });
+    }
+
+    document.getElementById('refreshAffiliatesBtn').addEventListener('click', loadAffiliates);
+
+    // ---------- Add / Edit affiliate modal ----------
+    var editingAffId = null;
+    var affOverlay = document.getElementById('affModalOverlay');
+
+    function openAffiliateModal(existing){
+      editingAffId = existing ? existing.affId : null;
+      document.getElementById('affModalTitle').textContent = existing ? 'Edit Affiliate' : 'Add Affiliate';
+      document.getElementById('affIdInput').value = existing ? existing.affId : '';
+      document.getElementById('affIdInput').disabled = !!existing;
+      document.getElementById('affNameInput').value = existing ? (existing.name || '') : '';
+      document.getElementById('affEmailInput').value = existing ? (existing.email || '') : '';
+      document.getElementById('affShareInput').value = existing ? (existing.revenueSharePct || 0) : '';
+      document.getElementById('affStatusInput').value = existing ? (existing.status || 'active') : 'active';
+      document.getElementById('affNotesInput').value = existing ? (existing.notes || '') : '';
+      document.getElementById('affModalStatus').classList.remove('show');
+      affOverlay.classList.add('show');
+    }
+    function closeAffiliateModal(){ affOverlay.classList.remove('show'); }
+
+    document.getElementById('addAffiliateBtn').addEventListener('click', function(){ openAffiliateModal(null); });
+    document.getElementById('affCancelBtn').addEventListener('click', closeAffiliateModal);
+    affOverlay.addEventListener('click', function(e){ if(e.target === affOverlay) closeAffiliateModal(); });
+
+    document.getElementById('affSaveBtn').addEventListener('click', function(){
+      var btn = this;
+      var statusEl = document.getElementById('affModalStatus');
+      statusEl.classList.remove('show');
+
+      var affId = document.getElementById('affIdInput').value.trim();
+      var name = document.getElementById('affNameInput').value.trim();
+      var email = document.getElementById('affEmailInput').value.trim();
+      var share = document.getElementById('affShareInput').value;
+      var status = document.getElementById('affStatusInput').value;
+      var notes = document.getElementById('affNotesInput').value.trim();
+
+      if(!affId){
+        statusEl.textContent = 'Enter the affiliate\'s ID first.';
+        statusEl.classList.add('show');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      adminPost('upsertAffiliate', {
+        affId: affId, name: name, email: email,
+        revenueSharePct: share, status: status, notes: notes
+      }).then(function(res){
+        btn.disabled = false;
+        btn.textContent = 'Save Affiliate';
+        if(res.data && res.data.ok){
+          showToast('Affiliate saved');
+          closeAffiliateModal();
+          loadAffiliates();
+        }else{
+          statusEl.textContent = (res.data && res.data.error) || 'Could not save affiliate.';
+          statusEl.classList.add('show');
+        }
+      }).catch(function(){
+        btn.disabled = false;
+        btn.textContent = 'Save Affiliate';
+      });
+    });
+
+    // ---------- Payouts ----------
+    var currentPayoutAffId = '';
+
+    function populatePayoutPicker(afterFn){
+      var picker = document.getElementById('payoutAffPicker');
+      var rebuild = function(){
+        var currentVal = picker.value;
+        picker.innerHTML = '<option value="">— Select an affiliate —</option>';
+        affiliatesCache.forEach(function(a){
+          var opt = document.createElement('option');
+          opt.value = a.affId;
+          opt.textContent = (a.name || a.affId) + (a.status === 'inactive' ? ' (inactive)' : '');
+          picker.appendChild(opt);
+        });
+        if(currentVal) picker.value = currentVal;
+        if(afterFn) afterFn();
+      };
+      if(affiliatesCache.length){
+        rebuild();
+      }else{
+        loadAffiliates().then(rebuild);
+      }
+    }
+
+    document.getElementById('payoutAffPicker').addEventListener('change', function(){
+      currentPayoutAffId = this.value;
+      var detail = document.getElementById('payoutsDetail');
+      if(!currentPayoutAffId){
+        detail.style.display = 'none';
+        return;
+      }
+      detail.style.display = 'block';
+      loadPayouts(currentPayoutAffId);
+    });
+
+    function currentAffiliateRecord(){
+      return affiliatesCache.filter(function(a){ return a.affId === currentPayoutAffId; })[0];
+    }
+
+    function loadPayouts(affId){
+      var statusEl = document.getElementById('payoutsStatus');
+      statusEl.className = 'status';
+      adminGet('payouts', { affId: affId })
+        .then(function(data){
+          if(data && data.ok){
+            renderPayouts(data.entries || []);
+          }else{
+            statusEl.textContent = (data && data.error) || 'Could not load payout history.';
+            statusEl.className = 'status show';
+          }
+        })
+        .catch(function(){
+          statusEl.textContent = 'Could not reach the server.';
+          statusEl.className = 'status show';
+        });
+    }
+
+    function renderSummary(){
+      var a = currentAffiliateRecord();
+      if(!a) return;
+      var outstanding = (a.totalOwed || 0) - (a.totalPaid || 0);
+      document.getElementById('statRevenue').textContent = money(a.totalRevenue || 0);
+      document.getElementById('statShare').textContent = (a.revenueSharePct || 0) + '%';
+      document.getElementById('statPaid').textContent = money(a.totalPaid || 0);
+      document.getElementById('statOutstanding').textContent = money(outstanding);
+    }
+
+    function renderPayouts(entries){
+      renderSummary();
+      var body = document.getElementById('entriesTableBody');
+      var empty = document.getElementById('entriesEmpty');
+      body.innerHTML = '';
+
+      if(!entries.length){
+        empty.style.display = 'block';
+        return;
+      }
+      empty.style.display = 'none';
+
+      entries.forEach(function(entry){
+        var tr = document.createElement('tr');
+
+        var tdPeriod = document.createElement('td');
+        tdPeriod.textContent = entry.period;
+        var tdRevenue = document.createElement('td');
+        tdRevenue.textContent = money(entry.revenue);
+        var tdShare = document.createElement('td');
+        tdShare.textContent = entry.sharePct + '%';
+        var tdOwed = document.createElement('td');
+        tdOwed.textContent = money(entry.owed);
+        tdOwed.style.fontWeight = '700';
+        var tdNote = document.createElement('td');
+        tdNote.textContent = entry.note || '—';
+        tdNote.style.fontSize = '12px';
+        tdNote.style.color = 'var(--muted)';
+        var tdStatus = document.createElement('td');
+        var badge = document.createElement('span');
+        badge.className = 'badge ' + (entry.paid ? 'paid' : 'unpaid');
+        badge.textContent = entry.paid ? 'Paid' : 'Unpaid';
+        tdStatus.appendChild(badge);
+
+        var tdActions = document.createElement('td');
+        var actionsWrap = document.createElement('div');
+        actionsWrap.className = 'row-actions';
+
+        var toggleBtn = document.createElement('button');
+        toggleBtn.className = entry.paid ? 'btn-outline btn-small' : 'btn-secondary btn-small';
+        toggleBtn.textContent = entry.paid ? 'Mark Unpaid' : 'Mark Paid';
+        toggleBtn.addEventListener('click', function(){
+          adminPost('markPayoutPaid', { affId: currentPayoutAffId, entryId: entry.id, paid: !entry.paid })
+            .then(function(res){
+              if(res.data && res.data.ok){
+                showToast(entry.paid ? 'Marked unpaid' : 'Marked paid');
+                loadAffiliates().then(function(){ loadPayouts(currentPayoutAffId); });
+              }else{
+                showToast((res.data && res.data.error) || 'Could not update entry.');
+              }
+            });
+        });
+
+        var deleteBtn = document.createElement('button');
+        deleteBtn.className = 'btn-danger btn-small';
+        deleteBtn.textContent = 'Delete';
+        deleteBtn.addEventListener('click', function(){
+          if(!window.confirm('Delete this revenue entry? This cannot be undone.')) return;
+          adminPost('deletePayoutEntry', { affId: currentPayoutAffId, entryId: entry.id })
+            .then(function(res){
+              if(res.data && res.data.ok){
+                showToast('Entry deleted');
+                loadAffiliates().then(function(){ loadPayouts(currentPayoutAffId); });
+              }else{
+                showToast((res.data && res.data.error) || 'Could not delete entry.');
+              }
+            });
+        });
+
+        actionsWrap.appendChild(toggleBtn);
+        actionsWrap.appendChild(deleteBtn);
+        tdActions.appendChild(actionsWrap);
+
+        tr.appendChild(tdPeriod);
+        tr.appendChild(tdRevenue);
+        tr.appendChild(tdShare);
+        tr.appendChild(tdOwed);
+        tr.appendChild(tdNote);
+        tr.appendChild(tdStatus);
+        tr.appendChild(tdActions);
+        body.appendChild(tr);
+      });
+    }
+
+    document.getElementById('addEntryBtn').addEventListener('click', function(){
+      var btn = this;
+      var statusEl = document.getElementById('entryStatus');
+      statusEl.className = 'status';
+
+      if(!currentPayoutAffId){
+        statusEl.textContent = 'Select an affiliate first.';
+        statusEl.className = 'status show';
+        return;
+      }
+      var period = document.getElementById('entryPeriod').value.trim();
+      var revenue = document.getElementById('entryRevenue').value;
+      var note = document.getElementById('entryNote').value.trim();
+
+      if(!period){
+        statusEl.textContent = 'Enter a period label (e.g. "August 2026").';
+        statusEl.className = 'status show';
+        return;
+      }
+      if(revenue === '' || Number(revenue) < 0){
+        statusEl.textContent = 'Enter a valid revenue amount.';
+        statusEl.className = 'status show';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Adding…';
+      adminPost('addPayoutEntry', { affId: currentPayoutAffId, period: period, revenue: revenue, note: note })
+        .then(function(res){
+          btn.disabled = false;
+          btn.textContent = 'Add Revenue Entry';
+          if(res.data && res.data.ok){
+            showToast('Revenue entry added');
+            document.getElementById('entryPeriod').value = '';
+            document.getElementById('entryRevenue').value = '';
+            document.getElementById('entryNote').value = '';
+            loadAffiliates().then(function(){ loadPayouts(currentPayoutAffId); });
+          }else{
+            statusEl.textContent = (res.data && res.data.error) || 'Could not add revenue entry.';
+            statusEl.className = 'status show';
+          }
+        }).catch(function(){
+          btn.disabled = false;
+          btn.textContent = 'Add Revenue Entry';
+        });
+    });
+
+    // ---------- initial load ----------
+    loadAffiliates();
+  </script>
+
+</body>
+</html>

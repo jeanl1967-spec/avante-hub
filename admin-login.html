@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avante Travel — Admin Login</title>
+<script>
+  // If already authenticated in this browser tab session, skip straight to the dashboard.
+  try{
+    if(sessionStorage.getItem('avante-admin-token')){
+      window.location.replace('admin.html');
+    }
+  }catch(e){}
+</script>
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --teal:#0DCDC2;
+    --teal-dark:#0aa89f;
+    --navy:#0e2f44;
+    --ink:#333333;
+    --muted:#808080;
+    --mint:#f4fbfa;
+    --line:#e3e9e8;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-family:'Noto Sans', sans-serif;
+    color:var(--ink);
+    background:var(--navy);
+    padding:20px;
+  }
+  h1,h2,.brand,button{ font-family:'Montserrat', sans-serif; }
+
+  .card{
+    width:100%;
+    max-width:380px;
+    background:#fff;
+    border-radius:16px;
+    padding:36px 32px 32px;
+    box-shadow:0 24px 60px rgba(0,0,0,0.3);
+  }
+  .brand{
+    font-weight:800;
+    font-size:20px;
+    color:var(--teal);
+    text-align:center;
+    letter-spacing:0.01em;
+    margin-bottom:2px;
+  }
+  .brand span{ display:block; color:var(--navy); font-size:12.5px; font-weight:600; letter-spacing:0.1em; margin-top:2px; }
+  h1{
+    text-align:center;
+    color:var(--navy);
+    font-size:18px;
+    margin:20px 0 4px;
+  }
+  .sub{
+    text-align:center;
+    color:var(--muted);
+    font-size:12.5px;
+    margin:0 0 22px;
+    line-height:1.5;
+  }
+  label{
+    display:block;
+    font-size:11px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.06em;
+    color:var(--teal-dark);
+    margin:14px 0 6px;
+  }
+  label:first-of-type{ margin-top:0; }
+  input{
+    width:100%;
+    padding:11px 12px;
+    border:1.5px solid #dcdcdc;
+    border-radius:8px;
+    font-size:14px;
+    font-family:'Noto Sans', sans-serif;
+    color:var(--navy);
+    background:var(--mint);
+  }
+  input:focus{ outline:none; border-color:var(--teal); }
+
+  button.primary{
+    margin-top:22px;
+    width:100%;
+    padding:13px;
+    background:var(--teal);
+    color:#fff;
+    border:none;
+    border-radius:8px;
+    font-size:14.5px;
+    font-weight:700;
+    cursor:pointer;
+  }
+  button.primary:hover{ background:var(--teal-dark); }
+  button.primary:disabled{ background:#bcd9d6; cursor:not-allowed; }
+
+  .status{
+    margin-top:14px;
+    padding:10px 13px;
+    border-radius:8px;
+    font-size:12.5px;
+    display:none;
+    background:#fdeceb;
+    color:#c0453a;
+    border:1px solid #f3cfc9;
+  }
+  .status.show{ display:block; }
+  .status.info{
+    background:var(--mint);
+    color:var(--teal-dark);
+    border-color:#bfe6e2;
+  }
+</style>
+</head>
+<body>
+
+  <div class="card">
+    <div class="brand">AVANTE<span>TRAVEL &middot; ADMIN</span></div>
+    <h1 id="heading">Admin Login</h1>
+    <p class="sub" id="subtext">Sign in to manage affiliates and payouts.</p>
+
+    <div id="loginForm">
+      <label for="loginPassword">Password</label>
+      <input id="loginPassword" type="password" autocomplete="current-password">
+      <button type="button" class="primary" id="loginBtn">Log In</button>
+    </div>
+
+    <div id="setupForm" style="display:none;">
+      <label for="setupPassword">Choose an admin password</label>
+      <input id="setupPassword" type="password" autocomplete="new-password">
+      <label for="setupPassword2">Confirm password</label>
+      <input id="setupPassword2" type="password" autocomplete="new-password">
+      <button type="button" class="primary" id="setupBtn">Create Admin Account</button>
+    </div>
+
+    <div class="status" id="statusEl"></div>
+  </div>
+
+  <script>
+    var statusEl = document.getElementById('statusEl');
+    function showError(msg){
+      statusEl.textContent = msg;
+      statusEl.className = 'status show';
+    }
+    function showInfo(msg){
+      statusEl.textContent = msg;
+      statusEl.className = 'status show info';
+    }
+
+    var loginForm = document.getElementById('loginForm');
+    var setupForm = document.getElementById('setupForm');
+    var heading = document.getElementById('heading');
+    var subtext = document.getElementById('subtext');
+
+    fetch('/api/admin?resource=setupStatus')
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if(data && data.needsSetup){
+          heading.textContent = 'Create Admin Account';
+          subtext.textContent = 'No admin account exists yet — choose a password to set one up. This only happens once.';
+          loginForm.style.display = 'none';
+          setupForm.style.display = 'block';
+        }
+      })
+      .catch(function(){
+        showError('Could not reach the server — please refresh and try again.');
+      });
+
+    function afterAuthSuccess(token){
+      try{ sessionStorage.setItem('avante-admin-token', token); }catch(e){}
+      window.location.href = 'admin.html';
+    }
+
+    document.getElementById('loginBtn').addEventListener('click', function(){
+      var btn = this;
+      var password = document.getElementById('loginPassword').value;
+      statusEl.className = 'status';
+      if(!password){ showError('Enter your password.'); return; }
+
+      btn.disabled = true;
+      btn.textContent = 'Logging in…';
+      fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'login', password: password })
+      })
+        .then(function(r){ return r.json().then(function(data){ return { status: r.status, data: data }; }); })
+        .then(function(res){
+          btn.disabled = false;
+          btn.textContent = 'Log In';
+          if(res.data && res.data.ok){
+            afterAuthSuccess(res.data.token);
+          }else{
+            showError((res.data && res.data.error) || 'Could not log in.');
+          }
+        })
+        .catch(function(){
+          btn.disabled = false;
+          btn.textContent = 'Log In';
+          showError('Something went wrong. Please try again.');
+        });
+    });
+
+    document.getElementById('setupBtn').addEventListener('click', function(){
+      var btn = this;
+      var password = document.getElementById('setupPassword').value;
+      var password2 = document.getElementById('setupPassword2').value;
+      statusEl.className = 'status';
+
+      if(!password || password.length < 6){ showError('Password must be at least 6 characters.'); return; }
+      if(password !== password2){ showError('Passwords do not match.'); return; }
+
+      btn.disabled = true;
+      btn.textContent = 'Creating…';
+      fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'setup', password: password })
+      })
+        .then(function(r){ return r.json().then(function(data){ return { status: r.status, data: data }; }); })
+        .then(function(res){
+          btn.disabled = false;
+          btn.textContent = 'Create Admin Account';
+          if(res.data && res.data.ok){
+            afterAuthSuccess(res.data.token);
+          }else{
+            showError((res.data && res.data.error) || 'Could not create the admin account.');
+          }
+        })
+        .catch(function(){
+          btn.disabled = false;
+          btn.textContent = 'Create Admin Account';
+          showError('Something went wrong. Please try again.');
+        });
+    });
+
+    // Allow Enter key to submit whichever form is visible.
+    document.addEventListener('keydown', function(e){
+      if(e.key !== 'Enter') return;
+      if(setupForm.style.display !== 'none'){
+        document.getElementById('setupBtn').click();
+      }else{
+        document.getElementById('loginBtn').click();
+      }
+    });
+  </script>
+
+</body>
+</html>
