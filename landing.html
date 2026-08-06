@@ -230,13 +230,15 @@
     // ---------- Header nav links ----------
     // Jean will supply the real destination URL for the remaining categories.
     // Until then, each tab is shown but disabled (greyed out, not clickable).
-    // Flights already has a real destination: the shared Impact.com/Travelstart
-    // tracking link, with this affiliate's ID appended as a Sub ID so bookings
-    // are attributed back to them — the same link the Hub's "Your Flight Link"
-    // tab generates for affiliates themselves.
+    // Accommodation and Flights already have real, per-affiliate destinations:
+    // Accommodation goes to this affiliate's own personal StockNetwork booking
+    // portal (same base link used throughout the Hub), and Flights goes to the
+    // shared Impact.com/Travelstart tracking link with this affiliate's ID
+    // appended as a Sub ID — both track bookings back to this exact affiliate.
+    var STOCKNETWORK_BASE = 'https://stock.stocknetwork.co.za/ui/';
     var FLIGHT_BASE_URL = 'https://travelstart.zwjlk6.net/LPVYJM';
     var CATEGORY_LINKS = {
-      accommodation: '',
+      accommodation: aff ? (STOCKNETWORK_BASE + encodeURIComponent(aff)) : '',
       flights: aff ? (FLIGHT_BASE_URL + (FLIGHT_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(aff)) : '',
       activities: '',
       car: '',
