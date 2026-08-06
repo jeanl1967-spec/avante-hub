@@ -121,6 +121,11 @@
     color:var(--teal-dark);
     border-color:#bfe6e2;
   }
+  .forgot-link{
+    display:block; text-align:center; margin-top:14px; font-size:12px;
+    color:var(--teal-dark); text-decoration:none; font-weight:600;
+  }
+  .forgot-link:hover{ text-decoration:underline; }
 </style>
 </head>
 <body>
@@ -134,6 +139,7 @@
       <label for="loginPassword">Password</label>
       <input id="loginPassword" type="password" autocomplete="current-password">
       <button type="button" class="primary" id="loginBtn">Log In</button>
+      <a href="#" class="forgot-link" id="forgotLink">Forgot your password?</a>
     </div>
 
     <div id="setupForm" style="display:none;">
@@ -142,6 +148,17 @@
       <label for="setupPassword2">Confirm password</label>
       <input id="setupPassword2" type="password" autocomplete="new-password">
       <button type="button" class="primary" id="setupBtn">Create Admin Account</button>
+    </div>
+
+    <div id="recoveryForm" style="display:none;">
+      <label for="recoveryPhraseInput">Recovery phrase</label>
+      <input id="recoveryPhraseInput" type="text" autocomplete="off">
+      <label for="recoveryNewPassword">New password</label>
+      <input id="recoveryNewPassword" type="password" autocomplete="new-password">
+      <label for="recoveryNewPassword2">Confirm new password</label>
+      <input id="recoveryNewPassword2" type="password" autocomplete="new-password">
+      <button type="button" class="primary" id="recoveryBtn">Reset Password</button>
+      <a href="#" class="forgot-link" id="backToLoginLink">Back to login</a>
     </div>
 
     <div class="status" id="statusEl"></div>
@@ -245,11 +262,73 @@
         });
     });
 
+    // ---------- Forgot password (recovery phrase) ----------
+    var recoveryForm = document.getElementById('recoveryForm');
+
+    document.getElementById('forgotLink').addEventListener('click', function(e){
+      e.preventDefault();
+      statusEl.className = 'status';
+      document.getElementById('recoveryPhraseInput').value = '';
+      document.getElementById('recoveryNewPassword').value = '';
+      document.getElementById('recoveryNewPassword2').value = '';
+      loginForm.style.display = 'none';
+      recoveryForm.style.display = 'block';
+      heading.textContent = 'Reset Password';
+      subtext.textContent = 'Enter the recovery phrase you set earlier, along with a new password.';
+      document.getElementById('recoveryPhraseInput').focus();
+    });
+
+    document.getElementById('backToLoginLink').addEventListener('click', function(e){
+      e.preventDefault();
+      statusEl.className = 'status';
+      recoveryForm.style.display = 'none';
+      loginForm.style.display = 'block';
+      heading.textContent = 'Admin Login';
+      subtext.textContent = 'Sign in to manage affiliates and payouts.';
+    });
+
+    document.getElementById('recoveryBtn').addEventListener('click', function(){
+      var btn = this;
+      var recoveryPhrase = document.getElementById('recoveryPhraseInput').value;
+      var newPassword = document.getElementById('recoveryNewPassword').value;
+      var newPassword2 = document.getElementById('recoveryNewPassword2').value;
+      statusEl.className = 'status';
+
+      if(!recoveryPhrase){ showError('Enter your recovery phrase.'); return; }
+      if(!newPassword || newPassword.length < 6){ showError('New password must be at least 6 characters.'); return; }
+      if(newPassword !== newPassword2){ showError('New passwords do not match.'); return; }
+
+      btn.disabled = true;
+      btn.textContent = 'Resetting…';
+      fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'forgotPassword', recoveryPhrase: recoveryPhrase, newPassword: newPassword })
+      })
+        .then(function(r){ return r.json().then(function(data){ return { status: r.status, data: data }; }); })
+        .then(function(res){
+          btn.disabled = false;
+          btn.textContent = 'Reset Password';
+          if(res.data && res.data.ok){
+            afterAuthSuccess(res.data.token);
+          }else{
+            showError((res.data && res.data.error) || 'Could not reset password.');
+          }
+        })
+        .catch(function(){
+          btn.disabled = false;
+          btn.textContent = 'Reset Password';
+          showError('Something went wrong. Please try again.');
+        });
+    });
+
     // Allow Enter key to submit whichever form is visible.
     document.addEventListener('keydown', function(e){
       if(e.key !== 'Enter') return;
       if(setupForm.style.display !== 'none'){
         document.getElementById('setupBtn').click();
+      }else if(recoveryForm.style.display !== 'none'){
+        document.getElementById('recoveryBtn').click();
       }else{
         document.getElementById('loginBtn').click();
       }

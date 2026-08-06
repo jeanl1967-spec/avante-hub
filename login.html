@@ -119,6 +119,13 @@
     border:1px solid #f0c8c2;
   }
   .status.show{ display:block; }
+  .status.ok{ background:var(--mint); color:var(--teal-dark); border-color:#bfe6e2; }
+
+  .forgot-link{
+    display:block; text-align:center; margin-top:14px; font-size:12px;
+    color:var(--teal-dark); text-decoration:none; font-weight:600;
+  }
+  .forgot-link:hover{ text-decoration:underline; }
 
   @media (max-width: 480px){
     header.hub-header{ padding:14px 16px; }
@@ -150,6 +157,7 @@
 
       <button class="cta" id="loginBtn">Log In</button>
       <div class="status" id="statusMsg"></div>
+      <a href="#" class="forgot-link" id="forgotLink">Forgot your password?</a>
     </div>
   </main>
 
@@ -163,8 +171,13 @@
     if(affPrefill) affInput.value = affPrefill;
 
     function showError(msg){
+      statusMsg.classList.remove('ok');
       statusMsg.textContent = msg;
       statusMsg.classList.add('show');
+    }
+    function showSuccess(msg){
+      statusMsg.textContent = msg;
+      statusMsg.classList.add('show', 'ok');
     }
 
     function doLogin(){
@@ -210,6 +223,41 @@
     loginBtn.addEventListener('click', doLogin);
     passInput.addEventListener('keydown', function(e){ if(e.key === 'Enter') doLogin(); });
     affInput.addEventListener('keydown', function(e){ if(e.key === 'Enter') passInput.focus(); });
+
+    // ---------- Forgot password ----------
+    // No email system exists in this app, so this simply resets the
+    // affiliate's account back to the default password (1234) — the same
+    // one every affiliate starts with before they set their own.
+    document.getElementById('forgotLink').addEventListener('click', function(e){
+      e.preventDefault();
+      var aff = affInput.value.trim();
+      statusMsg.classList.remove('show', 'ok');
+
+      if(!aff){
+        showError('Enter your affiliate number above first, then click "Forgot your password?" again.');
+        affInput.focus();
+        return;
+      }
+      if(!window.confirm('Reset the password for affiliate ' + aff + ' back to the default (1234)?')) return;
+
+      fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'reset', aff: aff })
+      })
+        .then(function(r){ return r.json(); })
+        .then(function(data){
+          if(data && data.ok){
+            passInput.value = '1234';
+            showSuccess('Password reset to 1234 — click Log In, then change it once you\'re inside the Hub.');
+          }else{
+            showError((data && data.error) || 'Could not reset password. Please try again.');
+          }
+        })
+        .catch(function(){
+          showError('Something went wrong. Please try again.');
+        });
+    });
   </script>
 
 </body>

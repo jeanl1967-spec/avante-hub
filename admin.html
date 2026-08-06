@@ -294,6 +294,9 @@
       <input id="pwNew" type="password" autocomplete="new-password">
       <label for="pwNew2">Confirm new password</label>
       <input id="pwNew2" type="password" autocomplete="new-password">
+      <label for="pwRecovery">Recovery phrase (optional)</label>
+      <input id="pwRecovery" type="text" placeholder="e.g. a memorable phrase only you'd know" autocomplete="off">
+      <p class="modal-sub" style="margin:4px 0 0;">Lets you reset your password later if you forget it, without needing your old one. Leave blank to keep your current recovery phrase unchanged.</p>
       <div class="modal-status" id="pwStatus"></div>
       <div class="modal-actions">
         <button type="button" class="modal-btn-secondary" id="pwCancelBtn">Cancel</button>
@@ -596,10 +599,11 @@
       var oldInput = document.getElementById('pwOld');
       var newInput = document.getElementById('pwNew');
       var new2Input = document.getElementById('pwNew2');
+      var recoveryInput = document.getElementById('pwRecovery');
       var statusEl = document.getElementById('pwStatus');
 
       function openModal(){
-        oldInput.value = ''; newInput.value = ''; new2Input.value = '';
+        oldInput.value = ''; newInput.value = ''; new2Input.value = ''; recoveryInput.value = '';
         statusEl.classList.remove('show');
         overlay.classList.add('show');
         oldInput.focus();
@@ -615,6 +619,7 @@
         var oldPw = oldInput.value;
         var newPw = newInput.value;
         var newPw2 = new2Input.value;
+        var recoveryPhrase = recoveryInput.value.trim();
         statusEl.classList.remove('show');
 
         if(!oldPw){ showModalError('Enter your current password.'); return; }
@@ -623,7 +628,7 @@
 
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving…';
-        adminPost('changePassword', { oldPassword: oldPw, newPassword: newPw })
+        adminPost('changePassword', { oldPassword: oldPw, newPassword: newPw, recoveryPhrase: recoveryPhrase })
           .then(function(res){
             saveBtn.disabled = false;
             saveBtn.textContent = 'Save Password';
