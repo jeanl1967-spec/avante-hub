@@ -138,6 +138,55 @@ export default async (request, context) => {
       return json({ ok: true, token: token }, 200, cors);
     }
 
+    if (action === "forgotPassword") {
+      // No email system exists in this app, so recovery relies on a
+      // recovery phrase the admin sets themselves (via Change Password)
+      // ahead of time. If none was ever set, there's no automated way
+      // back in — only someone with access to the Netlify dashboard can
+      // clear the "admin" key in the admin-auth Blobs store, which brings
+      // back the one-time account setup screen.
+      const record = await authStore.get("admin", { type: "json" });
+      if (!record) {
+        return json({ ok: false, error: "No admin account exists yet." }, 404, cors);
+      }
+      if (!record.recoveryPhraseHash) {
+        return json(
+          {
+            ok: false,
+            error:
+              "No recovery phrase has been set for this account, so automatic recovery isn't available. Only someone with access to the Netlify dashboard can reset it manually (Blobs → admin-auth → delete the \"admin\" key), which brings back the account setup screen.",
+          },
+          400,
+          cors
+        );
+      }
+      const recoveryPhrase = typeof body.recoveryPhrase === "string" ? body.recoveryPhrase.trim().toLowerCase() : "";
+      const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
+      if (!recoveryPhrase) return json({ ok: false, error: "Enter your recovery phrase." }, 400, cors);
+
+      const phraseHash = await sha256Hex(recoveryPhrase);
+      if (phraseHash !== record.recoveryPhraseHash) {
+        return json({ ok: false, error: "That recovery phrase doesn't match." }, 401, cors);
+      }
+      if (!newPassword || newPassword.length < 6) {
+        return json({ ok: false, error: "New password must be at least 6 characters." }, 400, cors);
+      }
+
+      const newHash = await sha256Hex(newPassword);
+      await authStore.setJSON("admin", {
+        passwordHash: newHash,
+        recoveryPhraseHash: record.recoveryPhraseHash,
+        updatedAt: new Date().toISOString(),
+      });
+
+      const token = randomToken();
+      await sessionStore.setJSON(token, {
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString(),
+      });
+      return json({ ok: true, token: token }, 200, cors);
+    }
+
     // Every other action requires a valid session token.
     const authed = await verifyToken(body.token);
     if (!authed) return json({ ok: false, error: "Not authenticated." }, 401, cors);
@@ -150,6 +199,7 @@ export default async (request, context) => {
     if (action === "changePassword") {
       const oldPassword = typeof body.oldPassword === "string" ? body.oldPassword : "";
       const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
+      const recoveryPhrase = typeof body.recoveryPhrase === "string" ? body.recoveryPhrase.trim() : "";
       if (!newPassword || newPassword.length < 6) {
         return json({ ok: false, error: "New password must be at least 6 characters." }, 400, cors);
       }
@@ -160,7 +210,13 @@ export default async (request, context) => {
         return json({ ok: false, error: "Current password is incorrect." }, 401, cors);
       }
       const newHash = await sha256Hex(newPassword);
-      await authStore.setJSON("admin", { passwordHash: newHash, updatedAt: new Date().toISOString() });
+      const updated = { passwordHash: newHash, updatedAt: new Date().toISOString() };
+      if (recoveryPhrase) {
+        updated.recoveryPhraseHash = await sha256Hex(recoveryPhrase.toLowerCase());
+      } else if (record && record.recoveryPhraseHash) {
+        updated.recoveryPhraseHash = record.recoveryPhraseHash;
+      }
+      await authStore.setJSON("admin", updated);
       return json({ ok: true }, 200, cors);
     }
 
