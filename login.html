@@ -152,8 +152,8 @@
       <div class="hint">This is the same ID that's in your personal StockNetwork booking link.</div>
 
       <label for="passInput">Password</label>
-      <input id="passInput" type="password" placeholder="Default: 1234" autocomplete="current-password">
-      <div class="hint">New here? Your default password is <strong>1234</strong> — you can change it once you're logged in.</div>
+      <input id="passInput" type="password" placeholder="Default: 0000" autocomplete="current-password">
+      <div class="hint">New here? Your default password is <strong>0000</strong> — you can change it once you're logged in.</div>
 
       <button class="cta" id="loginBtn">Log In</button>
       <div class="status" id="statusMsg"></div>
@@ -226,7 +226,7 @@
 
     // ---------- Forgot password ----------
     // No email system exists in this app, so this simply resets the
-    // affiliate's account back to the default password (1234) — the same
+    // affiliate's account back to the default password (0000) — the same
     // one every affiliate starts with before they set their own.
     document.getElementById('forgotLink').addEventListener('click', function(e){
       e.preventDefault();
@@ -238,7 +238,7 @@
         affInput.focus();
         return;
       }
-      if(!window.confirm('Reset the password for affiliate ' + aff + ' back to the default (1234)?')) return;
+      if(!window.confirm('Reset the password for affiliate ' + aff + ' back to the default (0000)?')) return;
 
       fetch('/api/auth', {
         method: 'POST',
@@ -248,8 +248,8 @@
         .then(function(r){ return r.json(); })
         .then(function(data){
           if(data && data.ok){
-            passInput.value = '1234';
-            showSuccess('Password reset to 1234 — click Log In, then change it once you\'re inside the Hub.');
+            passInput.value = '0000';
+            showSuccess('Password reset to 0000 — click Log In, then change it once you\'re inside the Hub.');
           }else{
             showError((data && data.error) || 'Could not reset password. Please try again.');
           }

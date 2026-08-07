@@ -102,6 +102,15 @@
   .modal-btn-primary:disabled{ background:#bcd9d6; cursor:not-allowed; }
   .modal-btn-secondary{ background:var(--mint); color:var(--navy); border-color:var(--line); }
 
+  .detail-section{ margin-top:16px; }
+  .detail-section:first-child{ margin-top:0; }
+  .detail-section h3{ margin:0 0 8px; font-size:12.5px; color:var(--navy); text-transform:uppercase; letter-spacing:0.05em; }
+  .detail-row{ margin-bottom:8px; }
+  .detail-row:last-child{ margin-bottom:0; }
+  .detail-label{ font-size:10.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--teal-dark); font-weight:700; margin-bottom:2px; }
+  .detail-value{ font-size:13px; color:var(--navy); word-break:break-all; line-height:1.5; }
+  .detail-divider{ border:none; border-top:1px solid var(--line); margin:16px 0; }
+
   header.hub-header{
     display:flex;
     align-items:center;
@@ -361,6 +370,18 @@
     </div>
   </div>
 
+  <div class="modal-overlay" id="detailsModalOverlay">
+    <div class="modal-card" style="max-width:520px;">
+      <h2 id="detailsModalTitle">Affiliate Details</h2>
+      <p class="modal-sub">Everything about this affiliate in one place — credentials, links, revenue share, and banking.</p>
+      <div id="detailsModalBody"></div>
+      <div class="modal-actions">
+        <button type="button" class="modal-btn-secondary" id="detailsCloseBtn">Close</button>
+        <button type="button" class="modal-btn-primary" id="detailsCopyBtn">Copy All</button>
+      </div>
+    </div>
+  </div>
+
   <header class="hub-header">
     <div class="brand">AVANTE<span>TRAVEL &middot; ADMIN</span></div>
     <nav class="tabs" id="tabs">
@@ -594,6 +615,9 @@
     // Same base used throughout the Hub/landing page for an affiliate's
     // personal StockNetwork accommodation booking link.
     var STOCKNETWORK_BASE = 'https://stock.stocknetwork.co.za/ui/';
+    // Same Impact.com/Travelstart tracking link used in hub.html/landing.html,
+    // with each affiliate's ID appended as a Sub ID.
+    var FLIGHT_BASE_URL = 'https://travelstart.zwjlk6.net/LPVYJM';
 
     // Shortens a link via the existing go.avantetravel.co.za shortener,
     // tagged to this affiliate. Falls back to the long URL if the shorten
@@ -667,6 +691,12 @@
     function money(n){
       n = Number(n) || 0;
       return 'R' + n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function escapeHtml(s){
+      var d = document.createElement('div');
+      d.textContent = (s === undefined || s === null) ? '' : String(s);
+      return d.innerHTML;
     }
 
     // ---------- Per-channel revenue share helpers ----------
@@ -952,7 +982,7 @@
               'Your personal Hub link:\n' + hubLink + '\n\n' +
               'Log in with:\n' +
               'Username (affiliate number): ' + a.affId + '\n' +
-              'Password: 1234 (default — you can change it once you\'re logged in, under "Change Password" in the top right)\n\n' +
+              'Password: 0000 (default — you can change it once you\'re logged in, under "Change Password" in the top right)\n\n' +
               'Your booking link:\n' + bookingLink + '\n' +
               'Short link: ' + bookingShort + '\n\n' +
               'Your affiliate storefront — share this one link with your clients:\n' + storefrontLink + '\n' +
@@ -967,23 +997,10 @@
           });
         });
 
-        var bankBtn = document.createElement('button');
-        bankBtn.className = 'btn-outline btn-small';
-        bankBtn.textContent = 'Bank Details';
-        bankBtn.addEventListener('click', function(){
-          var bank = a.bank || {};
-          if(!bank.accountNumber && !bank.accountHolder && !bank.bankName){
-            showToast('No bank details saved for this affiliate yet — add them under Edit.');
-            return;
-          }
-          var msg = (a.name || a.affId) + ' — banking details\n\n' +
-            'Bank: ' + (bank.bankName || '—') + '\n' +
-            'Account holder: ' + (bank.accountHolder || '—') + '\n' +
-            'Account number: ' + (bank.accountNumber || '—') + '\n' +
-            'Branch code: ' + (bank.branchCode || '—') + '\n' +
-            'Account type: ' + (bank.accountType || '—');
-          copyToClipboard(msg, 'Bank details copied');
-        });
+        var detailsBtn = document.createElement('button');
+        detailsBtn.className = 'btn-outline btn-small';
+        detailsBtn.textContent = 'Details';
+        detailsBtn.addEventListener('click', function(){ openDetailsModal(a); });
 
         var editBtn = document.createElement('button');
         editBtn.className = 'btn-secondary btn-small';
@@ -1007,7 +1024,7 @@
 
         actionsWrap.appendChild(payoutsBtn);
         actionsWrap.appendChild(welcomeBtn);
-        actionsWrap.appendChild(bankBtn);
+        actionsWrap.appendChild(detailsBtn);
         actionsWrap.appendChild(editBtn);
         actionsWrap.appendChild(deleteBtn);
         tdActions.appendChild(actionsWrap);
@@ -1165,6 +1182,98 @@
         btn.disabled = false;
         btn.textContent = 'Save Affiliate';
       });
+    });
+
+    // ---------- Affiliate Details modal (admin's full view of everything) ----------
+    var detailsOverlay = document.getElementById('detailsModalOverlay');
+    var currentDetailsText = '';
+
+    function detailRow(label, value){
+      return '<div class="detail-row"><div class="detail-label">' + escapeHtml(label) + '</div><div class="detail-value">' + escapeHtml(value) + '</div></div>';
+    }
+
+    function openDetailsModal(a){
+      document.getElementById('detailsModalTitle').textContent = (a.name || a.affId) + ' — Details';
+      var body = document.getElementById('detailsModalBody');
+      body.innerHTML = '<p class="hint">Generating short links…</p>';
+      currentDetailsText = '';
+      detailsOverlay.classList.add('show');
+
+      var hubLink = window.location.origin + '/hub.html?aff=' + encodeURIComponent(a.affId);
+      var bookingLink = STOCKNETWORK_BASE + encodeURIComponent(a.affId);
+      var storefrontLink = window.location.origin + '/landing.html?aff=' + encodeURIComponent(a.affId);
+      var flightLink = FLIGHT_BASE_URL + (FLIGHT_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(a.affId);
+
+      Promise.all([
+        shortenLink(bookingLink, a.affId),
+        shortenLink(storefrontLink, a.affId),
+        shortenLink(flightLink, a.affId)
+      ]).then(function(shortened){
+        var bookingShort = shortened[0];
+        var storefrontShort = shortened[1];
+        var flightShort = shortened[2];
+        var bank = a.bank || {};
+        var hasBank = !!(bank.bankName || bank.accountHolder || bank.accountNumber);
+        var outstanding = (a.totalOwed || 0) - (a.totalPaid || 0);
+
+        var html = '';
+        html += '<div class="detail-section"><h3>Login credentials</h3>' +
+          detailRow('Username (affiliate number)', a.affId) +
+          detailRow('Password', '0000 (default — affiliate can change this once logged in)') +
+          '</div>';
+        html += '<hr class="detail-divider">';
+        html += '<div class="detail-section"><h3>Links</h3>' +
+          detailRow('Hub link', hubLink) +
+          detailRow('Booking link', bookingLink) +
+          detailRow('Booking link (short)', bookingShort) +
+          detailRow('Storefront link', storefrontLink) +
+          detailRow('Storefront link (short)', storefrontShort) +
+          detailRow('Flight link', flightLink) +
+          detailRow('Flight link (short)', flightShort) +
+          '</div>';
+        html += '<hr class="detail-divider">';
+        html += '<div class="detail-section"><h3>Revenue share by channel</h3>' +
+          detailRow('Rates', formatShareSummary(a.revenueShare)) +
+          '</div>';
+        html += '<hr class="detail-divider">';
+        html += '<div class="detail-section"><h3>Totals</h3>' +
+          detailRow('Total revenue logged', money(a.totalRevenue || 0)) +
+          detailRow('Total paid out', money(a.totalPaid || 0)) +
+          detailRow('Outstanding', money(outstanding)) +
+          '</div>';
+        html += '<hr class="detail-divider">';
+        html += '<div class="detail-section"><h3>Bank account</h3>' +
+          (hasBank
+            ? detailRow('Bank', bank.bankName || '—') + detailRow('Account holder', bank.accountHolder || '—') +
+              detailRow('Account number', bank.accountNumber || '—') + detailRow('Branch code', bank.branchCode || '—') +
+              detailRow('Account type', bank.accountType || '—')
+            : '<p class="hint">No bank details saved yet — add them under Edit.</p>') +
+          '</div>';
+
+        body.innerHTML = html;
+
+        currentDetailsText = (a.name || a.affId) + ' — full details\n\n' +
+          'LOGIN\nUsername: ' + a.affId + '\nPassword: 0000 (default)\n\n' +
+          'LINKS\nHub: ' + hubLink + '\nBooking: ' + bookingLink + '\nBooking (short): ' + bookingShort +
+          '\nStorefront: ' + storefrontLink + '\nStorefront (short): ' + storefrontShort +
+          '\nFlight: ' + flightLink + '\nFlight (short): ' + flightShort + '\n\n' +
+          'REVENUE SHARE\n' + formatShareSummary(a.revenueShare) + '\n\n' +
+          'TOTALS\nRevenue: ' + money(a.totalRevenue || 0) + '\nPaid: ' + money(a.totalPaid || 0) + '\nOutstanding: ' + money(outstanding) + '\n\n' +
+          'BANK\n' + (hasBank
+            ? ('Bank: ' + (bank.bankName || '—') + '\nAccount holder: ' + (bank.accountHolder || '—') +
+               '\nAccount number: ' + (bank.accountNumber || '—') + '\nBranch code: ' + (bank.branchCode || '—') +
+               '\nAccount type: ' + (bank.accountType || '—'))
+            : 'Not set');
+      }).catch(function(){
+        body.innerHTML = '<p class="hint">Something went wrong loading this affiliate\'s details. Please try again.</p>';
+      });
+    }
+
+    document.getElementById('detailsCloseBtn').addEventListener('click', function(){ detailsOverlay.classList.remove('show'); });
+    detailsOverlay.addEventListener('click', function(e){ if(e.target === detailsOverlay) detailsOverlay.classList.remove('show'); });
+    document.getElementById('detailsCopyBtn').addEventListener('click', function(){
+      if(!currentDetailsText){ showToast('Still preparing — try again in a moment.'); return; }
+      copyToClipboard(currentDetailsText, 'Details copied');
     });
 
     // ---------- Payouts ----------
