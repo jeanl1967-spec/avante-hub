@@ -10,25 +10,39 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 // their Hub header (hub.html), since each one is tracked/paid separately.
 const CHANNEL_KEYS = ["accommodation", "flights", "activities", "car", "package"];
 
+// Each channel's share can be a percentage of revenue, or a flat Rand
+// amount (e.g. R200 per booking logged), regardless of the revenue figure.
+function sanitizeChannelShare(raw, fallbackPct) {
+  if (raw && typeof raw === "object") {
+    const type = raw.type === "amount" ? "amount" : "percent";
+    let value = Number(raw.value);
+    if (!isFinite(value) || value < 0) value = 0;
+    if (type === "percent" && value > 100) value = 100;
+    return { type: type, value: value };
+  }
+  // Legacy: a plain number meant a flat percentage.
+  let v = Number(raw);
+  if (!isFinite(v)) v = isFinite(fallbackPct) ? Number(fallbackPct) : 0;
+  v = Math.max(0, Math.min(100, v));
+  return { type: "percent", value: v };
+}
+
 function sanitizeRevenueShare(input, fallbackPct) {
   const out = {};
-  const fallback = isFinite(fallbackPct) ? Math.max(0, Math.min(100, Number(fallbackPct))) : 0;
   for (const key of CHANNEL_KEYS) {
-    let v = input && typeof input === "object" ? Number(input[key]) : NaN;
-    if (!isFinite(v)) v = fallback; // legacy affiliates: apply their old flat rate to every channel
-    out[key] = Math.max(0, Math.min(100, v));
+    const raw = input && typeof input === "object" ? input[key] : undefined;
+    out[key] = sanitizeChannelShare(raw, fallbackPct);
   }
   return out;
 }
 
 // Legacy records saved before per-channel shares existed only have a flat
-// revenueSharePct. This fills in a revenueShare object for them on the fly
-// (read-only, not persisted) so the UI never sees a blank/broken affiliate.
+// revenueSharePct (or an older revenueShare object of plain numbers). This
+// upgrades them to the current { type, value } shape on the fly (read-only,
+// not persisted) so the UI never sees a blank/broken affiliate.
 function withRevenueShare(record) {
   if (!record) return record;
-  if (!record.revenueShare || typeof record.revenueShare !== "object") {
-    record.revenueShare = sanitizeRevenueShare(null, record.revenueSharePct);
-  }
+  record.revenueShare = sanitizeRevenueShare(record.revenueShare, record.revenueSharePct);
   return record;
 }
 
@@ -315,8 +329,11 @@ export default async (request, context) => {
       if (!affiliate) return json({ ok: false, error: "Unknown affiliate — add them first." }, 404, cors);
       affiliate = withRevenueShare(affiliate);
 
-      const sharePct = (affiliate.revenueShare && affiliate.revenueShare[channel]) || 0;
-      const owed = Math.round(revenue * (sharePct / 100) * 100) / 100;
+      const channelShare = (affiliate.revenueShare && affiliate.revenueShare[channel]) || { type: "percent", value: 0 };
+      const owed =
+        channelShare.type === "amount"
+          ? Math.round(channelShare.value * 100) / 100
+          : Math.round(revenue * (channelShare.value / 100) * 100) / 100;
 
       const entries = (await payoutStore.get(affId, { type: "json" })) || [];
       const entry = {
@@ -324,7 +341,9 @@ export default async (request, context) => {
         period: period,
         channel: channel,
         revenue: revenue,
-        sharePct: sharePct,
+        shareType: channelShare.type,
+        shareValue: channelShare.value,
+        sharePct: channelShare.type === "percent" ? channelShare.value : null, // kept for older UI/reporting
         owed: owed,
         note: note,
         paid: false,
