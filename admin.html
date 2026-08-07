@@ -953,8 +953,10 @@
               'Log in with:\n' +
               'Username (affiliate number): ' + a.affId + '\n' +
               'Password: 1234 (default — you can change it once you\'re logged in, under "Change Password" in the top right)\n\n' +
-              'Your booking link:\n' + bookingShort + '\n\n' +
-              'Your affiliate storefront — share this one link with your clients:\n' + storefrontShort + '\n\n' +
+              'Your booking link:\n' + bookingLink + '\n' +
+              'Short link: ' + bookingShort + '\n\n' +
+              'Your affiliate storefront — share this one link with your clients:\n' + storefrontLink + '\n' +
+              'Short link: ' + storefrontShort + '\n\n' +
               'Once inside you\'ll find your booking links, flight link, and marketing tools all in one place.';
             copyToClipboard(msg, 'Welcome message copied — paste it into an email');
           }).catch(function(){
