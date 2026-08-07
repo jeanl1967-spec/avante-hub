@@ -727,6 +727,7 @@
           <div class="btn-row">
             <button class="btn-secondary" id="storefrontCopyBtn">Copy</button>
             <button class="btn-outline" id="storefrontOpenBtn">Open</button>
+            <button class="btn-outline" id="storefrontHomeBtn">Home</button>
           </div>
         </div>
         <div class="hint" style="margin-top:10px;">This page shows every active hook below in one place, plus quick links to browse other categories. It updates automatically whenever you save a hook.</div>
@@ -1091,6 +1092,33 @@
       });
       document.getElementById('storefrontOpenBtn').addEventListener('click', function(){
         window.open(urlStr, '_blank', 'noopener');
+      });
+
+      // "Home" opens the branded go.avantetravel.co.za short link for this
+      // affiliate's storefront (generating one on the fly if it doesn't
+      // exist yet), rather than the long landing.html?aff=... URL.
+      document.getElementById('storefrontHomeBtn').addEventListener('click', function(){
+        var btn = this;
+        var original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Opening…';
+        fetch('/api/shorten', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ url: urlStr, aff: AFF_ID })
+        })
+          .then(function(r){ return r.json(); })
+          .then(function(data){
+            btn.disabled = false;
+            btn.textContent = original;
+            var target = (data && data.ok && data.shortUrl) ? data.shortUrl : urlStr;
+            window.open(target, '_blank', 'noopener');
+          })
+          .catch(function(){
+            btn.disabled = false;
+            btn.textContent = original;
+            window.open(urlStr, '_blank', 'noopener');
+          });
       });
     })();
 
