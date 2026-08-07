@@ -46,6 +46,19 @@ function withRevenueShare(record) {
   return record;
 }
 
+// Revenue logged per channel, kept separately from totalRevenue so the
+// Leaderboard can rank affiliates within a single channel, not just overall.
+function withChannelRevenue(record) {
+  if (!record) return record;
+  const out = {};
+  for (const key of CHANNEL_KEYS) {
+    const v = record.channelRevenue && Number(record.channelRevenue[key]);
+    out[key] = isFinite(v) && v > 0 ? v : 0;
+  }
+  record.channelRevenue = out;
+  return record;
+}
+
 function sanitizeBankDetails(input) {
   const src = input && typeof input === "object" ? input : {};
   const clean = (v) => (typeof v === "string" ? v.trim().slice(0, 200) : "");
@@ -122,7 +135,7 @@ export default async (request, context) => {
         const list = [];
         for (const b of blobs) {
           const rec = await directoryStore.get(b.key, { type: "json" });
-          if (rec) list.push(withRevenueShare(rec));
+          if (rec) list.push(withChannelRevenue(withRevenueShare(rec)));
         }
         list.sort(function (a, b) {
           return (a.name || a.affId).localeCompare(b.name || b.affId);
@@ -295,6 +308,7 @@ export default async (request, context) => {
         totalRevenue: (existing && existing.totalRevenue) || 0,
         totalOwed: (existing && existing.totalOwed) || 0,
         totalPaid: (existing && existing.totalPaid) || 0,
+        channelRevenue: (existing && existing.channelRevenue) || {},
         createdAt: (existing && existing.createdAt) || new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
@@ -327,7 +341,7 @@ export default async (request, context) => {
 
       let affiliate = await directoryStore.get(affId, { type: "json" });
       if (!affiliate) return json({ ok: false, error: "Unknown affiliate — add them first." }, 404, cors);
-      affiliate = withRevenueShare(affiliate);
+      affiliate = withChannelRevenue(withRevenueShare(affiliate));
 
       const channelShare = (affiliate.revenueShare && affiliate.revenueShare[channel]) || { type: "percent", value: 0 };
       const owed =
@@ -355,6 +369,7 @@ export default async (request, context) => {
 
       affiliate.totalRevenue = (affiliate.totalRevenue || 0) + revenue;
       affiliate.totalOwed = (affiliate.totalOwed || 0) + owed;
+      affiliate.channelRevenue[channel] = (affiliate.channelRevenue[channel] || 0) + revenue;
       affiliate.updatedAt = new Date().toISOString();
       await directoryStore.setJSON(affId, affiliate);
 
@@ -403,11 +418,15 @@ export default async (request, context) => {
       const removed = entries.splice(idx, 1)[0];
       await payoutStore.setJSON(affId, entries);
 
-      const affiliate = await directoryStore.get(affId, { type: "json" });
+      let affiliate = await directoryStore.get(affId, { type: "json" });
       if (affiliate) {
+        affiliate = withChannelRevenue(affiliate);
         affiliate.totalRevenue = Math.max(0, (affiliate.totalRevenue || 0) - removed.revenue);
         affiliate.totalOwed = Math.max(0, (affiliate.totalOwed || 0) - removed.owed);
         if (removed.paid) affiliate.totalPaid = Math.max(0, (affiliate.totalPaid || 0) - removed.owed);
+        if (removed.channel && CHANNEL_KEYS.includes(removed.channel)) {
+          affiliate.channelRevenue[removed.channel] = Math.max(0, (affiliate.channelRevenue[removed.channel] || 0) - removed.revenue);
+        }
         affiliate.updatedAt = new Date().toISOString();
         await directoryStore.setJSON(affId, affiliate);
       }
