@@ -315,8 +315,8 @@
       <input id="affNameInput" placeholder="e.g. Jane Smith">
       <label for="affEmailInput">Email (optional)</label>
       <input id="affEmailInput" placeholder="e.g. jane@example.com">
-      <label>Revenue share (%) — by channel</label>
-      <p class="modal-sub" style="margin:-2px 0 8px;">Each revenue channel matches a tab in this affiliate's Hub — set what they earn on each one. Leave any at 0 if they don't get a cut of that channel.</p>
+      <label>Revenue share — by channel</label>
+      <p class="modal-sub" style="margin:-2px 0 8px;">Each channel matches a tab in this affiliate's Hub. For each one, choose <strong>%</strong> for a percentage of revenue, or <strong>R flat</strong> for a fixed Rand amount paid per entry regardless of revenue. Leave at 0 if they don't get a cut of that channel.</p>
       <div class="row" id="affShareFields" style="flex-wrap:wrap; gap:10px 12px;"></div>
       <label for="affStatusInput">Status</label>
       <select id="affStatusInput">
@@ -498,7 +498,7 @@
         <div class="num">1</div>
         <div>
           <h3>Add the affiliate here first</h3>
-          <p>On the <strong>Affiliates</strong> tab, add each affiliate with their exact Hub affiliate ID (the same ID that's in their personal Hub link and their flight/booking links) and set their revenue share percentage <strong>for each channel</strong> — Accommodation, Flights, Activities, Car Hire, and Packages. These match the tabs in their own Hub, and you can pay a different rate for each one (or leave a channel at 0% if they don't earn on it).</p>
+          <p>On the <strong>Affiliates</strong> tab, add each affiliate with their exact Hub affiliate ID (the same ID that's in their personal Hub link and their flight/booking links) and set what they earn <strong>for each channel</strong> — Accommodation, Flights, Activities, Car Hire, and Packages. These match the tabs in their own Hub. For each channel choose either a <strong>%</strong> of the revenue you log, or a fixed <strong>R flat</strong> amount paid every time you log an entry for that channel — whichever suits how you pay that affiliate.</p>
         </div>
       </div>
 
@@ -617,49 +617,91 @@
     }
 
     // ---------- Per-channel revenue share helpers ----------
+    // Each channel's share is either a percentage of revenue, or a flat
+    // Rand amount (paid regardless of how much revenue was logged).
+    function normalizeChannelShare(raw, legacyPct){
+      if(raw && typeof raw === 'object'){
+        var type = raw.type === 'amount' ? 'amount' : 'percent';
+        var value = Number(raw.value);
+        if(!isFinite(value) || value < 0) value = 0;
+        if(type === 'percent' && value > 100) value = 100;
+        return { type: type, value: value };
+      }
+      // Legacy: a plain number meant a flat percentage.
+      var v = Number(raw);
+      if(!isFinite(v)) v = (legacyPct !== undefined && legacyPct !== null) ? Number(legacyPct) || 0 : 0;
+      v = Math.max(0, Math.min(100, v));
+      return { type: 'percent', value: v };
+    }
+
     function normalizeRevenueShare(revenueShare, legacyPct){
       var out = {};
       CHANNELS.forEach(function(c){
-        var v = revenueShare && revenueShare[c.key];
-        if(v === undefined || v === null || v === '' || isNaN(Number(v))){
-          v = (legacyPct !== undefined && legacyPct !== null) ? legacyPct : 0;
-        }
-        out[c.key] = Number(v) || 0;
+        out[c.key] = normalizeChannelShare(revenueShare && revenueShare[c.key], legacyPct);
       });
       return out;
     }
 
-    function formatShareSummary(revenueShare){
-      var share = normalizeRevenueShare(revenueShare);
-      var active = CHANNELS.filter(function(c){ return share[c.key] > 0; });
-      if(!active.length) return '—';
-      return active.map(function(c){ return c.label + ' ' + share[c.key] + '%'; }).join(' · ');
+    function formatChannelShare(share){
+      return share.type === 'amount' ? money(share.value) + ' flat' : share.value + '%';
     }
 
-    // Builds the 5 per-channel number inputs inside the Add/Edit Affiliate
-    // modal. Called once per modal open so it always reflects the current
-    // CHANNELS list.
+    function formatShareSummary(revenueShare){
+      var share = normalizeRevenueShare(revenueShare);
+      var active = CHANNELS.filter(function(c){ return share[c.key].value > 0; });
+      if(!active.length) return '—';
+      return active.map(function(c){ return c.label + ' ' + formatChannelShare(share[c.key]); }).join(' · ');
+    }
+
+    // Builds the 5 per-channel share controls (type + value) inside the
+    // Add/Edit Affiliate modal. Called once per modal open so it always
+    // reflects the current CHANNELS list.
     function buildAffShareFields(revenueShare){
       var share = normalizeRevenueShare(revenueShare);
       var wrap = document.getElementById('affShareFields');
       wrap.innerHTML = '';
       CHANNELS.forEach(function(c){
         var div = document.createElement('div');
-        div.style.minWidth = '150px';
+        div.style.minWidth = '220px';
         var label = document.createElement('label');
-        label.setAttribute('for', 'affShare_' + c.key);
+        label.setAttribute('for', 'affShareValue_' + c.key);
         label.style.margin = '0 0 5px';
         label.textContent = c.label;
-        var input = document.createElement('input');
-        input.type = 'number';
-        input.min = '0';
-        input.max = '100';
-        input.step = '0.5';
-        input.id = 'affShare_' + c.key;
-        input.placeholder = '0';
-        input.value = share[c.key] || '';
         div.appendChild(label);
-        div.appendChild(input);
+
+        var inner = document.createElement('div');
+        inner.style.display = 'flex';
+        inner.style.gap = '6px';
+
+        var typeSelect = document.createElement('select');
+        typeSelect.id = 'affShareType_' + c.key;
+        typeSelect.style.flex = '0 0 auto';
+        typeSelect.style.width = '92px';
+        var optPct = document.createElement('option');
+        optPct.value = 'percent'; optPct.textContent = '%';
+        var optAmt = document.createElement('option');
+        optAmt.value = 'amount'; optAmt.textContent = 'R flat';
+        typeSelect.appendChild(optPct);
+        typeSelect.appendChild(optAmt);
+        typeSelect.value = share[c.key].type;
+
+        var valueInput = document.createElement('input');
+        valueInput.type = 'number';
+        valueInput.min = '0';
+        valueInput.step = '0.5';
+        valueInput.id = 'affShareValue_' + c.key;
+        valueInput.placeholder = '0';
+        valueInput.value = share[c.key].value || '';
+        valueInput.style.flex = '1';
+
+        // Percent inputs get a 0–100 cap; flat-amount inputs don't.
+        function applyMax(){ if(typeSelect.value === 'percent') valueInput.max = '100'; else valueInput.removeAttribute('max'); }
+        applyMax();
+        typeSelect.addEventListener('change', applyMax);
+
+        inner.appendChild(typeSelect);
+        inner.appendChild(valueInput);
+        div.appendChild(inner);
         wrap.appendChild(div);
       });
     }
@@ -667,11 +709,13 @@
     function readAffShareFields(){
       var out = {};
       CHANNELS.forEach(function(c){
-        var el = document.getElementById('affShare_' + c.key);
-        var v = el ? Number(el.value) : 0;
+        var typeEl = document.getElementById('affShareType_' + c.key);
+        var valueEl = document.getElementById('affShareValue_' + c.key);
+        var type = (typeEl && typeEl.value === 'amount') ? 'amount' : 'percent';
+        var v = valueEl ? Number(valueEl.value) : 0;
         if(!isFinite(v) || v < 0) v = 0;
-        if(v > 100) v = 100;
-        out[c.key] = v;
+        if(type === 'percent' && v > 100) v = 100;
+        out[c.key] = { type: type, value: v };
       });
       return out;
     }
@@ -1059,8 +1103,8 @@
       CHANNELS.forEach(function(c){
         var opt = document.createElement('option');
         opt.value = c.key;
-        var pct = a ? normalizeRevenueShare(a.revenueShare)[c.key] : 0;
-        opt.textContent = c.label + ' (' + pct + '%)';
+        var share = a ? normalizeRevenueShare(a.revenueShare)[c.key] : { type: 'percent', value: 0 };
+        opt.textContent = c.label + ' (' + formatChannelShare(share) + ')';
         select.appendChild(opt);
       });
       if(currentVal) select.value = currentVal;
@@ -1069,13 +1113,13 @@
     function updateSelectedChannelShare(){
       var a = currentAffiliateRecord();
       var select = document.getElementById('entryChannel');
-      var pct = 0;
+      var share = { type: 'percent', value: 0 };
       if(a && select.value){
-        pct = normalizeRevenueShare(a.revenueShare)[select.value] || 0;
+        share = normalizeRevenueShare(a.revenueShare)[select.value] || share;
       }
-      document.getElementById('statShare').textContent = pct + '%';
+      document.getElementById('statShare').textContent = formatChannelShare(share);
       document.getElementById('statShareLbl').textContent = select.value
-        ? (channelLabel(select.value) + ' share')
+        ? (channelLabel(select.value) + (share.type === 'amount' ? ' flat rate' : ' share'))
         : 'Share for selected channel';
     }
 
@@ -1103,7 +1147,9 @@
         var tdRevenue = document.createElement('td');
         tdRevenue.textContent = money(entry.revenue);
         var tdShare = document.createElement('td');
-        tdShare.textContent = entry.sharePct + '%';
+        tdShare.textContent = entry.shareType
+          ? formatChannelShare({ type: entry.shareType, value: entry.shareValue })
+          : (entry.sharePct || 0) + '%';
         var tdOwed = document.createElement('td');
         tdOwed.textContent = money(entry.owed);
         tdOwed.style.fontWeight = '700';
