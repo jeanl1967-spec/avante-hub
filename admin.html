@@ -323,6 +323,34 @@
         <option value="active">Active</option>
         <option value="inactive">Inactive</option>
       </select>
+      <label>Bank account (for payouts, optional)</label>
+      <p class="modal-sub" style="margin:-2px 0 8px;">Used only when you pay this affiliate — not shown to them.</p>
+      <div class="row">
+        <div>
+          <label for="affBankNameInput" style="margin-top:0;">Bank name</label>
+          <input id="affBankNameInput" placeholder="e.g. Standard Bank">
+        </div>
+        <div>
+          <label for="affAccountTypeInput" style="margin-top:0;">Account type</label>
+          <select id="affAccountTypeInput">
+            <option value="">— Select —</option>
+            <option value="Cheque/Current">Cheque / Current</option>
+            <option value="Savings">Savings</option>
+          </select>
+        </div>
+      </div>
+      <label for="affAccountHolderInput">Account holder name</label>
+      <input id="affAccountHolderInput" placeholder="e.g. Jane Smith">
+      <div class="row">
+        <div>
+          <label for="affAccountNumberInput">Account number</label>
+          <input id="affAccountNumberInput" placeholder="e.g. 123456789">
+        </div>
+        <div>
+          <label for="affBranchCodeInput">Branch code</label>
+          <input id="affBranchCodeInput" placeholder="e.g. 051001">
+        </div>
+      </div>
       <label for="affNotesInput">Notes (optional)</label>
       <textarea id="affNotesInput" placeholder="Anything worth remembering about this affiliate"></textarea>
       <div class="modal-status" id="affModalStatus"></div>
@@ -818,6 +846,24 @@
           copyToClipboard(msg, 'Welcome message copied — paste it into an email');
         });
 
+        var bankBtn = document.createElement('button');
+        bankBtn.className = 'btn-outline btn-small';
+        bankBtn.textContent = 'Bank Details';
+        bankBtn.addEventListener('click', function(){
+          var bank = a.bank || {};
+          if(!bank.accountNumber && !bank.accountHolder && !bank.bankName){
+            showToast('No bank details saved for this affiliate yet — add them under Edit.');
+            return;
+          }
+          var msg = (a.name || a.affId) + ' — banking details\n\n' +
+            'Bank: ' + (bank.bankName || '—') + '\n' +
+            'Account holder: ' + (bank.accountHolder || '—') + '\n' +
+            'Account number: ' + (bank.accountNumber || '—') + '\n' +
+            'Branch code: ' + (bank.branchCode || '—') + '\n' +
+            'Account type: ' + (bank.accountType || '—');
+          copyToClipboard(msg, 'Bank details copied');
+        });
+
         var editBtn = document.createElement('button');
         editBtn.className = 'btn-secondary btn-small';
         editBtn.textContent = 'Edit';
@@ -840,6 +886,7 @@
 
         actionsWrap.appendChild(payoutsBtn);
         actionsWrap.appendChild(welcomeBtn);
+        actionsWrap.appendChild(bankBtn);
         actionsWrap.appendChild(editBtn);
         actionsWrap.appendChild(deleteBtn);
         tdActions.appendChild(actionsWrap);
@@ -868,6 +915,12 @@
       document.getElementById('affNameInput').value = existing ? (existing.name || '') : '';
       document.getElementById('affEmailInput').value = existing ? (existing.email || '') : '';
       buildAffShareFields(existing ? existing.revenueShare : null);
+      var bank = (existing && existing.bank) || {};
+      document.getElementById('affBankNameInput').value = bank.bankName || '';
+      document.getElementById('affAccountTypeInput').value = bank.accountType || '';
+      document.getElementById('affAccountHolderInput').value = bank.accountHolder || '';
+      document.getElementById('affAccountNumberInput').value = bank.accountNumber || '';
+      document.getElementById('affBranchCodeInput').value = bank.branchCode || '';
       document.getElementById('affStatusInput').value = existing ? (existing.status || 'active') : 'active';
       document.getElementById('affNotesInput').value = existing ? (existing.notes || '') : '';
       document.getElementById('affModalStatus').classList.remove('show');
@@ -888,6 +941,13 @@
       var name = document.getElementById('affNameInput').value.trim();
       var email = document.getElementById('affEmailInput').value.trim();
       var revenueShare = readAffShareFields();
+      var bank = {
+        bankName: document.getElementById('affBankNameInput').value.trim(),
+        accountType: document.getElementById('affAccountTypeInput').value,
+        accountHolder: document.getElementById('affAccountHolderInput').value.trim(),
+        accountNumber: document.getElementById('affAccountNumberInput').value.trim(),
+        branchCode: document.getElementById('affBranchCodeInput').value.trim()
+      };
       var status = document.getElementById('affStatusInput').value;
       var notes = document.getElementById('affNotesInput').value.trim();
 
@@ -901,7 +961,7 @@
       btn.textContent = 'Saving…';
       adminPost('upsertAffiliate', {
         affId: affId, name: name, email: email,
-        revenueShare: revenueShare, status: status, notes: notes
+        revenueShare: revenueShare, bank: bank, status: status, notes: notes
       }).then(function(res){
         btn.disabled = false;
         btn.textContent = 'Save Affiliate';
