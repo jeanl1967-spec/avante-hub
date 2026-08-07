@@ -5,6 +5,33 @@ import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 // the very first login is a one-time "setup" that creates the admin account.
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
+// Revenue channels — these keys must stay in sync with the CHANNELS list in
+// admin.html. They map onto the actual booking tabs an affiliate sees in
+// their Hub header (hub.html), since each one is tracked/paid separately.
+const CHANNEL_KEYS = ["accommodation", "flights", "activities", "car", "package"];
+
+function sanitizeRevenueShare(input, fallbackPct) {
+  const out = {};
+  const fallback = isFinite(fallbackPct) ? Math.max(0, Math.min(100, Number(fallbackPct))) : 0;
+  for (const key of CHANNEL_KEYS) {
+    let v = input && typeof input === "object" ? Number(input[key]) : NaN;
+    if (!isFinite(v)) v = fallback; // legacy affiliates: apply their old flat rate to every channel
+    out[key] = Math.max(0, Math.min(100, v));
+  }
+  return out;
+}
+
+// Legacy records saved before per-channel shares existed only have a flat
+// revenueSharePct. This fills in a revenueShare object for them on the fly
+// (read-only, not persisted) so the UI never sees a blank/broken affiliate.
+function withRevenueShare(record) {
+  if (!record) return record;
+  if (!record.revenueShare || typeof record.revenueShare !== "object") {
+    record.revenueShare = sanitizeRevenueShare(null, record.revenueSharePct);
+  }
+  return record;
+}
+
 function randomToken() {
   const bytes = crypto.getRandomValues(new Uint8Array(24));
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -69,12 +96,12 @@ export default async (request, context) => {
         const list = [];
         for (const b of blobs) {
           const rec = await directoryStore.get(b.key, { type: "json" });
-          if (rec) list.push(rec);
+          if (rec) list.push(withRevenueShare(rec));
         }
         list.sort(function (a, b) {
           return (a.name || a.affId).localeCompare(b.name || b.affId);
         });
-        return json({ ok: true, affiliates: list }, 200, cors);
+        return json({ ok: true, affiliates: list, channels: CHANNEL_KEYS }, 200, cors);
       }
 
       if (resource === "payouts") {
@@ -225,8 +252,7 @@ export default async (request, context) => {
       if (!affId) return json({ ok: false, error: "Please enter an affiliate ID." }, 400, cors);
       const name = typeof body.name === "string" ? body.name.trim() : "";
       const email = typeof body.email === "string" ? body.email.trim() : "";
-      let revenueSharePct = Number(body.revenueSharePct);
-      if (!isFinite(revenueSharePct) || revenueSharePct < 0 || revenueSharePct > 100) revenueSharePct = 0;
+      const revenueShare = sanitizeRevenueShare(body.revenueShare, 0);
       const notes = typeof body.notes === "string" ? body.notes.trim() : "";
       const status = body.status === "inactive" ? "inactive" : "active";
 
@@ -235,7 +261,7 @@ export default async (request, context) => {
         affId: affId,
         name: name,
         email: email,
-        revenueSharePct: revenueSharePct,
+        revenueShare: revenueShare,
         notes: notes,
         status: status,
         totalRevenue: (existing && existing.totalRevenue) || 0,
@@ -261,22 +287,28 @@ export default async (request, context) => {
       if (!affId) return json({ ok: false, error: "missing affId" }, 400, cors);
       const period = typeof body.period === "string" ? body.period.trim() : "";
       const revenue = Number(body.revenue);
+      const channel = typeof body.channel === "string" ? body.channel.trim() : "";
+      if (!CHANNEL_KEYS.includes(channel)) {
+        return json({ ok: false, error: "Please select a revenue channel." }, 400, cors);
+      }
       if (!period) return json({ ok: false, error: "Please enter a period label (e.g. August 2026)." }, 400, cors);
       if (!isFinite(revenue) || revenue < 0) {
         return json({ ok: false, error: "Please enter a valid revenue amount." }, 400, cors);
       }
       const note = typeof body.note === "string" ? body.note.trim() : "";
 
-      const affiliate = await directoryStore.get(affId, { type: "json" });
+      let affiliate = await directoryStore.get(affId, { type: "json" });
       if (!affiliate) return json({ ok: false, error: "Unknown affiliate — add them first." }, 404, cors);
+      affiliate = withRevenueShare(affiliate);
 
-      const sharePct = affiliate.revenueSharePct || 0;
+      const sharePct = (affiliate.revenueShare && affiliate.revenueShare[channel]) || 0;
       const owed = Math.round(revenue * (sharePct / 100) * 100) / 100;
 
       const entries = (await payoutStore.get(affId, { type: "json" })) || [];
       const entry = {
         id: randomToken().slice(0, 12),
         period: period,
+        channel: channel,
         revenue: revenue,
         sharePct: sharePct,
         owed: owed,
