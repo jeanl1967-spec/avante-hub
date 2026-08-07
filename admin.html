@@ -110,6 +110,9 @@
   .detail-label{ font-size:10.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--teal-dark); font-weight:700; margin-bottom:2px; }
   .detail-value{ font-size:13px; color:var(--navy); word-break:break-all; line-height:1.5; }
   .detail-divider{ border:none; border-top:1px solid var(--line); margin:16px 0; }
+  .detail-value-row{ display:flex; align-items:center; gap:8px; }
+  .detail-value-row .detail-value{ flex:1; min-width:0; }
+  .detail-value-row .detail-copy-btn{ flex:none; }
 
   header.hub-header{
     display:flex;
@@ -1192,6 +1195,18 @@
       return '<div class="detail-row"><div class="detail-label">' + escapeHtml(label) + '</div><div class="detail-value">' + escapeHtml(value) + '</div></div>';
     }
 
+    // Same as detailRow, but with a small "Copy" button next to the value —
+    // used for the link fields so the admin can grab just one link at a time.
+    function detailLinkRow(label, value){
+      return '<div class="detail-row">' +
+        '<div class="detail-label">' + escapeHtml(label) + '</div>' +
+        '<div class="detail-value-row">' +
+          '<div class="detail-value">' + escapeHtml(value) + '</div>' +
+          '<button type="button" class="btn-outline btn-small detail-copy-btn" data-copy="' + escapeHtml(value) + '">Copy</button>' +
+        '</div>' +
+      '</div>';
+    }
+
     function openDetailsModal(a){
       document.getElementById('detailsModalTitle').textContent = (a.name || a.affId) + ' — Details';
       var body = document.getElementById('detailsModalBody');
@@ -1223,13 +1238,13 @@
           '</div>';
         html += '<hr class="detail-divider">';
         html += '<div class="detail-section"><h3>Links</h3>' +
-          detailRow('Hub link', hubLink) +
-          detailRow('Booking link', bookingLink) +
-          detailRow('Booking link (short)', bookingShort) +
-          detailRow('Storefront link', storefrontLink) +
-          detailRow('Storefront link (short)', storefrontShort) +
-          detailRow('Flight link', flightLink) +
-          detailRow('Flight link (short)', flightShort) +
+          detailLinkRow('Hub link', hubLink) +
+          detailLinkRow('Booking link', bookingLink) +
+          detailLinkRow('Booking link (short)', bookingShort) +
+          detailLinkRow('Storefront link', storefrontLink) +
+          detailLinkRow('Storefront link (short)', storefrontShort) +
+          detailLinkRow('Flight link', flightLink) +
+          detailLinkRow('Flight link (short)', flightShort) +
           '</div>';
         html += '<hr class="detail-divider">';
         html += '<div class="detail-section"><h3>Revenue share by channel</h3>' +
@@ -1251,6 +1266,11 @@
           '</div>';
 
         body.innerHTML = html;
+        body.querySelectorAll('.detail-copy-btn').forEach(function(btn){
+          btn.addEventListener('click', function(){
+            copyToClipboard(btn.dataset.copy, 'Link copied');
+          });
+        });
 
         currentDetailsText = (a.name || a.affId) + ' — full details\n\n' +
           'LOGIN\nUsername: ' + a.affId + '\nPassword: 0000 (default)\n\n' +
