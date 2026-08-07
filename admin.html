@@ -366,6 +366,7 @@
     <nav class="tabs" id="tabs">
       <button class="tab active" data-panel="affiliates">Affiliates</button>
       <button class="tab" data-panel="payouts">Payouts</button>
+      <button class="tab" data-panel="leaderboard">Leaderboard</button>
       <button class="tab" data-panel="tutorial">How Payouts Work</button>
     </nav>
   </header>
@@ -487,6 +488,36 @@
       </div>
     </section>
 
+    <!-- ===================== LEADERBOARD ===================== -->
+    <section class="panel" id="panel-leaderboard">
+      <div class="hero">
+        <h1>Leaderboard</h1>
+        <p>Rank your affiliates by total turnover, or drill into a single revenue channel</p>
+      </div>
+      <div class="card">
+        <label for="leaderboardMetric">Rank by</label>
+        <select id="leaderboardMetric">
+          <option value="total">Total Turnover (all channels)</option>
+        </select>
+        <div style="margin-top:18px;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Affiliate</th>
+                  <th>Turnover</th>
+                  <th>% of Total</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboardTableBody"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="leaderboardEmpty" style="display:none;">No affiliates added yet — add some on the Affiliates tab first.</div>
+        </div>
+      </div>
+    </section>
+
     <!-- ===================== TUTORIAL ===================== -->
     <section class="panel" id="panel-tutorial">
       <div class="hero">
@@ -560,6 +591,24 @@
       return found ? found.label : key;
     }
 
+    // Same base used throughout the Hub/landing page for an affiliate's
+    // personal StockNetwork accommodation booking link.
+    var STOCKNETWORK_BASE = 'https://stock.stocknetwork.co.za/ui/';
+
+    // Shortens a link via the existing go.avantetravel.co.za shortener,
+    // tagged to this affiliate. Falls back to the long URL if the shorten
+    // call fails, so Welcome Info still works even if that API is down.
+    function shortenLink(url, affId){
+      return fetch('/api/shorten', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: url, aff: affId })
+      })
+        .then(function(r){ return r.json(); })
+        .then(function(data){ return (data && data.ok && data.shortUrl) ? data.shortUrl : url; })
+        .catch(function(){ return url; });
+    }
+
     // ---------- Auth / token helpers ----------
     var ADMIN_TOKEN = '';
     try{ ADMIN_TOKEN = sessionStorage.getItem('avante-admin-token') || ''; }catch(e){}
@@ -600,6 +649,10 @@
         btn.classList.add('active');
         document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
         if(btn.dataset.panel === 'payouts') populatePayoutPicker();
+        if(btn.dataset.panel === 'leaderboard'){
+          if(affiliatesCache.length) renderLeaderboard();
+          else loadAffiliates().then(renderLeaderboard);
+        }
       });
     });
 
@@ -815,6 +868,7 @@
           if(data && data.ok){
             affiliatesCache = data.affiliates || [];
             renderAffiliatesTable();
+            renderLeaderboard();
           }else{
             statusEl.textContent = (data && data.error) || 'Could not load affiliates.';
             statusEl.className = 'status show';
@@ -880,14 +934,35 @@
         welcomeBtn.className = 'btn-outline btn-small';
         welcomeBtn.textContent = 'Welcome Info';
         welcomeBtn.addEventListener('click', function(){
+          var originalLabel = welcomeBtn.textContent;
+          welcomeBtn.disabled = true;
+          welcomeBtn.textContent = 'Preparing…';
+
           var hubLink = window.location.origin + '/hub.html?aff=' + encodeURIComponent(a.affId);
-          var msg = 'Welcome to the Avante Travel Affiliate Hub' + (a.name ? ', ' + a.name : '') + '!\n\n' +
-            'Your personal Hub link:\n' + hubLink + '\n\n' +
-            'Log in with:\n' +
-            'Affiliate number: ' + a.affId + '\n' +
-            'Password: 1234 (default — you can change it once you\'re logged in, under "Change Password" in the top right)\n\n' +
-            'Once inside you\'ll find your booking links, flight link, and marketing tools all in one place.';
-          copyToClipboard(msg, 'Welcome message copied — paste it into an email');
+          var bookingLink = STOCKNETWORK_BASE + encodeURIComponent(a.affId);
+          var storefrontLink = window.location.origin + '/landing.html?aff=' + encodeURIComponent(a.affId);
+
+          Promise.all([
+            shortenLink(bookingLink, a.affId),
+            shortenLink(storefrontLink, a.affId)
+          ]).then(function(shortened){
+            var bookingShort = shortened[0];
+            var storefrontShort = shortened[1];
+            var msg = 'Welcome to the Avante Travel Affiliate Hub' + (a.name ? ', ' + a.name : '') + '!\n\n' +
+              'Your personal Hub link:\n' + hubLink + '\n\n' +
+              'Log in with:\n' +
+              'Username (affiliate number): ' + a.affId + '\n' +
+              'Password: 1234 (default — you can change it once you\'re logged in, under "Change Password" in the top right)\n\n' +
+              'Your booking link:\n' + bookingShort + '\n\n' +
+              'Your affiliate storefront — share this one link with your clients:\n' + storefrontShort + '\n\n' +
+              'Once inside you\'ll find your booking links, flight link, and marketing tools all in one place.';
+            copyToClipboard(msg, 'Welcome message copied — paste it into an email');
+          }).catch(function(){
+            showToast('Could not prepare the welcome message — please try again.');
+          }).then(function(){
+            welcomeBtn.disabled = false;
+            welcomeBtn.textContent = originalLabel;
+          });
         });
 
         var bankBtn = document.createElement('button');
@@ -946,6 +1021,73 @@
     }
 
     document.getElementById('refreshAffiliatesBtn').addEventListener('click', loadAffiliates);
+
+    // ---------- Leaderboard ----------
+    (function(){
+      var select = document.getElementById('leaderboardMetric');
+      var populated = false;
+      function populateMetrics(){
+        if(populated) return;
+        CHANNELS.forEach(function(c){
+          var opt = document.createElement('option');
+          opt.value = c.key;
+          opt.textContent = c.label;
+          select.appendChild(opt);
+        });
+        populated = true;
+      }
+      populateMetrics();
+      select.addEventListener('change', renderLeaderboard);
+    })();
+
+    function renderLeaderboard(){
+      var metric = document.getElementById('leaderboardMetric').value || 'total';
+      var body = document.getElementById('leaderboardTableBody');
+      var empty = document.getElementById('leaderboardEmpty');
+      body.innerHTML = '';
+
+      var rows = affiliatesCache.map(function(a){
+        var value = metric === 'total'
+          ? (a.totalRevenue || 0)
+          : ((a.channelRevenue && a.channelRevenue[metric]) || 0);
+        return { a: a, value: value };
+      });
+      rows.sort(function(x, y){ return y.value - x.value; });
+
+      if(!rows.length){
+        empty.style.display = 'block';
+        return;
+      }
+      empty.style.display = 'none';
+
+      var total = rows.reduce(function(sum, r){ return sum + r.value; }, 0);
+
+      rows.forEach(function(r, i){
+        var tr = document.createElement('tr');
+
+        var tdRank = document.createElement('td');
+        tdRank.textContent = '#' + (i + 1);
+        tdRank.style.fontWeight = '800';
+        tdRank.style.color = i === 0 ? 'var(--teal-dark)' : 'var(--navy)';
+
+        var tdName = document.createElement('td');
+        tdName.textContent = r.a.name || r.a.affId;
+
+        var tdValue = document.createElement('td');
+        tdValue.textContent = money(r.value);
+        tdValue.style.fontWeight = '700';
+
+        var tdPct = document.createElement('td');
+        tdPct.textContent = total > 0 ? (Math.round((r.value / total) * 1000) / 10) + '%' : '0%';
+        tdPct.style.color = 'var(--muted)';
+
+        tr.appendChild(tdRank);
+        tr.appendChild(tdName);
+        tr.appendChild(tdValue);
+        tr.appendChild(tdPct);
+        body.appendChild(tr);
+      });
+    }
 
     // ---------- Add / Edit affiliate modal ----------
     var editingAffId = null;
