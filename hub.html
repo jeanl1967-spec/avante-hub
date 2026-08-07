@@ -856,15 +856,23 @@
       </div>
     </section>
 
-    <!-- ===================== CAR (placeholder) ===================== -->
+    <!-- ===================== CAR ===================== -->
     <section class="panel" id="panel-car">
       <div class="hero">
-        <h1>Your Car Link</h1>
+        <h1>Your Car Rental Link</h1>
+        <p>Your personal car hire link — every booking made through it is tracked back to you</p>
       </div>
-      <div class="placeholder">
-        <div class="badge">Coming soon</div>
-        <h3>Car hire links aren't live yet</h3>
-        <p>We're working on bringing car hire bookings into the Hub. Check back soon.</p>
+      <div class="card">
+        <div class="status" id="c-errorStatus"></div>
+        <div class="link-box" id="c-linkBox">
+          <div class="label">Your shareable car rental link</div>
+          <div class="url" id="c-finalUrl"></div>
+          <div class="btn-row">
+            <button class="btn-secondary" id="c-copyBtn">Copy link</button>
+            <button class="btn-outline" id="c-openBtn">Open car rental search</button>
+          </div>
+        </div>
+        <div class="hint" style="margin-top:14px;">Share this link on social media, WhatsApp, or your website. Every car rental booking made through it is tracked back to your affiliate ID, so we can calculate your share of the commission.</div>
       </div>
     </section>
 
@@ -962,6 +970,11 @@
     // (subId1) — Impact.com records bookings against that value, visible
     // under Reports -> Performance by Sub ID for revenue-share purposes.
     var FLIGHT_BASE_URL = 'https://travelstart.zwjlk6.net/LPVYJM';
+    // Car rental — test/placeholder link until a real car rental affiliate
+    // program is signed up (e.g. DiscoverCars, RentalCars/Awin, Europcar).
+    // Uses the same subId1 tracking pattern as the Flights link above so it
+    // can be swapped for a real tracking URL later with no other changes.
+    var CAR_BASE_URL = 'https://www.avis.co.za';
 
     function affKey(key){ return 'avante-hub:' + AFF_ID + ':' + key; }
     function affSave(key, value){
@@ -1442,6 +1455,36 @@
       });
     })();
 
+    // ---------- Car Rental Link ----------
+    // Same pattern as the Flight Link above: auto-generated, everyone shares
+    // the same base URL with their own affiliate ID appended as a Sub ID.
+    // CAR_BASE_URL is currently a test/placeholder link — swap it out for a
+    // real car rental affiliate tracking URL once one is signed up.
+    (function(){
+      var currentLink = '';
+      var errorEl = document.getElementById('c-errorStatus');
+      var linkBox = document.getElementById('c-linkBox');
+
+      if(!AFF_ID){
+        errorEl.textContent = 'Open the Hub using your personal affiliate link to get your car rental link.';
+        errorEl.className = 'status show';
+      }else{
+        var sep = CAR_BASE_URL.indexOf('?') === -1 ? '?' : '&';
+        currentLink = CAR_BASE_URL + sep + 'subId1=' + encodeURIComponent(AFF_ID);
+        document.getElementById('c-finalUrl').textContent = currentLink;
+        linkBox.classList.add('show');
+      }
+
+      document.getElementById('c-copyBtn').addEventListener('click', function(){
+        if(!currentLink) return;
+        copyText(currentLink, document.getElementById('c-finalUrl'));
+      });
+      document.getElementById('c-openBtn').addEventListener('click', function(){
+        if(!currentLink) return;
+        window.open(currentLink, '_blank', 'noopener');
+      });
+    })();
+
     // ---------- Home: Promo Hooks ----------
     (function(){
       var grid = document.getElementById('hook-grid');
@@ -1812,6 +1855,9 @@
 
       var fBtnRow = document.querySelector('#f-linkBox .btn-row');
       LinkShortener.attach(fBtnRow, textOf('f-finalUrl'));
+
+      var cBtnRow = document.querySelector('#c-linkBox .btn-row');
+      LinkShortener.attach(cBtnRow, textOf('c-finalUrl'));
 
       var storefrontBtnRow = document.querySelector('#storefrontCard .btn-row');
       LinkShortener.attach(storefrontBtnRow, textOf('storefrontUrl'));

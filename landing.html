@@ -237,11 +237,15 @@
     // appended as a Sub ID — both track bookings back to this exact affiliate.
     var STOCKNETWORK_BASE = 'https://stock.stocknetwork.co.za/ui/';
     var FLIGHT_BASE_URL = 'https://travelstart.zwjlk6.net/LPVYJM';
+    // Car rental — test/placeholder link until a real car rental affiliate
+    // program is signed up. Same subId1 tracking pattern as Flights, kept in
+    // sync with hub.html's CAR_BASE_URL.
+    var CAR_BASE_URL = 'https://www.avis.co.za';
     var CATEGORY_LINKS = {
       accommodation: aff ? (STOCKNETWORK_BASE + encodeURIComponent(aff)) : '',
       flights: aff ? (FLIGHT_BASE_URL + (FLIGHT_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(aff)) : '',
       activities: '',
-      car: '',
+      car: aff ? (CAR_BASE_URL + (CAR_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(aff)) : '',
       tutorials: ''
     };
     Object.keys(CATEGORY_LINKS).forEach(function(key){
