@@ -32,6 +32,18 @@ function withRevenueShare(record) {
   return record;
 }
 
+function sanitizeBankDetails(input) {
+  const src = input && typeof input === "object" ? input : {};
+  const clean = (v) => (typeof v === "string" ? v.trim().slice(0, 200) : "");
+  return {
+    bankName: clean(src.bankName),
+    accountHolder: clean(src.accountHolder),
+    accountNumber: clean(src.accountNumber),
+    branchCode: clean(src.branchCode),
+    accountType: clean(src.accountType),
+  };
+}
+
 function randomToken() {
   const bytes = crypto.getRandomValues(new Uint8Array(24));
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -253,6 +265,7 @@ export default async (request, context) => {
       const name = typeof body.name === "string" ? body.name.trim() : "";
       const email = typeof body.email === "string" ? body.email.trim() : "";
       const revenueShare = sanitizeRevenueShare(body.revenueShare, 0);
+      const bank = sanitizeBankDetails(body.bank);
       const notes = typeof body.notes === "string" ? body.notes.trim() : "";
       const status = body.status === "inactive" ? "inactive" : "active";
 
@@ -262,6 +275,7 @@ export default async (request, context) => {
         name: name,
         email: email,
         revenueShare: revenueShare,
+        bank: bank,
         notes: notes,
         status: status,
         totalRevenue: (existing && existing.totalRevenue) || 0,
