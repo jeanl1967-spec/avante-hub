@@ -1,6 +1,6 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 
-const DEFAULT_PASSWORD = "1234";
+const DEFAULT_PASSWORD = "0000";
 
 async function sha256Hex(str) {
   const data = new TextEncoder().encode(str);
@@ -94,7 +94,7 @@ export default async (request, context) => {
 
     if (action === "reset") {
       // No email system exists in this app, so "forgot password" simply
-      // reverts the affiliate's account back to the default password (1234)
+      // reverts the affiliate's account back to the default password (0000)
       // — the same one every new affiliate starts with. Anyone resetting
       // needs to already know the affiliate's ID, which matches this app's
       // existing security level throughout.
