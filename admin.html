@@ -315,8 +315,9 @@
       <input id="affNameInput" placeholder="e.g. Jane Smith">
       <label for="affEmailInput">Email (optional)</label>
       <input id="affEmailInput" placeholder="e.g. jane@example.com">
-      <label for="affShareInput">Revenue share (%)</label>
-      <input id="affShareInput" type="number" min="0" max="100" step="0.5" placeholder="e.g. 50">
+      <label>Revenue share (%) — by channel</label>
+      <p class="modal-sub" style="margin:-2px 0 8px;">Each revenue channel matches a tab in this affiliate's Hub — set what they earn on each one. Leave any at 0 if they don't get a cut of that channel.</p>
+      <div class="row" id="affShareFields" style="flex-wrap:wrap; gap:10px 12px;"></div>
       <label for="affStatusInput">Status</label>
       <select id="affStatusInput">
         <option value="active">Active</option>
@@ -399,7 +400,7 @@
             </div>
             <div class="stat-card">
               <div class="num" id="statShare">0%</div>
-              <div class="lbl">Current share</div>
+              <div class="lbl" id="statShareLbl">Share for selected channel</div>
             </div>
             <div class="stat-card">
               <div class="num" id="statPaid">R0.00</div>
@@ -410,6 +411,14 @@
               <div class="lbl">Outstanding</div>
             </div>
           </div>
+
+          <div class="hint" id="channelShareBreakdown" style="margin:0 0 16px;"></div>
+
+          <label for="entryChannel">Revenue channel</label>
+          <select id="entryChannel">
+            <option value="">— Select a channel —</option>
+          </select>
+          <div class="hint">Matches the tab this affiliate used to drive the booking (e.g. their Flight Link or Accommodation Link Builder).</div>
 
           <label for="entryPeriod">Period</label>
           <input id="entryPeriod" placeholder="e.g. August 2026">
@@ -432,6 +441,7 @@
             <table class="data-table">
               <thead>
                 <tr>
+                  <th>Channel</th>
                   <th>Period</th>
                   <th>Revenue</th>
                   <th>Share</th>
@@ -460,7 +470,7 @@
         <div class="num">1</div>
         <div>
           <h3>Add the affiliate here first</h3>
-          <p>On the <strong>Affiliates</strong> tab, add each affiliate with their exact Hub affiliate ID (the same ID that's in their personal Hub link and their flight/booking links) and set their revenue share percentage — the cut they get of the bookings they drive.</p>
+          <p>On the <strong>Affiliates</strong> tab, add each affiliate with their exact Hub affiliate ID (the same ID that's in their personal Hub link and their flight/booking links) and set their revenue share percentage <strong>for each channel</strong> — Accommodation, Flights, Activities, Car Hire, and Packages. These match the tabs in their own Hub, and you can pay a different rate for each one (or leave a channel at 0% if they don't earn on it).</p>
         </div>
       </div>
 
@@ -484,7 +494,7 @@
         <div class="num">4</div>
         <div>
           <h3>Log the revenue on the Payouts tab</h3>
-          <p>Select the affiliate, enter a period label (e.g. "August 2026") and the total revenue they generated in that period, then click <strong>Add Revenue Entry</strong>. The amount you owe them is calculated automatically using their current revenue share percentage.</p>
+          <p>Select the affiliate, choose which <strong>channel</strong> the revenue came from (Accommodation, Flights, Activities, Car Hire, or Packages), enter a period label (e.g. "August 2026") and the total revenue for that period, then click <strong>Add Revenue Entry</strong>. The amount you owe them is calculated automatically using that channel's own revenue share percentage.</p>
         </div>
       </div>
 
@@ -506,6 +516,22 @@
   <div class="toast" id="toast">Saved</div>
 
   <script>
+    // ---------- Revenue channels ----------
+    // Keys must stay in sync with CHANNEL_KEYS in admin-api.js. Labels match
+    // the tabs an affiliate sees in their own Hub header (hub.html), since
+    // each of these is tracked and paid out separately.
+    var CHANNELS = [
+      { key: 'accommodation', label: 'Accommodation' },
+      { key: 'flights', label: 'Flights' },
+      { key: 'activities', label: 'Activities' },
+      { key: 'car', label: 'Car Hire' },
+      { key: 'package', label: 'Packages' }
+    ];
+    function channelLabel(key){
+      var found = CHANNELS.filter(function(c){ return c.key === key; })[0];
+      return found ? found.label : key;
+    }
+
     // ---------- Auth / token helpers ----------
     var ADMIN_TOKEN = '';
     try{ ADMIN_TOKEN = sessionStorage.getItem('avante-admin-token') || ''; }catch(e){}
@@ -560,6 +586,66 @@
     function money(n){
       n = Number(n) || 0;
       return 'R' + n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    // ---------- Per-channel revenue share helpers ----------
+    function normalizeRevenueShare(revenueShare, legacyPct){
+      var out = {};
+      CHANNELS.forEach(function(c){
+        var v = revenueShare && revenueShare[c.key];
+        if(v === undefined || v === null || v === '' || isNaN(Number(v))){
+          v = (legacyPct !== undefined && legacyPct !== null) ? legacyPct : 0;
+        }
+        out[c.key] = Number(v) || 0;
+      });
+      return out;
+    }
+
+    function formatShareSummary(revenueShare){
+      var share = normalizeRevenueShare(revenueShare);
+      var active = CHANNELS.filter(function(c){ return share[c.key] > 0; });
+      if(!active.length) return '—';
+      return active.map(function(c){ return c.label + ' ' + share[c.key] + '%'; }).join(' · ');
+    }
+
+    // Builds the 5 per-channel number inputs inside the Add/Edit Affiliate
+    // modal. Called once per modal open so it always reflects the current
+    // CHANNELS list.
+    function buildAffShareFields(revenueShare){
+      var share = normalizeRevenueShare(revenueShare);
+      var wrap = document.getElementById('affShareFields');
+      wrap.innerHTML = '';
+      CHANNELS.forEach(function(c){
+        var div = document.createElement('div');
+        div.style.minWidth = '150px';
+        var label = document.createElement('label');
+        label.setAttribute('for', 'affShare_' + c.key);
+        label.style.margin = '0 0 5px';
+        label.textContent = c.label;
+        var input = document.createElement('input');
+        input.type = 'number';
+        input.min = '0';
+        input.max = '100';
+        input.step = '0.5';
+        input.id = 'affShare_' + c.key;
+        input.placeholder = '0';
+        input.value = share[c.key] || '';
+        div.appendChild(label);
+        div.appendChild(input);
+        wrap.appendChild(div);
+      });
+    }
+
+    function readAffShareFields(){
+      var out = {};
+      CHANNELS.forEach(function(c){
+        var el = document.getElementById('affShare_' + c.key);
+        var v = el ? Number(el.value) : 0;
+        if(!isFinite(v) || v < 0) v = 0;
+        if(v > 100) v = 100;
+        out[c.key] = v;
+      });
+      return out;
     }
 
     function copyToClipboard(text, successMsg){
@@ -691,7 +777,8 @@
         tdId.style.color = 'var(--muted)';
         tdId.style.wordBreak = 'break-all';
         var tdShare = document.createElement('td');
-        tdShare.textContent = (a.revenueSharePct || 0) + '%';
+        tdShare.textContent = formatShareSummary(a.revenueShare);
+        tdShare.style.fontSize = '12px';
         var tdStatus = document.createElement('td');
         var badge = document.createElement('span');
         badge.className = 'badge ' + (a.status === 'inactive' ? 'inactive' : 'active');
@@ -780,7 +867,7 @@
       document.getElementById('affIdInput').disabled = !!existing;
       document.getElementById('affNameInput').value = existing ? (existing.name || '') : '';
       document.getElementById('affEmailInput').value = existing ? (existing.email || '') : '';
-      document.getElementById('affShareInput').value = existing ? (existing.revenueSharePct || 0) : '';
+      buildAffShareFields(existing ? existing.revenueShare : null);
       document.getElementById('affStatusInput').value = existing ? (existing.status || 'active') : 'active';
       document.getElementById('affNotesInput').value = existing ? (existing.notes || '') : '';
       document.getElementById('affModalStatus').classList.remove('show');
@@ -800,7 +887,7 @@
       var affId = document.getElementById('affIdInput').value.trim();
       var name = document.getElementById('affNameInput').value.trim();
       var email = document.getElementById('affEmailInput').value.trim();
-      var share = document.getElementById('affShareInput').value;
+      var revenueShare = readAffShareFields();
       var status = document.getElementById('affStatusInput').value;
       var notes = document.getElementById('affNotesInput').value.trim();
 
@@ -814,7 +901,7 @@
       btn.textContent = 'Saving…';
       adminPost('upsertAffiliate', {
         affId: affId, name: name, email: email,
-        revenueSharePct: share, status: status, notes: notes
+        revenueShare: revenueShare, status: status, notes: notes
       }).then(function(res){
         btn.disabled = false;
         btn.textContent = 'Save Affiliate';
@@ -894,10 +981,45 @@
       if(!a) return;
       var outstanding = (a.totalOwed || 0) - (a.totalPaid || 0);
       document.getElementById('statRevenue').textContent = money(a.totalRevenue || 0);
-      document.getElementById('statShare').textContent = (a.revenueSharePct || 0) + '%';
       document.getElementById('statPaid').textContent = money(a.totalPaid || 0);
       document.getElementById('statOutstanding').textContent = money(outstanding);
+
+      var breakdown = document.getElementById('channelShareBreakdown');
+      breakdown.textContent = 'Revenue share by channel — ' + formatShareSummary(a.revenueShare);
+
+      populateEntryChannelSelect();
+      updateSelectedChannelShare();
     }
+
+    function populateEntryChannelSelect(){
+      var a = currentAffiliateRecord();
+      var select = document.getElementById('entryChannel');
+      var currentVal = select.value;
+      select.innerHTML = '<option value="">— Select a channel —</option>';
+      CHANNELS.forEach(function(c){
+        var opt = document.createElement('option');
+        opt.value = c.key;
+        var pct = a ? normalizeRevenueShare(a.revenueShare)[c.key] : 0;
+        opt.textContent = c.label + ' (' + pct + '%)';
+        select.appendChild(opt);
+      });
+      if(currentVal) select.value = currentVal;
+    }
+
+    function updateSelectedChannelShare(){
+      var a = currentAffiliateRecord();
+      var select = document.getElementById('entryChannel');
+      var pct = 0;
+      if(a && select.value){
+        pct = normalizeRevenueShare(a.revenueShare)[select.value] || 0;
+      }
+      document.getElementById('statShare').textContent = pct + '%';
+      document.getElementById('statShareLbl').textContent = select.value
+        ? (channelLabel(select.value) + ' share')
+        : 'Share for selected channel';
+    }
+
+    document.getElementById('entryChannel').addEventListener('change', updateSelectedChannelShare);
 
     function renderPayouts(entries){
       renderSummary();
@@ -914,6 +1036,8 @@
       entries.forEach(function(entry){
         var tr = document.createElement('tr');
 
+        var tdChannel = document.createElement('td');
+        tdChannel.textContent = entry.channel ? channelLabel(entry.channel) : '—';
         var tdPeriod = document.createElement('td');
         tdPeriod.textContent = entry.period;
         var tdRevenue = document.createElement('td');
@@ -972,6 +1096,7 @@
         actionsWrap.appendChild(deleteBtn);
         tdActions.appendChild(actionsWrap);
 
+        tr.appendChild(tdChannel);
         tr.appendChild(tdPeriod);
         tr.appendChild(tdRevenue);
         tr.appendChild(tdShare);
@@ -993,10 +1118,16 @@
         statusEl.className = 'status show';
         return;
       }
+      var channel = document.getElementById('entryChannel').value;
       var period = document.getElementById('entryPeriod').value.trim();
       var revenue = document.getElementById('entryRevenue').value;
       var note = document.getElementById('entryNote').value.trim();
 
+      if(!channel){
+        statusEl.textContent = 'Select which revenue channel this came from.';
+        statusEl.className = 'status show';
+        return;
+      }
       if(!period){
         statusEl.textContent = 'Enter a period label (e.g. "August 2026").';
         statusEl.className = 'status show';
@@ -1010,7 +1141,7 @@
 
       btn.disabled = true;
       btn.textContent = 'Adding…';
-      adminPost('addPayoutEntry', { affId: currentPayoutAffId, period: period, revenue: revenue, note: note })
+      adminPost('addPayoutEntry', { affId: currentPayoutAffId, channel: channel, period: period, revenue: revenue, note: note })
         .then(function(res){
           btn.disabled = false;
           btn.textContent = 'Add Revenue Entry';
