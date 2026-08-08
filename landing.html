@@ -229,6 +229,12 @@
   body.embed main{
     padding-top:24px;
   }
+  /* No header/nav exists in embed mode, so the Back to Home button has
+     nothing to return to and would leave the visitor with no way back
+     to the Great Deals grid — hide it in embed mode only. */
+  body.embed .back-home-btn{
+    display:none;
+  }
 </style>
 </head>
 <body>
