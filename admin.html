@@ -625,6 +625,9 @@
     // constant in hub.html and landing.html. Swap out for a real car rental
     // affiliate tracking URL once one is signed up.
     var CAR_BASE_URL = 'https://www.avis.co.za';
+    // Free E-Sim — same subId1 tracking pattern, kept in sync with the same
+    // constant in hub.html and landing.html.
+    var ESIM_BASE_URL = 'https://avante.1-esim.com/';
 
     // Shortens a link via the existing go.avantetravel.co.za shortener,
     // tagged to this affiliate. Falls back to the long URL if the shorten
@@ -1224,17 +1227,20 @@
       var embedLink = window.location.origin + '/landing.html?aff=' + encodeURIComponent(a.affId) + '&embed=1';
       var flightLink = FLIGHT_BASE_URL + (FLIGHT_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(a.affId);
       var carLink = CAR_BASE_URL + (CAR_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(a.affId);
+      var esimLink = ESIM_BASE_URL + (ESIM_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(a.affId);
 
       Promise.all([
         shortenLink(bookingLink, a.affId),
         shortenLink(storefrontLink, a.affId),
         shortenLink(flightLink, a.affId),
-        shortenLink(carLink, a.affId)
+        shortenLink(carLink, a.affId),
+        shortenLink(esimLink, a.affId)
       ]).then(function(shortened){
         var bookingShort = shortened[0];
         var storefrontShort = shortened[1];
         var flightShort = shortened[2];
         var carShort = shortened[3];
+        var esimShort = shortened[4];
         var bank = a.bank || {};
         var hasBank = !!(bank.bankName || bank.accountHolder || bank.accountNumber);
         var outstanding = (a.totalOwed || 0) - (a.totalPaid || 0);
@@ -1256,6 +1262,8 @@
           detailLinkRow('Flight link (short)', flightShort) +
           detailLinkRow('Car rental link', carLink) +
           detailLinkRow('Car rental link (short)', carShort) +
+          detailLinkRow('Free E-Sim link', esimLink) +
+          detailLinkRow('Free E-Sim link (short)', esimShort) +
           '</div>';
         html += '<hr class="detail-divider">';
         html += '<div class="detail-section"><h3>Revenue share by channel</h3>' +
@@ -1289,7 +1297,8 @@
           '\nStorefront: ' + storefrontLink + '\nStorefront (short): ' + storefrontShort +
           '\nPromotions embed link (no header): ' + embedLink +
           '\nFlight: ' + flightLink + '\nFlight (short): ' + flightShort +
-          '\nCar rental: ' + carLink + '\nCar rental (short): ' + carShort + '\n\n' +
+          '\nCar rental: ' + carLink + '\nCar rental (short): ' + carShort +
+          '\nFree E-Sim: ' + esimLink + '\nFree E-Sim (short): ' + esimShort + '\n\n' +
           'REVENUE SHARE\n' + formatShareSummary(a.revenueShare) + '\n\n' +
           'TOTALS\nRevenue: ' + money(a.totalRevenue || 0) + '\nPaid: ' + money(a.totalPaid || 0) + '\nOutstanding: ' + money(outstanding) + '\n\n' +
           'BANK\n' + (hasBank

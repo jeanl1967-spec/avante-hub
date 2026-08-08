@@ -596,6 +596,7 @@
       <button class="tab" data-panel="flight">Your Flight Link</button>
       <button class="tab" data-panel="activity">Your Activity Link</button>
       <button class="tab" data-panel="car">Your Car Link</button>
+      <button class="tab" data-panel="esim">Your Free E-Sim Link</button>
       <button class="tab" data-panel="shortlinks">Your Short Links</button>
       <button class="tab" data-panel="tutorials">Tutorials</button>
     </nav>
@@ -888,6 +889,26 @@
       </div>
     </section>
 
+    <!-- ===================== E-SIM ===================== -->
+    <section class="panel" id="panel-esim">
+      <div class="hero">
+        <h1>Your Free E-Sim Link</h1>
+        <p>Your personal free e-SIM link — every signup made through it is tracked back to you</p>
+      </div>
+      <div class="card">
+        <div class="status" id="e-errorStatus"></div>
+        <div class="link-box" id="e-linkBox">
+          <div class="label">Your shareable free e-SIM link</div>
+          <div class="url" id="e-finalUrl"></div>
+          <div class="btn-row">
+            <button class="btn-secondary" id="e-copyBtn">Copy link</button>
+            <button class="btn-outline" id="e-openBtn">Open e-SIM page</button>
+          </div>
+        </div>
+        <div class="hint" style="margin-top:14px;">Share this link on social media, WhatsApp, or your website. Every free e-SIM claimed through it is tracked back to your affiliate ID.</div>
+      </div>
+    </section>
+
     <!-- ===================== SHORT LINKS ===================== -->
     <section class="panel" id="panel-shortlinks">
       <div class="hero">
@@ -987,6 +1008,9 @@
     // Uses the same subId1 tracking pattern as the Flights link above so it
     // can be swapped for a real tracking URL later with no other changes.
     var CAR_BASE_URL = 'https://www.avis.co.za';
+    // Free E-Sim — same subId1 tracking pattern as Flights/Car Hire above,
+    // kept in sync with landing.html's ESIM_BASE_URL.
+    var ESIM_BASE_URL = 'https://avante.1-esim.com/';
 
     function affKey(key){ return 'avante-hub:' + AFF_ID + ':' + key; }
     function affSave(key, value){
@@ -1542,6 +1566,34 @@
       });
     })();
 
+    // ---------- Free E-Sim Link ----------
+    // Same pattern as Flights/Car Hire above: everyone shares the same base
+    // URL with their own affiliate ID appended as a Sub ID (subId1).
+    (function(){
+      var currentLink = '';
+      var errorEl = document.getElementById('e-errorStatus');
+      var linkBox = document.getElementById('e-linkBox');
+
+      if(!AFF_ID){
+        errorEl.textContent = 'Open the Hub using your personal affiliate link to get your free e-SIM link.';
+        errorEl.className = 'status show';
+      }else{
+        var sep = ESIM_BASE_URL.indexOf('?') === -1 ? '?' : '&';
+        currentLink = ESIM_BASE_URL + sep + 'subId1=' + encodeURIComponent(AFF_ID);
+        document.getElementById('e-finalUrl').textContent = currentLink;
+        linkBox.classList.add('show');
+      }
+
+      document.getElementById('e-copyBtn').addEventListener('click', function(){
+        if(!currentLink) return;
+        copyText(currentLink, document.getElementById('e-finalUrl'));
+      });
+      document.getElementById('e-openBtn').addEventListener('click', function(){
+        if(!currentLink) return;
+        window.open(currentLink, '_blank', 'noopener');
+      });
+    })();
+
     // ---------- Home: Promo Hooks ----------
     (function(){
       var grid = document.getElementById('hook-grid');
@@ -1921,6 +1973,9 @@
 
       var cBtnRow = document.querySelector('#c-linkBox .btn-row');
       LinkShortener.attach(cBtnRow, textOf('c-finalUrl'));
+
+      var eBtnRow = document.querySelector('#e-linkBox .btn-row');
+      LinkShortener.attach(eBtnRow, textOf('e-finalUrl'));
 
       var storefrontBtnRow = document.querySelector('#storefrontCard .btn-row');
       LinkShortener.attach(storefrontBtnRow, textOf('storefrontUrl'));

@@ -248,6 +248,7 @@
       <a class="tab" id="tab-flights" href="#">Flights</a>
       <a class="tab" id="tab-activities" href="#">Activities</a>
       <a class="tab" id="tab-car" href="#">Car Hire</a>
+      <a class="tab" id="tab-esim" href="#">Free E-Sim</a>
       <a class="tab" id="tab-tutorials" href="#">Tutorials</a>
     </nav>
   </header>
@@ -301,11 +302,15 @@
     // program is signed up. Same subId1 tracking pattern as Flights, kept in
     // sync with hub.html's CAR_BASE_URL.
     var CAR_BASE_URL = 'https://www.avis.co.za';
+    // Free E-Sim — same subId1 tracking pattern as Flights/Car Hire above,
+    // kept in sync with hub.html's ESIM_BASE_URL.
+    var ESIM_BASE_URL = 'https://avante.1-esim.com/';
     var CATEGORY_LINKS = {
       accommodation: aff ? (STOCKNETWORK_BASE + encodeURIComponent(aff)) : '',
       flights: aff ? (FLIGHT_BASE_URL + (FLIGHT_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(aff)) : '',
       activities: '',
       car: aff ? (CAR_BASE_URL + (CAR_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(aff)) : '',
+      esim: aff ? (ESIM_BASE_URL + (ESIM_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(aff)) : '',
       tutorials: ''
     };
     // Accommodation opens inline, in an iframe right below the header, in
