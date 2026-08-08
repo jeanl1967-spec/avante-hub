@@ -194,11 +194,6 @@
 
   .iframe-wrap{ display:none; }
   .iframe-wrap.show{ display:block; }
-  .iframe-backbar{
-    padding:10px 32px;
-    border-bottom:1px solid var(--line);
-    background:#fff;
-  }
   .back-home-btn{
     appearance:none;
     border:1.5px solid var(--teal);
@@ -210,18 +205,18 @@
     padding:8px 16px;
     border-radius:8px;
     cursor:pointer;
+    margin-bottom:20px;
   }
   .back-home-btn:hover{ background:var(--mint); }
   .iframe-wrap iframe{
     width:100%;
-    height:calc(100vh - 142px);
-    min-height:480px;
+    height:calc(100vh - 96px);
+    min-height:520px;
     border:0;
     display:block;
   }
   @media (max-width: 700px){
-    .iframe-backbar{ padding:10px 16px; }
-    .iframe-wrap iframe{ height:calc(100vh - 112px); }
+    .iframe-wrap iframe{ height:calc(100vh - 66px); }
   }
 
   /* Embed mode (?embed=1): strip the topbar, header and nav so this page
@@ -254,13 +249,11 @@
   </header>
 
   <div class="iframe-wrap" id="accomFrameWrap">
-    <div class="iframe-backbar">
-      <button type="button" class="back-home-btn" id="accomBackBtn">&larr; Back to Great Deals</button>
-    </div>
     <iframe id="accomFrame" title="Accommodation booking"></iframe>
   </div>
 
   <main id="promotions">
+    <button type="button" class="back-home-btn" id="dealsBackBtn">&larr; Back to Home</button>
     <div class="hero">
       <h1>Special Offers</h1>
       <p>Brought to you by Avante Travel</p>
@@ -313,12 +306,13 @@
       esim: aff ? (ESIM_BASE_URL + (ESIM_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(aff)) : '',
       tutorials: ''
     };
-    // Accommodation opens inline, in an iframe right below the header, in
-    // the same window — instead of navigating away or opening a new tab.
-    // Flights and Car Hire are affiliate tracking links, so they navigate
-    // normally in the same window (no new tab, no iframe): affiliate
-    // tracking cookies are set the same way a normal click sets them,
-    // which an iframe risks breaking.
+    // Accommodation (Home) opens inline, in an iframe right below the
+    // header, in the same window — instead of navigating away or opening a
+    // new tab. Flights, Car Hire and Free E-Sim are third-party affiliate
+    // tracking links, so they open in a new tab instead: this keeps Home
+    // open, untouched, in the original tab (so there's always something to
+    // come back to) without risking their tracking cookies the way
+    // embedding them in an iframe would.
     var accomFrameWrap = document.getElementById('accomFrameWrap');
     var accomFrame = document.getElementById('accomFrame');
     var mainEl = document.getElementById('promotions');
@@ -344,6 +338,9 @@
             e.preventDefault();
             showAccommodationFrame(url);
           });
+        }else{
+          el.target = '_blank';
+          el.rel = 'noopener';
         }
       }else{
         el.removeAttribute('href');
@@ -358,9 +355,11 @@
       promotionsTab.addEventListener('click', hideAccommodationFrame);
     }
 
-    var accomBackBtn = document.getElementById('accomBackBtn');
-    if(accomBackBtn){
-      accomBackBtn.addEventListener('click', hideAccommodationFrame);
+    var dealsBackBtn = document.getElementById('dealsBackBtn');
+    if(dealsBackBtn){
+      dealsBackBtn.addEventListener('click', function(){
+        if(CATEGORY_LINKS.accommodation){ showAccommodationFrame(CATEGORY_LINKS.accommodation); }
+      });
     }
 
     // Home (Accommodation) is now the default view on load. Embed mode is
