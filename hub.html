@@ -745,6 +745,7 @@
         <label for="a-baseUrl">Your booking link URL</label>
         <input id="a-baseUrl" placeholder="e.g. https://stock.stocknetwork.co.za/ui/your-own-guid-here">
         <div class="hint">Your own personal StockNetwork booking link — the one issued to you, not anyone else's. Paste it here once; every link this builds will use it.</div>
+        <div class="btn-row" id="a-baseUrlBtnRow" style="margin-top:8px;"></div>
 
         <label for="a-area">Destination or property name</label>
         <input id="a-area" placeholder="e.g. Plettenberg Bay, or a specific resort name">
@@ -1877,6 +1878,12 @@
 
       var aBtnRow = document.querySelector('#a-linkBox .btn-row');
       LinkShortener.attach(aBtnRow, textOf('a-finalUrl'));
+
+      var aBaseUrlBtnRow = document.getElementById('a-baseUrlBtnRow');
+      LinkShortener.attach(aBaseUrlBtnRow, function(){
+        var el = document.getElementById('a-baseUrl');
+        return el ? el.value : '';
+      });
 
       var rBtnRow = document.querySelector('#r-linkBox .btn-row');
       LinkShortener.attach(rBtnRow, textOf('r-finalUrl'));
