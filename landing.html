@@ -421,39 +421,45 @@
           return;
         }
 
-        // When this page is itself sitting inside someone else's iframe
-        // (e.g. the embed link dropped into a "paste a URL" widget like
-        // stocknetwork's), that host platform generates the actual
-        // <iframe> tag and typically sandboxes it — blocking both
-        // target="_blank" popups AND target="_top" (escape the iframe)
-        // navigation, since letting embedded content pop open windows or
-        // hijack the whole host page is exactly what iframe sandboxing is
-        // meant to prevent. We have no way to grant those permissions
-        // from inside the iframe itself. The one kind of navigation that
-        // is (almost) always allowed, with no special permission needed,
-        // is navigating the iframe's OWN content — same as any normal
-        // link click within a page. So when framed, the buttons open the
-        // booking/landing page inside the existing frame instead of
-        // trying to escape it. Standalone visits are unaffected and keep
-        // opening in a new tab as before.
-        var inIframe = false;
-        try{ inIframe = window.self !== window.top; }catch(e){ inIframe = true; }
-        var ctaTarget = inIframe ? '_self' : '_blank';
-
         var html = '<div class="promo-grid">';
         active.forEach(function(r){
           html += '<div class="promo-card">';
           html += '<img class="promo-card-image" id="promoImg' + r.n + '" alt="">';
           if(isSafeUrl(r.data.booking)){
-            html += '<a class="cta" href="' + escapeHtml(r.data.booking) + '" target="' + ctaTarget + '" rel="noopener">Book Now</a>';
+            html += '<a class="cta" href="' + escapeHtml(r.data.booking) + '" target="_blank" rel="noopener">Book Now</a>';
           }
           if(isSafeUrl(r.data.landing)){
-            html += '<a class="cta-outline" href="' + escapeHtml(r.data.landing) + '" target="' + ctaTarget + '" rel="noopener">See full details</a>';
+            html += '<a class="cta-outline" href="' + escapeHtml(r.data.landing) + '" target="_blank" rel="noopener">See full details</a>';
           }
           html += '</div>';
         });
         html += '</div>';
         content.innerHTML = html;
+
+        // When this page is itself sitting inside someone else's iframe
+        // (e.g. the embed link dropped into a "paste a URL" widget like
+        // stocknetwork's), that host platform generates the actual
+        // <iframe> tag and it may sandbox it — blocking target="_blank"
+        // popups outright, with no way for us to grant that permission
+        // from inside the iframe. Rather than assuming that's always the
+        // case, each button now tries to open a real new tab first; only
+        // if the browser actually blocks that popup (window.open returns
+        // nothing) do we fall back to navigating within the current
+        // frame, so the button still does *something* instead of nothing.
+        // Standalone visits and less-restrictive embeds are unaffected
+        // and open in a new tab exactly as before.
+        content.querySelectorAll('.cta, .cta-outline').forEach(function(a){
+          a.addEventListener('click', function(e){
+            var url = a.getAttribute('href');
+            if(!url){ return; }
+            e.preventDefault();
+            var win = null;
+            try{ win = window.open(url, '_blank'); }catch(err){ win = null; }
+            if(!win){
+              window.location.href = url;
+            }
+          });
+        });
 
         active.forEach(function(r){
           var img = document.getElementById('promoImg' + r.n);
