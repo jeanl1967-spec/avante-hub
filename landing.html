@@ -191,6 +191,19 @@
     main{ padding:24px 16px 56px; }
     .hero h1{ font-size:21px; }
   }
+
+  .iframe-wrap{ display:none; }
+  .iframe-wrap.show{ display:block; }
+  .iframe-wrap iframe{
+    width:100%;
+    height:calc(100vh - 96px);
+    min-height:520px;
+    border:0;
+    display:block;
+  }
+  @media (max-width: 700px){
+    .iframe-wrap iframe{ height:calc(100vh - 66px); }
+  }
 </style>
 </head>
 <body>
@@ -201,13 +214,17 @@
     <div class="brand">AVANTE<span>TRAVEL</span></div>
     <nav class="tabs">
       <a class="tab" href="#promotions">Promotions</a>
-      <a class="tab" id="tab-accommodation" href="#" target="_blank" rel="noopener">Accommodation</a>
-      <a class="tab" id="tab-flights" href="#" target="_blank" rel="noopener">Flights</a>
-      <a class="tab" id="tab-activities" href="#" target="_blank" rel="noopener">Activities</a>
-      <a class="tab" id="tab-car" href="#" target="_blank" rel="noopener">Car Hire</a>
-      <a class="tab" id="tab-tutorials" href="#" target="_blank" rel="noopener">Tutorials</a>
+      <a class="tab" id="tab-accommodation" href="#">Accommodation</a>
+      <a class="tab" id="tab-flights" href="#">Flights</a>
+      <a class="tab" id="tab-activities" href="#">Activities</a>
+      <a class="tab" id="tab-car" href="#">Car Hire</a>
+      <a class="tab" id="tab-tutorials" href="#">Tutorials</a>
     </nav>
   </header>
+
+  <div class="iframe-wrap" id="accomFrameWrap">
+    <iframe id="accomFrame" title="Accommodation booking"></iframe>
+  </div>
 
   <main id="promotions">
     <div class="hero">
@@ -249,19 +266,50 @@
       car: aff ? (CAR_BASE_URL + (CAR_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(aff)) : '',
       tutorials: ''
     };
+    // Accommodation opens inline, in an iframe right below the header, in
+    // the same window — instead of navigating away or opening a new tab.
+    // Flights and Car Hire are affiliate tracking links, so they navigate
+    // normally in the same window (no new tab, no iframe): affiliate
+    // tracking cookies are set the same way a normal click sets them,
+    // which an iframe risks breaking.
+    var accomFrameWrap = document.getElementById('accomFrameWrap');
+    var accomFrame = document.getElementById('accomFrame');
+    var mainEl = document.getElementById('promotions');
+
+    function showAccommodationFrame(url){
+      if(!accomFrame.getAttribute('src')){ accomFrame.src = url; }
+      mainEl.style.display = 'none';
+      accomFrameWrap.classList.add('show');
+      window.scrollTo(0, 0);
+    }
+    function hideAccommodationFrame(){
+      accomFrameWrap.classList.remove('show');
+      mainEl.style.display = '';
+    }
+
     Object.keys(CATEGORY_LINKS).forEach(function(key){
       var el = document.getElementById('tab-' + key);
       var url = CATEGORY_LINKS[key];
       if(url){
         el.href = url;
+        if(key === 'accommodation'){
+          el.addEventListener('click', function(e){
+            e.preventDefault();
+            showAccommodationFrame(url);
+          });
+        }
       }else{
         el.removeAttribute('href');
-        el.removeAttribute('target');
         el.classList.add('disabled');
         el.setAttribute('aria-disabled', 'true');
         el.title = 'Coming soon';
       }
     });
+
+    var promotionsTab = document.querySelector('a.tab[href="#promotions"]');
+    if(promotionsTab){
+      promotionsTab.addEventListener('click', hideAccommodationFrame);
+    }
 
     // ---------- Promotions grid ----------
     var content = document.getElementById('content');
