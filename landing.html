@@ -422,17 +422,23 @@
         }
 
         // When this page is itself sitting inside someone else's iframe
-        // (e.g. the embed link dropped into a WordPress page), some
-        // browsers block target="_blank" popups coming from a third-party
-        // iframe even with no sandbox restrictions at all — the buttons
-        // silently do nothing. target="_top" (navigate the outer page
-        // directly) is a normal, direct-click top-level navigation that
-        // isn't subject to that popup blocking, so it stays reliable
-        // wherever this page is embedded. Standalone visits are unaffected
-        // and keep opening in a new tab as before.
+        // (e.g. the embed link dropped into a "paste a URL" widget like
+        // stocknetwork's), that host platform generates the actual
+        // <iframe> tag and typically sandboxes it — blocking both
+        // target="_blank" popups AND target="_top" (escape the iframe)
+        // navigation, since letting embedded content pop open windows or
+        // hijack the whole host page is exactly what iframe sandboxing is
+        // meant to prevent. We have no way to grant those permissions
+        // from inside the iframe itself. The one kind of navigation that
+        // is (almost) always allowed, with no special permission needed,
+        // is navigating the iframe's OWN content — same as any normal
+        // link click within a page. So when framed, the buttons open the
+        // booking/landing page inside the existing frame instead of
+        // trying to escape it. Standalone visits are unaffected and keep
+        // opening in a new tab as before.
         var inIframe = false;
         try{ inIframe = window.self !== window.top; }catch(e){ inIframe = true; }
-        var ctaTarget = inIframe ? '_top' : '_blank';
+        var ctaTarget = inIframe ? '_self' : '_blank';
 
         var html = '<div class="promo-grid">';
         active.forEach(function(r){
