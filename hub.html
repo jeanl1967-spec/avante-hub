@@ -731,6 +731,16 @@
           </div>
         </div>
         <div class="hint" style="margin-top:10px;">This page shows every active hook below in one place, plus quick links to browse other categories. It updates automatically whenever you save a hook.</div>
+
+        <div class="link-box show" id="embedLinkBox" style="margin-top:20px; display:none;">
+          <div class="label">Promotions embed link — no header, for embedding on your own website</div>
+          <div class="url" id="embedUrl"></div>
+          <div class="btn-row">
+            <button class="btn-secondary" id="embedCopyBtn">Copy</button>
+            <button class="btn-outline" id="embedOpenBtn">Open</button>
+          </div>
+        </div>
+        <div class="hint" id="embedHint" style="margin-top:10px; display:none;">Use this one inside an iframe on your own website (like avantetravel.co.za) — it shows just the promotions grid, with no Avante Travel header or navigation, so it won't duplicate your site's own header.</div>
       </div>
       <div class="hook-grid" id="hook-grid"></div>
     </section>
@@ -1093,6 +1103,24 @@
       });
       document.getElementById('storefrontOpenBtn').addEventListener('click', function(){
         window.open(urlStr, '_blank', 'noopener');
+      });
+
+      // Promotions embed link — same page, but with ?embed=1 so the topbar,
+      // header and nav are hidden. Meant for embedding this in an iframe on
+      // your own website (e.g. avantetravel.co.za), not for sharing with
+      // clients directly (they'd have no nav to browse other categories).
+      var embedUrl = new URL('landing.html', window.location.href);
+      embedUrl.searchParams.set('aff', AFF_ID);
+      embedUrl.searchParams.set('embed', '1');
+      var embedUrlStr = embedUrl.toString();
+      document.getElementById('embedUrl').textContent = embedUrlStr;
+      document.getElementById('embedLinkBox').style.display = 'block';
+      document.getElementById('embedHint').style.display = 'block';
+      document.getElementById('embedCopyBtn').addEventListener('click', function(){
+        copyText(embedUrlStr, document.getElementById('embedUrl'));
+      });
+      document.getElementById('embedOpenBtn').addEventListener('click', function(){
+        window.open(embedUrlStr, '_blank', 'noopener');
       });
 
       // "Home" opens the branded go.avantetravel.co.za short link for this
@@ -1896,6 +1924,9 @@
 
       var storefrontBtnRow = document.querySelector('#storefrontCard .btn-row');
       LinkShortener.attach(storefrontBtnRow, textOf('storefrontUrl'));
+
+      var embedBtnRow = document.querySelector('#embedLinkBox .btn-row');
+      LinkShortener.attach(embedBtnRow, textOf('embedUrl'));
 
       var HOOK_COUNT = 6;
       for(var i = 1; i <= HOOK_COUNT; i++){

@@ -1221,6 +1221,7 @@
       var hubLink = window.location.origin + '/hub.html?aff=' + encodeURIComponent(a.affId);
       var bookingLink = STOCKNETWORK_BASE + encodeURIComponent(a.affId);
       var storefrontLink = window.location.origin + '/landing.html?aff=' + encodeURIComponent(a.affId);
+      var embedLink = window.location.origin + '/landing.html?aff=' + encodeURIComponent(a.affId) + '&embed=1';
       var flightLink = FLIGHT_BASE_URL + (FLIGHT_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(a.affId);
       var carLink = CAR_BASE_URL + (CAR_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(a.affId);
 
@@ -1250,6 +1251,7 @@
           detailLinkRow('Booking link (short)', bookingShort) +
           detailLinkRow('Storefront link', storefrontLink) +
           detailLinkRow('Storefront link (short)', storefrontShort) +
+          detailLinkRow('Promotions embed link (no header, for embedding)', embedLink) +
           detailLinkRow('Flight link', flightLink) +
           detailLinkRow('Flight link (short)', flightShort) +
           detailLinkRow('Car rental link', carLink) +
@@ -1285,6 +1287,7 @@
           'LOGIN\nUsername: ' + a.affId + '\nPassword: 0000 (default)\n\n' +
           'LINKS\nHub: ' + hubLink + '\nBooking: ' + bookingLink + '\nBooking (short): ' + bookingShort +
           '\nStorefront: ' + storefrontLink + '\nStorefront (short): ' + storefrontShort +
+          '\nPromotions embed link (no header): ' + embedLink +
           '\nFlight: ' + flightLink + '\nFlight (short): ' + flightShort +
           '\nCar rental: ' + carLink + '\nCar rental (short): ' + carShort + '\n\n' +
           'REVENUE SHARE\n' + formatShareSummary(a.revenueShare) + '\n\n' +

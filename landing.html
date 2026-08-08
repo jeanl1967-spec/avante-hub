@@ -204,6 +204,17 @@
   @media (max-width: 700px){
     .iframe-wrap iframe{ height:calc(100vh - 66px); }
   }
+
+  /* Embed mode (?embed=1): strip the topbar, header and nav so this page
+     can be dropped straight into an iframe elsewhere (e.g. on
+     avantetravel.co.za) without a duplicate header. */
+  body.embed .topbar,
+  body.embed header.hub-header{
+    display:none;
+  }
+  body.embed main{
+    padding-top:24px;
+  }
 </style>
 </head>
 <body>
@@ -244,6 +255,15 @@
     // ---------- Shared: affiliate ID from the URL ----------
     var params = new URLSearchParams(window.location.search);
     var aff = (params.get('aff') || '').trim();
+
+    // ---------- Embed mode ----------
+    // ?embed=1 strips the topbar/header/nav, leaving just the promotions
+    // grid — meant for embedding this page in an iframe (e.g. on
+    // avantetravel.co.za) without stacking a second header.
+    var embed = (params.get('embed') || '').trim();
+    if(embed === '1' || embed.toLowerCase() === 'true'){
+      document.body.classList.add('embed');
+    }
 
     // ---------- Header nav links ----------
     // Jean will supply the real destination URL for the remaining categories.
