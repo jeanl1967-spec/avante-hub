@@ -150,18 +150,15 @@
   .tab.active{ background:var(--teal); color:#fff; }
 
   @media (max-width: 900px){
+    /* Wrap tabs onto as many lines as needed on narrow screens instead of
+       scrolling them off-screen, so every tab stays visible. */
     nav.tabs{
-      flex-wrap:nowrap;
-      overflow-x:auto;
-      -webkit-overflow-scrolling:touch;
+      flex-wrap:wrap;
+      gap:6px 8px;
       width:100%;
-      padding-bottom:4px;
-      scrollbar-width:thin;
     }
-    .tab{ flex:none; white-space:nowrap; }
+    .tab{ padding:8px 12px; font-size:13px; }
   }
-  nav.tabs::-webkit-scrollbar{ height:4px; }
-  nav.tabs::-webkit-scrollbar-thumb{ background:var(--line); border-radius:10px; }
 
   main{
     max-width:760px;
