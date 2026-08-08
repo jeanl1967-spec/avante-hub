@@ -421,15 +421,28 @@
           return;
         }
 
+        // When this page is itself sitting inside someone else's iframe
+        // (e.g. the embed link dropped into a WordPress page), some
+        // browsers block target="_blank" popups coming from a third-party
+        // iframe even with no sandbox restrictions at all — the buttons
+        // silently do nothing. target="_top" (navigate the outer page
+        // directly) is a normal, direct-click top-level navigation that
+        // isn't subject to that popup blocking, so it stays reliable
+        // wherever this page is embedded. Standalone visits are unaffected
+        // and keep opening in a new tab as before.
+        var inIframe = false;
+        try{ inIframe = window.self !== window.top; }catch(e){ inIframe = true; }
+        var ctaTarget = inIframe ? '_top' : '_blank';
+
         var html = '<div class="promo-grid">';
         active.forEach(function(r){
           html += '<div class="promo-card">';
           html += '<img class="promo-card-image" id="promoImg' + r.n + '" alt="">';
           if(isSafeUrl(r.data.booking)){
-            html += '<a class="cta" href="' + escapeHtml(r.data.booking) + '" target="_blank" rel="noopener">Book Now</a>';
+            html += '<a class="cta" href="' + escapeHtml(r.data.booking) + '" target="' + ctaTarget + '" rel="noopener">Book Now</a>';
           }
           if(isSafeUrl(r.data.landing)){
-            html += '<a class="cta-outline" href="' + escapeHtml(r.data.landing) + '" target="_blank" rel="noopener">See full details</a>';
+            html += '<a class="cta-outline" href="' + escapeHtml(r.data.landing) + '" target="' + ctaTarget + '" rel="noopener">See full details</a>';
           }
           html += '</div>';
         });
