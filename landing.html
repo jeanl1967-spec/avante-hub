@@ -75,17 +75,17 @@
   .tab.disabled{ opacity:0.4; cursor:default; pointer-events:none; }
 
   @media (max-width: 900px){
+    /* On narrow screens, wrap the tabs onto as many lines as needed
+       instead of scrolling them off-screen — a horizontal scroll area
+       hid Free E-Sim/Tutorials with no visual hint they existed. */
+    header.hub-header{ gap:10px 20px; }
     nav.tabs{
-      flex-wrap:nowrap;
-      overflow-x:auto;
-      -webkit-overflow-scrolling:touch;
+      flex-wrap:wrap;
+      gap:6px 10px;
       width:100%;
-      padding-bottom:4px;
     }
-    .tab{ flex:none; white-space:nowrap; }
+    .tab{ padding:8px 12px; font-size:13px; }
   }
-  nav.tabs::-webkit-scrollbar{ height:4px; }
-  nav.tabs::-webkit-scrollbar-thumb{ background:var(--line); border-radius:10px; }
 
   main{
     max-width:1320px;
