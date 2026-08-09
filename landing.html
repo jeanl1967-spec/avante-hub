@@ -219,13 +219,12 @@
     .iframe-wrap iframe{ height:calc(100vh - 66px); }
   }
 
-  /* Book Now / See full details open here — a full-width panel that
-     starts just below the topbar/header (so the Avante tabs stay visible
-     and usable above it) rather than a small centered box or a new tab
-     (silently blocked inside stocknetwork's sandboxed embed). The top
-     offset is set in JS from the actual header height, so in embed mode
-     — where the topbar/header don't exist — it correctly starts flush
-     at the very top instead. */
+  /* Book Now / See full details open here as a true full-screen panel —
+     covers the entire viewport, including the header, rather than a
+     small centered box or a new tab (silently blocked inside
+     stocknetwork's sandboxed embed). Covering everything, with nothing
+     peeking through above it, leaves no room for the destination page's
+     own duplicate/sticky search bar to show through a gap. */
   .booking-modal-overlay{
     display:none;
     position:fixed;
@@ -233,7 +232,7 @@
     left:0;
     right:0;
     bottom:0;
-    z-index:9999;
+    z-index:2147483647;
   }
   .booking-modal-overlay.show{ display:block; }
   .booking-modal-box{
@@ -415,21 +414,11 @@
     var bookingModalOverlay = document.getElementById('bookingModalOverlay');
     var bookingModalFrame = document.getElementById('bookingModalFrame');
     var bookingModalClose = document.getElementById('bookingModalClose');
-    var topbarEl = document.querySelector('.topbar');
-    var headerEl = document.querySelector('header.hub-header');
 
     function openBookingModal(url){
-      // Start the panel just below the topbar + header (so the Avante
-      // tabs stay visible above it). In embed mode both are display:none
-      // (offsetParent is null), so this correctly comes out to 0 and the
-      // panel fills the full height instead. Scroll to top first so that
-      // gap always lines up with the header actually being on screen,
-      // even if the visitor had scrolled down the Great Deals grid.
+      // Full-screen — covers the header too, with no gap anywhere for
+      // stocknetwork's own duplicate/sticky search bar to show through.
       window.scrollTo(0, 0);
-      var topOffset = 0;
-      if(topbarEl && topbarEl.offsetParent !== null){ topOffset += topbarEl.offsetHeight; }
-      if(headerEl && headerEl.offsetParent !== null){ topOffset += headerEl.offsetHeight; }
-      bookingModalOverlay.style.top = topOffset + 'px';
       bookingModalFrame.src = url;
       bookingModalOverlay.classList.add('show');
     }
