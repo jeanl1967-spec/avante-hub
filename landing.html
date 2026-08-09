@@ -318,6 +318,7 @@
     if(embed === '1' || embed.toLowerCase() === 'true'){
       document.body.classList.add('embed');
     }
+    var isEmbed = document.body.classList.contains('embed');
 
     // ---------- Header nav links ----------
     // Jean will supply the real destination URL for the remaining categories.
@@ -467,7 +468,15 @@
         active.forEach(function(r){
           html += '<div class="promo-card">';
           html += '<img class="promo-card-image" id="promoImg' + r.n + '" alt="">';
-          if(isSafeUrl(r.data.booking)){
+          // Book Now is left out of the embed (?embed=1) version — the
+          // headerless link Jean embeds on her own site — because
+          // stocknetwork's sandboxed iframe blocks new-tab popups there,
+          // so the button either does nothing or falls back into the same
+          // frame and duplicates their search widget. Jean is following up
+          // with stocknetwork support to remove that block; once it's
+          // fixed this condition can come back out. Standalone (non-embed)
+          // visits are unaffected and keep the Book Now button.
+          if(isSafeUrl(r.data.booking) && !isEmbed){
             html += '<a class="cta" href="' + escapeHtml(r.data.booking) + '" target="_blank" rel="noopener">Book Now</a>';
           }
           if(isSafeUrl(r.data.landing)){
