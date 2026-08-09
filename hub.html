@@ -1329,17 +1329,33 @@
         showBanner();
       });
 
-      // iOS never fires beforeinstallprompt — show the banner anyway and
+      // iOS never fires beforeinstallprompt — show the banner right away and
       // walk them through the manual Share > Add to Home Screen steps.
       if(isIOS){
         showBanner();
+      } else {
+        // Desktop Chrome/Edge and some Android browsers only fire
+        // beforeinstallprompt after their own engagement heuristics are
+        // met (or not at all — Firefox, Safari desktop, etc. never fire
+        // it). Rather than leave the banner silently never appearing,
+        // show it anyway after a short delay if no native prompt has
+        // shown up yet; the Add button falls back to on-screen
+        // instructions instead of the native prompt in that case.
+        setTimeout(function(){
+          if(!deferredPrompt) showBanner();
+        }, 2500);
       }
 
       function openInstructions(){
+        var isDesktop = !/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
         stepsList.innerHTML = isIOS
           ? '<li>Tap the <strong>Share</strong> icon (square with an arrow) in Safari’s toolbar.</li>' +
             '<li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>' +
             '<li>Tap <strong>Add</strong> in the top right.</li>'
+          : isDesktop
+          ? '<li>Look for the <strong>Install</strong> icon (⊕ or a small monitor) at the right side of your address bar.</li>' +
+            '<li>If you don’t see it, open your browser’s menu (⋮) and choose <strong>Install Avante Travel Hub…</strong> or <strong>Save and share</strong> &rarr; <strong>Create shortcut</strong>.</li>' +
+            '<li>Confirm to add it — it’ll open in its own window, like an app.</li>'
           : '<li>Tap your browser’s menu (usually ⋮ or ≡).</li>' +
             '<li>Tap <strong>Add to Home screen</strong> or <strong>Install app</strong>.</li>' +
             '<li>Confirm to add the icon.</li>';
