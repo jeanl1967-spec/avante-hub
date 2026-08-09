@@ -560,6 +560,7 @@
   <div class="topbar">
     <span>Avante Travel &middot; Affiliate Hub</span>
     <span class="topbar-actions">
+      <a id="storefrontLink">View Front Store</a>
       <a id="changePasswordLink">Change Password</a>
       <a id="logoutLink">Log Out</a>
     </span>
@@ -1008,6 +1009,20 @@
     // Free E-Sim — same subId1 tracking pattern as Flights/Car Hire above,
     // kept in sync with landing.html's ESIM_BASE_URL.
     var ESIM_BASE_URL = 'https://avante.1-esim.com/';
+
+    // ---------- Front Store link (topbar, visible on every tab) ----------
+    // Same destination as the "Open" button on the Affiliate Marketing
+    // tab's storefront card, just reachable without switching tabs first.
+    (function(){
+      var link = document.getElementById('storefrontLink');
+      if(!link || !AFF_ID) return;
+      var url = new URL('landing.html', window.location.href);
+      url.searchParams.set('aff', AFF_ID);
+      var urlStr = url.toString();
+      link.addEventListener('click', function(){
+        window.open(urlStr, '_blank', 'noopener');
+      });
+    })();
 
     function affKey(key){ return 'avante-hub:' + AFF_ID + ':' + key; }
     function affSave(key, value){
