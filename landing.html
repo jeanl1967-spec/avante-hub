@@ -77,7 +77,7 @@
   @media (max-width: 900px){
     /* On narrow screens, wrap the tabs onto as many lines as needed
        instead of scrolling them off-screen — a horizontal scroll area
-       hid Free E-Sim/Tutorials with no visual hint they existed. */
+       hid tabs with no visual hint they existed. */
     header.hub-header{ gap:10px 20px; }
     nav.tabs{
       flex-wrap:wrap;
@@ -194,20 +194,6 @@
 
   .iframe-wrap{ display:none; }
   .iframe-wrap.show{ display:block; }
-  .back-home-btn{
-    appearance:none;
-    border:1.5px solid var(--teal);
-    background:#fff;
-    color:var(--teal-dark);
-    font-family:'Montserrat', sans-serif;
-    font-weight:700;
-    font-size:12.5px;
-    padding:8px 16px;
-    border-radius:8px;
-    cursor:pointer;
-    margin-bottom:20px;
-  }
-  .back-home-btn:hover{ background:var(--mint); }
   .iframe-wrap iframe{
     width:100%;
     height:calc(100vh - 96px);
@@ -276,12 +262,6 @@
   body.embed main{
     padding-top:24px;
   }
-  /* No header/nav exists in embed mode, so the Back to Home button has
-     nothing to return to and would leave the visitor with no way back
-     to the Great Deals grid — hide it in embed mode only. */
-  body.embed .back-home-btn{
-    display:none;
-  }
 </style>
 </head>
 <body>
@@ -291,13 +271,12 @@
   <header class="hub-header">
     <div class="brand">AVANTE<span>TRAVEL</span></div>
     <nav class="tabs">
-      <a class="tab" id="tab-accommodation" href="#">Home</a>
-      <a class="tab" href="#promotions">Great Deals</a>
+      <a class="tab" href="#promotions">Home</a>
+      <a class="tab" id="tab-accommodation" href="#">Book Your Accommodation</a>
       <a class="tab" id="tab-flights" href="#">Flights</a>
       <a class="tab" id="tab-activities" href="#">Activities</a>
       <a class="tab" id="tab-car" href="#">Car Hire</a>
       <a class="tab" id="tab-esim" href="#">Free E-Sim</a>
-      <a class="tab" id="tab-tutorials" href="#">Tutorials</a>
     </nav>
   </header>
 
@@ -313,7 +292,6 @@
   </div>
 
   <main id="promotions">
-    <button type="button" class="back-home-btn" id="dealsBackBtn">&larr; Back to Home</button>
     <div class="hero">
       <h1>Special Offers</h1>
       <p>Brought to you by Avante Travel</p>
@@ -363,16 +341,15 @@
       flights: aff ? (FLIGHT_BASE_URL + (FLIGHT_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(aff)) : '',
       activities: '',
       car: aff ? (CAR_BASE_URL + (CAR_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(aff)) : '',
-      esim: aff ? (ESIM_BASE_URL + (ESIM_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(aff)) : '',
-      tutorials: ''
+      esim: aff ? (ESIM_BASE_URL + (ESIM_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(aff)) : ''
     };
-    // Accommodation (Home) opens inline, in an iframe right below the
+    // Book Your Accommodation opens inline, in an iframe right below the
     // header, in the same window — instead of navigating away or opening a
     // new tab. Flights, Car Hire and Free E-Sim are third-party affiliate
     // tracking links, so they open in a new tab instead: this keeps Home
-    // open, untouched, in the original tab (so there's always something to
-    // come back to) without risking their tracking cookies the way
-    // embedding them in an iframe would.
+    // (the Great Deals grid) open, untouched, in the original tab (so
+    // there's always something to come back to) without risking their
+    // tracking cookies the way embedding them in an iframe would.
     var accomFrameWrap = document.getElementById('accomFrameWrap');
     var accomFrame = document.getElementById('accomFrame');
     var mainEl = document.getElementById('promotions');
@@ -431,23 +408,13 @@
       if(e.key === 'Escape'){ closeBookingModal(); }
     });
 
+    // Home is the Great Deals grid itself (main#promotions), so it's
+    // already what's showing by default — no need to force it on load
+    // the way Accommodation used to be. Clicking Home while the
+    // Accommodation iframe is open just needs to hide that iframe again.
     var promotionsTab = document.querySelector('a.tab[href="#promotions"]');
     if(promotionsTab){
       promotionsTab.addEventListener('click', hideAccommodationFrame);
-    }
-
-    var dealsBackBtn = document.getElementById('dealsBackBtn');
-    if(dealsBackBtn){
-      dealsBackBtn.addEventListener('click', function(){
-        if(CATEGORY_LINKS.accommodation){ showAccommodationFrame(CATEGORY_LINKS.accommodation); }
-      });
-    }
-
-    // Home (Accommodation) is now the default view on load. Embed mode is
-    // the exception — it's specifically the header-less promotions-only
-    // link (no nav to switch tabs), so it always shows Great Deals.
-    if(CATEGORY_LINKS.accommodation && !document.body.classList.contains('embed')){
-      showAccommodationFrame(CATEGORY_LINKS.accommodation);
     }
 
     // ---------- Promotions grid ----------
