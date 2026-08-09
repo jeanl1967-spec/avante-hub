@@ -422,7 +422,10 @@
       // Start the panel just below the topbar + header (so the Avante
       // tabs stay visible above it). In embed mode both are display:none
       // (offsetParent is null), so this correctly comes out to 0 and the
-      // panel fills the full height instead.
+      // panel fills the full height instead. Scroll to top first so that
+      // gap always lines up with the header actually being on screen,
+      // even if the visitor had scrolled down the Great Deals grid.
+      window.scrollTo(0, 0);
       var topOffset = 0;
       if(topbarEl && topbarEl.offsetParent !== null){ topOffset += topbarEl.offsetHeight; }
       if(headerEl && headerEl.offsetParent !== null){ topOffset += headerEl.offsetHeight; }
