@@ -334,6 +334,54 @@
   .placeholder h3{ color:var(--navy); margin:0 0 8px; font-size:19px; }
   .placeholder p{ color:var(--muted); margin:0; font-size:13.5px; max-width:420px; margin:0 auto; }
 
+  /* ---- tutorials ---- */
+  .tut-layout{ display:flex; gap:28px; align-items:flex-start; }
+  .tut-menu{ flex:0 0 230px; display:flex; flex-direction:column; gap:6px; }
+  .tut-menu-btn{
+    text-align:left; padding:13px 16px; border-radius:10px;
+    border:1.5px solid var(--line); background:#fff; color:var(--navy);
+    font-weight:700; font-size:13.5px; cursor:pointer; font-family:'Montserrat', sans-serif;
+  }
+  .tut-menu-btn:hover{ background:var(--mint); }
+  .tut-menu-btn.active{ background:var(--teal); color:#fff; border-color:var(--teal); }
+  .tut-content{ flex:1; min-width:0; }
+  .tut-panel{ display:none; }
+  .tut-panel.active{ display:block; }
+  .tut-panel h2{ color:var(--navy); font-size:21px; margin:0 0 6px; }
+  .tut-panel .tut-sub{ color:var(--muted); font-size:13.5px; margin:0 0 24px; }
+  .tut-step{ display:flex; gap:16px; margin-bottom:26px; }
+  .tut-step-num{
+    flex:none; width:32px; height:32px; border-radius:50%;
+    background:var(--teal); color:#fff; font-weight:800; font-size:14px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .tut-step-body{ min-width:0; }
+  .tut-step-body h3{ margin:0 0 6px; font-size:15.5px; color:var(--navy); }
+  .tut-step-body p{ margin:0 0 12px; font-size:13.5px; color:var(--muted); line-height:1.6; }
+  .tut-step-body img{ max-width:100%; border:1.5px solid var(--line); border-radius:10px; display:block; margin-top:4px; box-shadow:0 6px 18px rgba(14,47,68,0.05); }
+  .tut-gif-wrap{ margin:24px 0; }
+  .tut-gif-wrap img{ max-width:100%; border:1.5px solid var(--line); border-radius:12px; display:block; box-shadow:0 8px 24px rgba(14,47,68,0.06); }
+  .tut-gif-caption{ font-size:12px; color:var(--muted); margin-top:8px; text-align:center; }
+  .tut-tip{
+    background:var(--mint); border:1.5px solid #bfe6e2; border-radius:10px;
+    padding:14px 16px; font-size:13px; color:var(--navy); margin-top:10px;
+  }
+  .tut-tip b{ color:var(--teal-dark); }
+  .tut-platform-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:16px; margin-top:18px; }
+  .tut-platform-card{
+    background:#fff; border:1.5px solid var(--line); border-left:4px solid var(--teal);
+    border-radius:12px; padding:16px 18px; box-shadow:0 6px 18px rgba(14,47,68,0.05);
+  }
+  .tut-platform-card h3{ margin:0 0 5px; font-size:15px; color:var(--navy); }
+  .tut-platform-card p{ margin:0; font-size:13px; color:var(--muted); line-height:1.55; }
+  @media (max-width: 700px){
+    .tut-layout{ flex-direction:column; }
+    .tut-menu{ flex-direction:row; flex-wrap:wrap; width:100%; }
+    .tut-menu-btn{ flex:1 1 auto; text-align:center; }
+    .tut-platform-grid{ grid-template-columns:1fr; }
+    .tut-step{ flex-direction:column; }
+  }
+
   /* ---- home / hook grid ---- */
   main.wide{ max-width:960px; }
   .hook-grid{
@@ -922,15 +970,93 @@
       </div>
     </section>
 
-    <!-- ===================== TUTORIALS (placeholder) ===================== -->
+    <!-- ===================== TUTORIALS ===================== -->
     <section class="panel" id="panel-tutorials">
       <div class="hero">
         <h1>Tutorials</h1>
+        <p>Step-by-step guides to help you get the most out of the Hub.</p>
       </div>
-      <div class="placeholder">
-        <div class="badge">Coming soon</div>
-        <h3>Guides and walkthroughs are on the way</h3>
-        <p>Step-by-step tutorials on using the Hub and growing your affiliate sales will appear here.</p>
+      <div class="tut-layout">
+        <div class="tut-menu">
+          <button type="button" class="tut-menu-btn active" data-tut="build-link">How to Build a Great Link</button>
+          <button type="button" class="tut-menu-btn" data-tut="platforms">Best Platforms to Share Your Links</button>
+        </div>
+        <div class="tut-content">
+
+          <div class="tut-panel active" id="tut-build-link">
+            <h2>How to Build a Great Link</h2>
+            <p class="tut-sub">Turn your personal booking link into something clients actually want to click — in under a minute.</p>
+
+            <div class="tut-step">
+              <div class="tut-step-num">1</div>
+              <div class="tut-step-body">
+                <h3>Start with the right tool</h3>
+                <p>Use <strong>Accommodation Link Builder</strong> for stays, or the ready-made "Your Flight Link", "Your Car Link" and "Your Free E-Sim Link" tabs for everything else. Your personal StockNetwork booking link is already saved here — you only ever paste it once.</p>
+                <img src="tut-link-builder-1-booking-url.png" alt="Your booking link URL field, already filled in with your personal StockNetwork link">
+              </div>
+            </div>
+
+            <div class="tut-step">
+              <div class="tut-step-num">2</div>
+              <div class="tut-step-body">
+                <h3>Point it at something specific</h3>
+                <p>Don't send clients to a generic homepage — type a destination, or pick the exact resort from the dropdown. A link that already shows the place they're excited about converts far better than one that makes them start searching from scratch.</p>
+                <img src="tut-link-builder-2-destination.png" alt="Destination or property name field filled in with Plettenberg Bay, and the resort dropdown below it">
+              </div>
+            </div>
+
+            <div class="tut-step">
+              <div class="tut-step-num">3</div>
+              <div class="tut-step-body">
+                <h3>Set your dates and generate</h3>
+                <p>Add check-in and check-out dates if you have them, then click <strong>Generate link</strong>. This builds your personal, trackable booking link — every booking made through it is automatically credited to you.</p>
+                <img src="tut-link-builder-3-dates.png" alt="Check-in and check-out date fields with the Generate link button">
+              </div>
+            </div>
+
+            <div class="tut-step">
+              <div class="tut-step-num">4</div>
+              <div class="tut-step-body">
+                <h3>Shorten it before you share it</h3>
+                <p>Long booking links look messy in a caption or bio. Click <strong>Shorten</strong> to turn it into a clean go.avantetravel.co.za link — still fully tracked back to you, just easier to read, type, and trust.</p>
+              </div>
+            </div>
+
+            <div class="tut-gif-wrap">
+              <img src="tut-build-link-walkthrough.gif" alt="Screen recording of building and shortening a booking link in the Hub, start to finish">
+              <div class="tut-gif-caption">The full flow, start to finish, recorded live in the Hub.</div>
+            </div>
+
+            <div class="tut-tip"><b>Tip:</b> If you're promoting a resort you've featured in a Reel or story, always use its own resort link — not a generic search link. Clients trust what they can already see.</div>
+          </div>
+
+          <div class="tut-panel" id="tut-platforms">
+            <h2>Best Platforms to Share Your Links</h2>
+            <p class="tut-sub">Not all platforms convert the same way. Here's what tends to work best for travel links, and why.</p>
+
+            <div class="tut-platform-grid">
+              <div class="tut-platform-card">
+                <h3>💬 WhatsApp Status &amp; Broadcast Lists</h3>
+                <p>The highest-trust channel you have. A short Status update or a message to a broadcast list of past clients gets seen and clicked because it's coming from a real person they already know, not a stranger's feed.</p>
+              </div>
+              <div class="tut-platform-card">
+                <h3>📸 Instagram &amp; Facebook Reels/Stories</h3>
+                <p>Best for reach. A short video of the resort with your shortened link in the caption or "link in bio" works well — pair it with the Done-For-You Canva templates and captions from your Home tab.</p>
+              </div>
+              <div class="tut-platform-card">
+                <h3>🎵 TikTok</h3>
+                <p>Great for discovery beyond your existing followers. Keep it short and visual — the destination itself is the hook, your link is just the next step.</p>
+              </div>
+              <div class="tut-platform-card">
+                <h3>👥 Facebook Groups &amp; Marketplace</h3>
+                <p>Useful for reaching people already actively planning trips (travel groups, local community groups). Always check a group's rules before posting a link — some restrict promotional posts.</p>
+              </div>
+            </div>
+
+            <div class="tut-tip"><b>Tip:</b> Whichever platform you use, always share your <em>shortened</em> link (see the first tutorial) — it looks cleaner, and it's easier for clients to type if they see it rather than click it.</div>
+          </div>
+
+        </div>
       </div>
     </section>
 
@@ -939,6 +1065,16 @@
   <div class="toast" id="toast">Link copied to your clipboard</div>
 
   <script>
+    // ---------- tutorials sub-menu switching ----------
+    document.querySelectorAll('.tut-menu-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        document.querySelectorAll('.tut-menu-btn').forEach(function(b){ b.classList.remove('active'); });
+        document.querySelectorAll('.tut-panel').forEach(function(p){ p.classList.remove('active'); });
+        btn.classList.add('active');
+        document.getElementById('tut-' + btn.dataset.tut).classList.add('active');
+      });
+    });
+
     // ---------- tab switching ----------
     document.querySelectorAll('.tab').forEach(function(btn){
       btn.addEventListener('click', function(){
