@@ -511,12 +511,29 @@
         html += '</div>';
         content.innerHTML = html;
 
-        // Book Now opens a real new tab/window and leaves this page as-is
-        // (plain target="_blank", no JS override) — Jean's real embed
-        // showed the destination page's own duplicate search widget when
-        // shown in our popup, so for Book Now the destination is simplest
-        // shown fully on its own, outside our page entirely. See full
-        // details keeps opening in the in-page popup.
+        // Book Now: try to open a real new tab first (leaves this page
+        // untouched, exactly like a plain link). stocknetwork's sandboxed
+        // embed blocks real popups outright with no way for us to grant
+        // that permission from inside the iframe — confirmed live: a
+        // plain target="_blank" link did nothing there. So if the
+        // browser silently blocks the popup (window.open returns
+        // nothing), fall back to opening within the page instead of
+        // doing nothing at all. Standalone visits and any less-locked-down
+        // embed still get a normal new tab.
+        content.querySelectorAll('.cta').forEach(function(a){
+          a.addEventListener('click', function(e){
+            var url = a.getAttribute('href');
+            if(!url){ return; }
+            e.preventDefault();
+            var win = null;
+            try{ win = window.open(url, '_blank'); }catch(err){ win = null; }
+            if(!win){
+              window.location.href = url;
+            }
+          });
+        });
+
+        // See full details keeps opening in the in-page popup.
         content.querySelectorAll('.cta-outline').forEach(function(a){
           a.addEventListener('click', function(e){
             var url = a.getAttribute('href');
