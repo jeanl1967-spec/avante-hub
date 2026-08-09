@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Avante Travel Hub — Affiliate Tools</title>
+<link rel="manifest" id="manifestLink" href="hub-manifest.json">
+<meta name="theme-color" content="#0DCDC2">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Avante Hub">
 <script>
   // ---------- Auth gate ----------
   // Runs immediately, before the page renders, so an unauthenticated visitor
@@ -601,6 +608,92 @@
     .modal-card{ padding:22px 18px 20px; }
     .modal-card h2{ font-size:16px; }
   }
+
+  /* ---- Add to Home Screen ---- */
+  .a2hs-banner{
+    display:none;
+    position:fixed;
+    left:16px;
+    right:16px;
+    bottom:16px;
+    max-width:420px;
+    margin:0 auto;
+    background:#fff;
+    border:1.5px solid var(--line);
+    border-radius:14px;
+    box-shadow:0 10px 30px rgba(14,47,68,0.18);
+    padding:14px 14px 14px 16px;
+    align-items:center;
+    gap:12px;
+    z-index:900;
+  }
+  .a2hs-banner.show{ display:flex; }
+  .a2hs-banner-text{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .a2hs-banner-text strong{ font-family:'Montserrat', sans-serif; font-size:13.5px; color:var(--navy); }
+  .a2hs-banner-text span{ font-size:12px; color:var(--muted); }
+  .a2hs-banner-actions{ display:flex; align-items:center; gap:8px; flex:none; }
+  .a2hs-btn{
+    background:var(--teal);
+    color:#fff;
+    border:none;
+    border-radius:8px;
+    padding:9px 16px;
+    font-weight:700;
+    font-size:13px;
+    font-family:'Montserrat', sans-serif;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .a2hs-btn:hover{ background:var(--teal-dark); }
+  .a2hs-dismiss{
+    background:transparent;
+    border:none;
+    font-size:20px;
+    line-height:1;
+    color:var(--muted);
+    cursor:pointer;
+    padding:4px;
+  }
+  .a2hs-dismiss:hover{ color:var(--navy); }
+
+  .a2hs-modal-overlay{
+    display:none;
+    position:fixed;
+    top:0; left:0; right:0; bottom:0;
+    background:rgba(14,47,68,0.45);
+    z-index:2147483000;
+    align-items:center;
+    justify-content:center;
+    padding:20px;
+  }
+  .a2hs-modal-overlay.show{ display:flex; }
+  .a2hs-modal-box{
+    background:#fff;
+    border-radius:14px;
+    padding:26px 24px 22px;
+    max-width:360px;
+    width:100%;
+    position:relative;
+    box-shadow:0 12px 40px rgba(0,0,0,0.2);
+  }
+  .a2hs-modal-box h3{ margin:0 0 14px; color:var(--navy); font-size:17px; }
+  .a2hs-modal-close{
+    position:absolute;
+    top:10px; right:12px;
+    background:transparent;
+    border:none;
+    font-size:20px;
+    line-height:1;
+    cursor:pointer;
+    color:var(--muted);
+  }
+  .a2hs-modal-close:hover{ color:var(--navy); }
+  .a2hs-steps{ margin:0; padding-left:20px; color:var(--ink); font-size:13.5px; line-height:1.7; }
+  .a2hs-steps li{ margin-bottom:6px; }
+
+  @media (max-width: 480px){
+    .a2hs-banner{ left:10px; right:10px; bottom:10px; padding:12px; }
+  }
 </style>
 </head>
 <body>
@@ -612,6 +705,25 @@
       <a id="changePasswordLink">Change Password</a>
       <a id="logoutLink">Log Out</a>
     </span>
+  </div>
+
+  <div class="a2hs-banner" id="a2hsBanner">
+    <div class="a2hs-banner-text">
+      <strong>Add your Hub to your Home Screen</strong>
+      <span>Quick access, just like an app.</span>
+    </div>
+    <div class="a2hs-banner-actions">
+      <button type="button" class="a2hs-btn" id="a2hsInstallBtn">Add</button>
+      <button type="button" class="a2hs-dismiss" id="a2hsDismissBtn" aria-label="Dismiss">&times;</button>
+    </div>
+  </div>
+
+  <div class="a2hs-modal-overlay" id="a2hsModalOverlay">
+    <div class="a2hs-modal-box">
+      <button type="button" class="a2hs-modal-close" id="a2hsModalClose" aria-label="Close">&times;</button>
+      <h3>Add to Home Screen</h3>
+      <ol class="a2hs-steps" id="a2hsSteps"></ol>
+    </div>
   </div>
 
   <div class="modal-overlay" id="pwModalOverlay">
@@ -1157,6 +1269,101 @@
       var urlStr = url.toString();
       link.addEventListener('click', function(){
         window.open(urlStr, '_blank', 'noopener');
+      });
+    })();
+
+    // ---------- Add to Home Screen ----------
+    // Lets an affiliate install their Hub as an app-style icon on their
+    // own phone's home screen, so they can jump straight in without
+    // hunting for a bookmark or retyping their personal Hub link.
+    (function(){
+      var isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+      if(isStandalone) return; // already installed/running as an app
+
+      var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+
+      // Point the manifest's start_url at this affiliate's own Hub link,
+      // so the installed icon reopens their personalized dashboard, not a
+      // bare hub.html with no affiliate ID attached.
+      var manifestLink = document.getElementById('manifestLink');
+      if(manifestLink && AFF_ID){
+        fetch('hub-manifest.json').then(function(r){ return r.json(); }).then(function(m){
+          m.start_url = 'hub.html?aff=' + encodeURIComponent(AFF_ID);
+          var blob = new Blob([JSON.stringify(m)], {type: 'application/json'});
+          manifestLink.setAttribute('href', URL.createObjectURL(blob));
+        }).catch(function(){});
+      }
+
+      if('serviceWorker' in navigator){
+        navigator.serviceWorker.register('sw.js').catch(function(){});
+      }
+
+      var DISMISS_KEY = 'a2hs-hub-dismissed-' + (AFF_ID || 'anon');
+      var DISMISS_DAYS = 14;
+      function recentlyDismissed(){
+        var t = localStorage.getItem(DISMISS_KEY);
+        if(!t) return false;
+        return (Date.now() - parseInt(t, 10)) < DISMISS_DAYS * 24 * 60 * 60 * 1000;
+      }
+
+      var banner = document.getElementById('a2hsBanner');
+      var installBtn = document.getElementById('a2hsInstallBtn');
+      var dismissBtn = document.getElementById('a2hsDismissBtn');
+      var modalOverlay = document.getElementById('a2hsModalOverlay');
+      var modalClose = document.getElementById('a2hsModalClose');
+      var stepsList = document.getElementById('a2hsSteps');
+
+      var deferredPrompt = null;
+
+      function showBanner(){
+        if(recentlyDismissed()) return;
+        banner.classList.add('show');
+      }
+      function hideBanner(){
+        banner.classList.remove('show');
+      }
+
+      window.addEventListener('beforeinstallprompt', function(e){
+        e.preventDefault();
+        deferredPrompt = e;
+        showBanner();
+      });
+
+      // iOS never fires beforeinstallprompt — show the banner anyway and
+      // walk them through the manual Share > Add to Home Screen steps.
+      if(isIOS){
+        showBanner();
+      }
+
+      function openInstructions(){
+        stepsList.innerHTML = isIOS
+          ? '<li>Tap the <strong>Share</strong> icon (square with an arrow) in Safari’s toolbar.</li>' +
+            '<li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>' +
+            '<li>Tap <strong>Add</strong> in the top right.</li>'
+          : '<li>Tap your browser’s menu (usually ⋮ or ≡).</li>' +
+            '<li>Tap <strong>Add to Home screen</strong> or <strong>Install app</strong>.</li>' +
+            '<li>Confirm to add the icon.</li>';
+        modalOverlay.classList.add('show');
+      }
+      function closeInstructions(){
+        modalOverlay.classList.remove('show');
+      }
+
+      installBtn.addEventListener('click', function(){
+        if(deferredPrompt){
+          deferredPrompt.prompt();
+          deferredPrompt.userChoice.then(function(){ deferredPrompt = null; hideBanner(); });
+        } else {
+          openInstructions();
+        }
+      });
+      dismissBtn.addEventListener('click', function(){
+        localStorage.setItem(DISMISS_KEY, String(Date.now()));
+        hideBanner();
+      });
+      modalClose.addEventListener('click', closeInstructions);
+      modalOverlay.addEventListener('click', function(e){
+        if(e.target === modalOverlay) closeInstructions();
       });
     })();
 
