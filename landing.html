@@ -511,7 +511,13 @@
         html += '</div>';
         content.innerHTML = html;
 
-        content.querySelectorAll('.cta, .cta-outline').forEach(function(a){
+        // Book Now opens a real new tab/window and leaves this page as-is
+        // (plain target="_blank", no JS override) — Jean's real embed
+        // showed the destination page's own duplicate search widget when
+        // shown in our popup, so for Book Now the destination is simplest
+        // shown fully on its own, outside our page entirely. See full
+        // details keeps opening in the in-page popup.
+        content.querySelectorAll('.cta-outline').forEach(function(a){
           a.addEventListener('click', function(e){
             var url = a.getAttribute('href');
             if(!url){ return; }
