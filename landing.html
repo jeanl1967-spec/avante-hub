@@ -219,6 +219,54 @@
     .iframe-wrap iframe{ height:calc(100vh - 66px); }
   }
 
+  /* Book Now / See full details open here — a full-width panel that
+     starts just below the topbar/header (so the Avante tabs stay visible
+     and usable above it) rather than a small centered box or a new tab
+     (silently blocked inside stocknetwork's sandboxed embed). The top
+     offset is set in JS from the actual header height, so in embed mode
+     — where the topbar/header don't exist — it correctly starts flush
+     at the very top instead. */
+  .booking-modal-overlay{
+    display:none;
+    position:fixed;
+    top:0;
+    left:0;
+    right:0;
+    bottom:0;
+    z-index:9999;
+  }
+  .booking-modal-overlay.show{ display:block; }
+  .booking-modal-box{
+    background:#fff;
+    width:100%;
+    height:100%;
+    box-shadow:0 -6px 24px rgba(0,0,0,0.15);
+    position:relative;
+  }
+  .booking-modal-close{
+    position:absolute;
+    top:10px;
+    right:14px;
+    background:#fff;
+    border:1.5px solid var(--line);
+    border-radius:50%;
+    width:36px;
+    height:36px;
+    font-size:20px;
+    line-height:1;
+    cursor:pointer;
+    z-index:2;
+    color:var(--navy);
+    box-shadow:0 2px 8px rgba(0,0,0,0.15);
+  }
+  .booking-modal-close:hover{ background:var(--mint); }
+  .booking-modal-box iframe{
+    width:100%;
+    height:100%;
+    border:0;
+    display:block;
+  }
+
   /* Embed mode (?embed=1): strip the topbar, header and nav so this page
      can be dropped straight into an iframe elsewhere (e.g. on
      avantetravel.co.za) without a duplicate header. */
@@ -256,6 +304,13 @@
 
   <div class="iframe-wrap" id="accomFrameWrap">
     <iframe id="accomFrame" title="Accommodation booking"></iframe>
+  </div>
+
+  <div class="booking-modal-overlay" id="bookingModalOverlay">
+    <div class="booking-modal-box">
+      <button type="button" class="booking-modal-close" id="bookingModalClose" aria-label="Close">&times;</button>
+      <iframe id="bookingModalFrame" title="Booking details"></iframe>
+    </div>
   </div>
 
   <main id="promotions">
@@ -356,6 +411,34 @@
       }
     });
 
+    // ---------- Booking modal (Book Now / See full details) ----------
+    var bookingModalOverlay = document.getElementById('bookingModalOverlay');
+    var bookingModalFrame = document.getElementById('bookingModalFrame');
+    var bookingModalClose = document.getElementById('bookingModalClose');
+    var topbarEl = document.querySelector('.topbar');
+    var headerEl = document.querySelector('header.hub-header');
+
+    function openBookingModal(url){
+      // Start the panel just below the topbar + header (so the Avante
+      // tabs stay visible above it). In embed mode both are display:none
+      // (offsetParent is null), so this correctly comes out to 0 and the
+      // panel fills the full height instead.
+      var topOffset = 0;
+      if(topbarEl && topbarEl.offsetParent !== null){ topOffset += topbarEl.offsetHeight; }
+      if(headerEl && headerEl.offsetParent !== null){ topOffset += headerEl.offsetHeight; }
+      bookingModalOverlay.style.top = topOffset + 'px';
+      bookingModalFrame.src = url;
+      bookingModalOverlay.classList.add('show');
+    }
+    function closeBookingModal(){
+      bookingModalOverlay.classList.remove('show');
+      bookingModalFrame.src = 'about:blank';
+    }
+    bookingModalClose.addEventListener('click', closeBookingModal);
+    document.addEventListener('keydown', function(e){
+      if(e.key === 'Escape'){ closeBookingModal(); }
+    });
+
     var promotionsTab = document.querySelector('a.tab[href="#promotions"]');
     if(promotionsTab){
       promotionsTab.addEventListener('click', hideAccommodationFrame);
@@ -435,6 +518,15 @@
         });
         html += '</div>';
         content.innerHTML = html;
+
+        content.querySelectorAll('.cta, .cta-outline').forEach(function(a){
+          a.addEventListener('click', function(e){
+            var url = a.getAttribute('href');
+            if(!url){ return; }
+            e.preventDefault();
+            openBookingModal(url);
+          });
+        });
 
         active.forEach(function(r){
           var img = document.getElementById('promoImg' + r.n);
