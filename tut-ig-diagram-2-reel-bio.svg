@@ -53,8 +53,8 @@
   <circle cx="410" cy="198" r="13" fill="#0DCDC2"/>
   <text x="410" y="203" font-size="12" font-weight="800" fill="#ffffff" text-anchor="middle">3</text>
   <text x="435" y="194" font-size="15" font-weight="700" fill="#0e2f44">Update your bio link</text>
-  <text x="435" y="212" font-size="13" fill="#808080">Go to your profile → <strong>Edit profile</strong> → paste your</text>
-  <text x="435" y="230" font-size="13" fill="#808080">shortened link into the <strong>Website</strong> field → tap Done.</text>
+  <text x="435" y="212" font-size="13" fill="#808080">Go to your profile → Edit profile → paste your shortened</text>
+  <text x="435" y="230" font-size="13" fill="#808080">link into the Website field → tap Done.</text>
   <text x="435" y="248" font-size="13" fill="#808080">This is what "link in bio" actually points to.</text>
 
   <text x="410" y="290" font-size="12" fill="#0aa89f" font-style="italic">Tip: if you promote different resorts often, keep your bio</text>
