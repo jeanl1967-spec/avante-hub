@@ -1,0 +1,58 @@
+<svg viewBox="0 0 860 380" xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">
+  <rect x="0" y="0" width="860" height="380" fill="#ffffff"/>
+
+  <!-- phone frame: LinkedIn post composer -->
+  <rect x="40" y="20" width="260" height="280" rx="30" fill="#0e2f44"/>
+  <rect x="53" y="36" width="234" height="248" rx="18" fill="#ffffff"/>
+
+  <rect x="53" y="36" width="234" height="34" rx="18" fill="#0DCDC2"/>
+  <rect x="53" y="52" width="234" height="18" fill="#0DCDC2"/>
+  <text x="70" y="58" font-size="12" font-weight="700" fill="#ffffff">Create a post</text>
+
+  <!-- caption box with pasted link -->
+  <rect x="66" y="80" width="208" height="70" rx="8" fill="#f4fbfa" stroke="#e3e9e8" stroke-width="1"/>
+  <text x="74" y="96" font-size="8" fill="#0e2f44">Still open for 12–19 Dec —</text>
+  <text x="74" y="108" font-size="8" fill="#0e2f44">The Dunes, Plettenberg Bay.</text>
+  <text x="74" y="120" font-size="8" fill="#0e2f44">Great for a team incentive trip:</text>
+  <text x="74" y="132" font-size="8" font-weight="700" fill="#1877f2">go.avantetravel.co.za/v4JMWj</text>
+  <circle cx="252" cy="110" r="13" fill="#0DCDC2"/>
+  <text x="252" y="115" font-size="12" font-weight="800" fill="#ffffff" text-anchor="middle">1</text>
+
+  <!-- auto link preview card -->
+  <rect x="66" y="158" width="208" height="56" rx="8" fill="#ffffff" stroke="#bfe6e2" stroke-width="1.5"/>
+  <rect x="74" y="166" width="40" height="40" rx="6" fill="#f4fbfa"/>
+  <text x="94" y="190" font-size="16" text-anchor="middle">🏖️</text>
+  <text x="122" y="178" font-size="8" font-weight="700" fill="#0e2f44">The Dunes — Plettenberg Bay</text>
+  <text x="122" y="190" font-size="7" fill="#808080">avantetravel.co.za</text>
+  <circle cx="252" cy="186" r="13" fill="#0DCDC2"/>
+  <text x="252" y="191" font-size="12" font-weight="800" fill="#ffffff" text-anchor="middle">2</text>
+
+  <!-- post button -->
+  <rect x="66" y="224" width="208" height="26" rx="13" fill="#0DCDC2"/>
+  <text x="170" y="241" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">Post</text>
+  <circle cx="252" cy="237" r="13" fill="#0DCDC2"/>
+  <text x="252" y="242" font-size="12" font-weight="800" fill="#ffffff" text-anchor="middle">3</text>
+
+  <!-- legend -->
+  <circle cx="345" cy="60" r="14" fill="#0DCDC2"/>
+  <text x="345" y="65" font-size="13" font-weight="800" fill="#ffffff" text-anchor="middle">1</text>
+  <text x="372" y="50" font-size="15" font-weight="700" fill="#0e2f44">Paste your link straight into the post</text>
+  <text x="372" y="68" font-size="13" fill="#808080">Unlike Instagram or TikTok, a link works directly in a</text>
+  <text x="372" y="86" font-size="13" fill="#808080">LinkedIn post — no "link in bio" workaround needed.</text>
+
+  <circle cx="345" cy="140" r="14" fill="#0DCDC2"/>
+  <text x="345" y="145" font-size="13" font-weight="800" fill="#ffffff" text-anchor="middle">2</text>
+  <text x="372" y="130" font-size="15" font-weight="700" fill="#0e2f44">LinkedIn builds a preview card</text>
+  <text x="372" y="148" font-size="13" fill="#808080">A moment after pasting, a preview card appears — you can</text>
+  <text x="372" y="166" font-size="13" fill="#808080">then delete the plain link text from your caption if you want,</text>
+  <text x="372" y="184" font-size="13" fill="#808080">since the card itself is tappable.</text>
+
+  <circle cx="345" cy="220" r="14" fill="#0DCDC2"/>
+  <text x="345" y="225" font-size="13" font-weight="800" fill="#ffffff" text-anchor="middle">3</text>
+  <text x="372" y="210" font-size="15" font-weight="700" fill="#0e2f44">Tap Post</text>
+  <text x="372" y="228" font-size="13" fill="#808080">Your post appears in your connections' feed and on your</text>
+  <text x="372" y="246" font-size="13" fill="#808080">own profile.</text>
+
+  <text x="345" y="290" font-size="12" fill="#0aa89f" font-style="italic">Illustrative — LinkedIn's composer and preview cards vary</text>
+  <text x="345" y="306" font-size="12" fill="#0aa89f" font-style="italic">slightly by app version.</text>
+</svg>
