@@ -1,0 +1,62 @@
+<svg viewBox="0 0 860 380" xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">
+  <rect x="0" y="0" width="860" height="380" fill="#ffffff"/>
+
+  <!-- phone frame -->
+  <rect x="40" y="20" width="260" height="340" rx="30" fill="#0e2f44"/>
+  <rect x="53" y="36" width="234" height="308" rx="18" fill="#ffffff"/>
+
+  <!-- top bar -->
+  <rect x="53" y="36" width="234" height="34" rx="18" fill="#0DCDC2"/>
+  <rect x="53" y="52" width="234" height="18" fill="#0DCDC2"/>
+  <text x="70" y="58" font-size="12" font-weight="700" fill="#ffffff">New Story</text>
+
+  <!-- sticker icon top right -->
+  <rect x="255" y="46" width="18" height="18" rx="5" fill="#ffffff" opacity="0.9"/>
+  <text x="264" y="59" font-size="11" text-anchor="middle">😊</text>
+  <circle cx="345" cy="55" r="14" fill="#0DCDC2"/>
+  <text x="345" y="60" font-size="13" font-weight="800" fill="#ffffff" text-anchor="middle">1</text>
+
+  <!-- story photo -->
+  <rect x="66" y="80" width="208" height="150" rx="10" fill="#f4fbfa" stroke="#bfe6e2" stroke-width="1.5" stroke-dasharray="5,4"/>
+  <text x="170" y="165" font-size="34" text-anchor="middle">🏖️</text>
+
+  <!-- sticker tray -->
+  <rect x="66" y="238" width="208" height="32" rx="16" fill="#0e2f44"/>
+  <rect x="76" y="244" width="40" height="20" rx="10" fill="#33506a"/>
+  <text x="96" y="258" font-size="8" fill="#ffffff" text-anchor="middle">GIF</text>
+  <rect x="122" y="244" width="46" height="20" rx="10" fill="#33506a"/>
+  <text x="145" y="258" font-size="8" fill="#ffffff" text-anchor="middle">MUSIC</text>
+  <rect x="174" y="244" width="42" height="20" rx="10" fill="#0DCDC2"/>
+  <text x="195" y="258" font-size="8" font-weight="700" fill="#ffffff" text-anchor="middle">LINK</text>
+  <circle cx="345" cy="254" r="14" fill="#0DCDC2"/>
+  <text x="345" y="259" font-size="13" font-weight="800" fill="#ffffff" text-anchor="middle">2</text>
+
+  <!-- link sticker placed -->
+  <rect x="86" y="284" width="168" height="26" rx="13" fill="#ffffff" stroke="#0DCDC2" stroke-width="1.5"/>
+  <text x="170" y="301" font-size="9" font-weight="700" fill="#0aa89f" text-anchor="middle">🔗 go.avantetravel.co.za/v4JMWj</text>
+  <circle cx="345" cy="297" r="14" fill="#0DCDC2"/>
+  <text x="345" y="302" font-size="13" font-weight="800" fill="#ffffff" text-anchor="middle">3</text>
+
+  <!-- legend -->
+  <circle cx="410" cy="56" r="13" fill="#0DCDC2"/>
+  <text x="410" y="61" font-size="12" font-weight="800" fill="#ffffff" text-anchor="middle">1</text>
+  <text x="435" y="52" font-size="15" font-weight="700" fill="#0e2f44">Tap the sticker icon</text>
+  <text x="435" y="70" font-size="13" fill="#808080">The small smiley/square icon near the top of the screen</text>
+  <text x="435" y="88" font-size="13" fill="#808080">while creating a Story.</text>
+
+  <circle cx="410" cy="125" r="13" fill="#0DCDC2"/>
+  <text x="410" y="130" font-size="12" font-weight="800" fill="#ffffff" text-anchor="middle">2</text>
+  <text x="435" y="121" font-size="15" font-weight="700" fill="#0e2f44">Tap "Link" in the sticker list</text>
+  <text x="435" y="139" font-size="13" fill="#808080">Paste your shortened link into the box that appears,</text>
+  <text x="435" y="157" font-size="13" fill="#808080">then tap Done.</text>
+
+  <circle cx="410" cy="196" r="13" fill="#0DCDC2"/>
+  <text x="410" y="201" font-size="12" font-weight="800" fill="#ffffff" text-anchor="middle">3</text>
+  <text x="435" y="192" font-size="15" font-weight="700" fill="#0e2f44">Position it, then post</text>
+  <text x="435" y="210" font-size="13" fill="#808080">Drag the sticker wherever looks best on your photo,</text>
+  <text x="435" y="228" font-size="13" fill="#808080">then tap Share/Your Story. Anyone viewing can now tap</text>
+  <text x="435" y="246" font-size="13" fill="#808080">or swipe up on the sticker to open your link directly.</text>
+
+  <text x="410" y="290" font-size="12" fill="#0aa89f" font-style="italic">Illustrative — Instagram and Facebook Story tools look</text>
+  <text x="410" y="306" font-size="12" fill="#0aa89f" font-style="italic">almost identical, and update from time to time.</text>
+</svg>
