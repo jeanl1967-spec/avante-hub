@@ -524,9 +524,14 @@
       }
 
       // ---- Permanent per-affiliate "don't show again" preference ----
-      // Stored server-side (not just localStorage) so a dismissal follows
-      // the affiliate across every device/browser, not just the one they
-      // checked the box on.
+      // Stored server-side so a dismissal follows the affiliate across
+      // every device/browser, not just the one they checked the box on —
+      // backed up by a local flag on this device so it stays hidden here
+      // immediately and reliably even if the server read lags behind.
+      var PERM_KEY = 'a2hs-permanent-' + (aff || 'anon');
+      function isLocallyRemembered(){
+        return localStorage.getItem(PERM_KEY) === '1';
+      }
       function getRememberedPref(cb){
         if(!aff){ cb(false); return; }
         fetch('/api/prefs?aff=' + encodeURIComponent(aff))
@@ -535,6 +540,7 @@
           .catch(function(){ cb(false); });
       }
       function setRememberedPref(hide){
+        localStorage.setItem(PERM_KEY, hide ? '1' : '0');
         if(!aff) return;
         fetch('/api/prefs?aff=' + encodeURIComponent(aff), {
           method: 'POST',
@@ -577,8 +583,13 @@
         });
       }
 
+      if(isLocallyRemembered()) return; // already dismissed for good on this device
+
       getRememberedPref(function(permanentlyHidden){
-        if(permanentlyHidden) return; // never auto-show for this affiliate again
+        if(permanentlyHidden){
+          localStorage.setItem(PERM_KEY, '1'); // sync the local copy for next time
+          return; // never auto-show for this affiliate again
+        }
 
         window.addEventListener('beforeinstallprompt', function(e){
           e.preventDefault();
