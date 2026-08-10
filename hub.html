@@ -381,12 +381,37 @@
   }
   .tut-platform-card h3{ margin:0 0 5px; font-size:15px; color:var(--navy); }
   .tut-platform-card p{ margin:0; font-size:13px; color:var(--muted); line-height:1.55; }
+
+  /* ---- WhatsApp step-by-step (Best Platforms panel) ---- */
+  .tut-subhead{ margin:32px 0 14px; }
+  .tut-subhead h3{ margin:0 0 4px; font-size:16px; color:var(--navy); }
+  .tut-subhead p{ margin:0; font-size:13px; color:var(--muted); line-height:1.55; }
+  .tut-example-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:16px; margin:14px 0 6px; }
+  .tut-example-card{
+    background:var(--mint); border:1.5px solid #bfe6e2; border-radius:12px;
+    padding:14px 16px;
+  }
+  .tut-example-card .tag{
+    display:inline-block; background:var(--teal); color:#fff; font-size:10.5px;
+    font-weight:700; letter-spacing:0.04em; text-transform:uppercase;
+    padding:3px 9px; border-radius:100px; margin-bottom:8px;
+  }
+  .tut-example-card h4{ margin:0 0 8px; font-size:14px; color:var(--navy); }
+  .tut-example-card ol{ margin:0; padding-left:18px; font-size:12.5px; color:var(--ink); line-height:1.65; }
+  .tut-example-card ol li{ margin-bottom:4px; }
+  .tut-caption-bubble{
+    margin-top:10px; background:#dcf8c6; border-radius:10px; border-bottom-left-radius:2px;
+    padding:9px 12px; font-size:12px; color:#1c1c1c; line-height:1.5;
+  }
   @media (max-width: 700px){
     .tut-layout{ flex-direction:column; }
     .tut-menu{ flex-direction:row; flex-wrap:wrap; width:100%; }
     .tut-menu-btn{ flex:1 1 auto; text-align:center; }
     .tut-platform-grid{ grid-template-columns:1fr; }
     .tut-step{ flex-direction:column; }
+  }
+  @media (max-width: 560px){
+    .tut-example-grid{ grid-template-columns:1fr; }
   }
 
   /* ---- home / hook grid ---- */
@@ -1162,6 +1187,73 @@
               <div class="tut-platform-card">
                 <h3>👥 Facebook Groups &amp; Marketplace</h3>
                 <p>Useful for reaching people already actively planning trips (travel groups, local community groups). Always check a group's rules before posting a link — some restrict promotional posts.</p>
+              </div>
+            </div>
+
+            <div class="tut-subhead">
+              <h3>💬 Step-by-step: Sharing on WhatsApp Status &amp; Broadcast Lists</h3>
+              <p>The exact steps, from building the link to sending it — using <strong>The Dunes</strong> (a specific resort in Plettenberg Bay) and <strong>Plettenberg Bay</strong> (a whole area) as examples.</p>
+            </div>
+
+            <div class="tut-step">
+              <div class="tut-step-num">1</div>
+              <div class="tut-step-body">
+                <h3>Decide: one resort, or a whole area?</h3>
+                <p>Promoting a specific property you have photos or a video of? Link straight to it — clients trust what they can already see. Not sure which resort someone wants, or just showcasing a destination? Link to the whole area instead, so they can browse everything available for those dates.</p>
+              </div>
+            </div>
+
+            <div class="tut-step">
+              <div class="tut-step-num">2</div>
+              <div class="tut-step-body">
+                <h3>Build the link in Accommodation Link Builder</h3>
+                <p>Both examples use the same tool, just one field done differently:</p>
+                <div class="tut-example-grid">
+                  <div class="tut-example-card">
+                    <span class="tag">Specific resort</span>
+                    <h4>Example: The Dunes</h4>
+                    <ol>
+                      <li>Under <strong>Or pick a resort from the list</strong>, select <strong>The Dunes</strong> — this fills in the Destination field for you.</li>
+                      <li>Set <strong>Check-in</strong> and <strong>Check-out</strong> dates, e.g. 12–19 Dec.</li>
+                      <li>Click <strong>Generate link</strong>, then <strong>Shorten</strong>.</li>
+                    </ol>
+                  </div>
+                  <div class="tut-example-card">
+                    <span class="tag">Whole area</span>
+                    <h4>Example: Plettenberg Bay</h4>
+                    <ol>
+                      <li>In <strong>Destination or property name</strong>, type <strong>Plettenberg Bay</strong> — leave the resort dropdown on <strong>— Select a resort —</strong>.</li>
+                      <li>Set the same <strong>Check-in</strong> / <strong>Check-out</strong> dates.</li>
+                      <li>Click <strong>Generate link</strong>, then <strong>Shorten</strong> — this link shows everything available in Plett for those dates.</li>
+                    </ol>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="tut-step">
+              <div class="tut-step-num">3</div>
+              <div class="tut-step-body">
+                <h3>Post it to your WhatsApp Status</h3>
+                <p>Open WhatsApp &rarr; the <strong>Status</strong> tab &rarr; tap the camera/pencil icon. Choose a photo or short video (use the Done-For-You Canva templates on your Home tab if you have one for that resort), add a caption with your shortened link, then post.</p>
+                <div class="tut-caption-bubble">📍 The Dunes, Plett — 12–19 Dec still open! Book here: go.avantetravel.co.za/xxxxx</div>
+              </div>
+            </div>
+
+            <div class="tut-step">
+              <div class="tut-step-num">4</div>
+              <div class="tut-step-body">
+                <h3>Send it to a Broadcast List</h3>
+                <p>In WhatsApp, go to <strong>Chats</strong> &rarr; tap the menu (&#8942;) &rarr; <strong>New broadcast</strong> &rarr; select past clients or prospects who'd like this destination. Send the same caption and link — each person receives it as an ordinary message, not a group chat, so it never looks mass-sent.</p>
+                <div class="tut-tip" style="margin-top:12px;"><b>Note:</b> a broadcast only reaches contacts who have your number saved in their own phone. Keep your client list up to date so nothing gets missed.</div>
+              </div>
+            </div>
+
+            <div class="tut-step">
+              <div class="tut-step-num">5</div>
+              <div class="tut-step-body">
+                <h3>Follow up</h3>
+                <p>Check the eye icon on your Status to see who viewed it, and message anyone who replies or views more than once — that's usually genuine interest. A quick "Want me to check availability for your dates?" is often all it takes to turn a view into a booking.</p>
               </div>
             </div>
 
