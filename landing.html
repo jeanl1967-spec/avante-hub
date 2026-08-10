@@ -85,7 +85,6 @@
      nav tabs, and takes the affiliate (not the customer) to their Hub
      login so they can manage this storefront. */
   .affiliate-login{
-    margin-left:auto;
     display:inline-flex;
     align-items:center;
     gap:6px;
@@ -101,6 +100,28 @@
   }
   .affiliate-login:hover{ background:var(--mint); }
 
+  /* Header trigger to manually bring back the Add to Home Screen flow —
+     always available even if the popup was permanently dismissed, or on
+     a brand new device where it hasn't shown yet. */
+  .a2hs-header-btn{
+    margin-left:auto;
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    padding:9px 16px;
+    border:1.5px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+    color:var(--navy);
+    font-weight:700;
+    font-size:13px;
+    font-family:'Montserrat', sans-serif;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+  .a2hs-header-btn:hover{ background:var(--mint); border-color:#bfe6e2; }
+  .a2hs-header-btn[hidden]{ display:none; }
+
   @media (max-width: 900px){
     /* On narrow screens, wrap the tabs onto as many lines as needed
        instead of scrolling them off-screen — a horizontal scroll area
@@ -112,7 +133,7 @@
       width:100%;
     }
     .tab{ padding:8px 12px; font-size:13px; }
-    .affiliate-login{ margin-left:0; }
+    .a2hs-header-btn{ margin-left:0; }
   }
 
   main{
@@ -313,6 +334,11 @@
   .a2hs-banner-text{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
   .a2hs-banner-text strong{ font-family:'Montserrat', sans-serif; font-size:13.5px; color:var(--navy); }
   .a2hs-banner-text span{ font-size:12px; color:var(--muted); }
+  .a2hs-remember{
+    display:flex; align-items:center; gap:6px; margin-top:6px;
+    font-size:11.5px; color:var(--muted); cursor:pointer; user-select:none;
+  }
+  .a2hs-remember input{ margin:0; cursor:pointer; }
   .a2hs-banner-actions{ display:flex; align-items:center; gap:8px; flex:none; }
   .a2hs-btn{
     background:var(--teal);
@@ -392,6 +418,7 @@
       <a class="tab" id="tab-car" href="#">Car Hire</a>
       <a class="tab" id="tab-esim" href="#">Free E-Sim</a>
     </nav>
+    <button type="button" class="a2hs-header-btn" id="a2hsHeaderBtn" hidden>📲 Add to Home Screen</button>
     <a class="affiliate-login" id="affiliateLoginLink" href="login.html" target="_blank" rel="noopener">Affiliate Login</a>
   </header>
 
@@ -410,6 +437,10 @@
     <div class="a2hs-banner-text">
       <strong>Add this to your Home Screen</strong>
       <span>Quick access, just like an app.</span>
+      <label class="a2hs-remember">
+        <input type="checkbox" id="a2hsRememberCheckbox">
+        Don't show me this again
+      </label>
     </div>
     <div class="a2hs-banner-actions">
       <button type="button" class="a2hs-btn" id="a2hsInstallBtn">Add</button>
@@ -460,10 +491,11 @@
     // embed mode, since this page is then living inside someone else's
     // site and "install this page" would be confusing there.
     (function(){
-      if(isEmbed) return;
+      var headerBtn = document.getElementById('a2hsHeaderBtn');
+      if(isEmbed) return; // no header button, no banner, in embed mode
 
       var isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-      if(isStandalone) return; // already installed/running as an app
+      if(isStandalone) return; // already installed/running as an app — nothing to offer
 
       var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
 
@@ -491,9 +523,30 @@
         return (Date.now() - parseInt(t, 10)) < DISMISS_DAYS * 24 * 60 * 60 * 1000;
       }
 
+      // ---- Permanent per-affiliate "don't show again" preference ----
+      // Stored server-side (not just localStorage) so a dismissal follows
+      // the affiliate across every device/browser, not just the one they
+      // checked the box on.
+      function getRememberedPref(cb){
+        if(!aff){ cb(false); return; }
+        fetch('/api/prefs?aff=' + encodeURIComponent(aff))
+          .then(function(r){ return r.json(); })
+          .then(function(data){ cb(!!(data && data.hideA2HS)); })
+          .catch(function(){ cb(false); });
+      }
+      function setRememberedPref(hide){
+        if(!aff) return;
+        fetch('/api/prefs?aff=' + encodeURIComponent(aff), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ hideA2HS: hide })
+        }).catch(function(){});
+      }
+
       var banner = document.getElementById('a2hsBanner');
       var installBtn = document.getElementById('a2hsInstallBtn');
       var dismissBtn = document.getElementById('a2hsDismissBtn');
+      var rememberCheckbox = document.getElementById('a2hsRememberCheckbox');
       var modalOverlay = document.getElementById('a2hsModalOverlay');
       var modalClose = document.getElementById('a2hsModalClose');
       var stepsList = document.getElementById('a2hsSteps');
@@ -508,28 +561,48 @@
         banner.classList.remove('show');
       }
 
-      window.addEventListener('beforeinstallprompt', function(e){
-        e.preventDefault();
-        deferredPrompt = e;
-        showBanner();
-      });
-
-      // iOS never fires beforeinstallprompt — show the banner right away and
-      // walk them through the manual Share > Add to Home Screen steps.
-      if(isIOS){
-        showBanner();
-      } else {
-        // Desktop Chrome/Edge and some Android browsers only fire
-        // beforeinstallprompt after their own engagement heuristics are
-        // met (or not at all — Firefox, Safari desktop, etc. never fire
-        // it). Rather than leave the banner silently never appearing,
-        // show it anyway after a short delay if no native prompt has
-        // shown up yet; the Add button falls back to on-screen
-        // instructions instead of the native prompt in that case.
-        setTimeout(function(){
-          if(!deferredPrompt) showBanner();
-        }, 2500);
+      // The header button is always available (as long as we're not embed
+      // or already installed, per the early returns above) so the affiliate
+      // can bring this flow back any time — including right after
+      // permanently dismissing it, or on a brand new device.
+      if(headerBtn){
+        headerBtn.hidden = false;
+        headerBtn.addEventListener('click', function(){
+          if(deferredPrompt){
+            deferredPrompt.prompt();
+            deferredPrompt.userChoice.then(function(){ deferredPrompt = null; });
+          } else {
+            openInstructions();
+          }
+        });
       }
+
+      getRememberedPref(function(permanentlyHidden){
+        if(permanentlyHidden) return; // never auto-show for this affiliate again
+
+        window.addEventListener('beforeinstallprompt', function(e){
+          e.preventDefault();
+          deferredPrompt = e;
+          showBanner();
+        });
+
+        // iOS never fires beforeinstallprompt — show the banner right away and
+        // walk them through the manual Share > Add to Home Screen steps.
+        if(isIOS){
+          showBanner();
+        } else {
+          // Desktop Chrome/Edge and some Android browsers only fire
+          // beforeinstallprompt after their own engagement heuristics are
+          // met (or not at all — Firefox, Safari desktop, etc. never fire
+          // it). Rather than leave the banner silently never appearing,
+          // show it anyway after a short delay if no native prompt has
+          // shown up yet; the Add button falls back to on-screen
+          // instructions instead of the native prompt in that case.
+          setTimeout(function(){
+            if(!deferredPrompt) showBanner();
+          }, 2500);
+        }
+      });
 
       function openInstructions(){
         var isDesktop = !/android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
@@ -551,6 +624,7 @@
       }
 
       installBtn.addEventListener('click', function(){
+        if(rememberCheckbox && rememberCheckbox.checked) setRememberedPref(true);
         if(deferredPrompt){
           deferredPrompt.prompt();
           deferredPrompt.userChoice.then(function(){ deferredPrompt = null; hideBanner(); });
@@ -559,7 +633,11 @@
         }
       });
       dismissBtn.addEventListener('click', function(){
-        localStorage.setItem(DISMISS_KEY, String(Date.now()));
+        if(rememberCheckbox && rememberCheckbox.checked){
+          setRememberedPref(true);
+        } else {
+          localStorage.setItem(DISMISS_KEY, String(Date.now()));
+        }
         hideBanner();
       });
       modalClose.addEventListener('click', closeInstructions);
