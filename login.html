@@ -207,7 +207,10 @@
           loginBtn.disabled = false;
           loginBtn.textContent = 'Log In';
           if(res.data && res.data.ok){
-            try{ localStorage.setItem('avante-hub-auth:' + aff, '1'); }catch(e){}
+            try{
+              localStorage.setItem('avante-hub-auth:' + aff, '1');
+              localStorage.setItem('avante-hub-last-aff', aff);
+            }catch(e){}
             window.location.href = 'hub.html?aff=' + encodeURIComponent(aff);
           }else{
             showError((res.data && res.data.error) || 'Login failed. Please check your details.');

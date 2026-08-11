@@ -21,10 +21,31 @@
     var aff = new URLSearchParams(window.location.search).get('aff') || '';
     var authed = false;
     try{ authed = !!aff && localStorage.getItem('avante-hub-auth:' + aff) === '1'; }catch(e){}
-    if(!authed){
-      var target = 'login.html' + (aff ? ('?aff=' + encodeURIComponent(aff)) : '');
-      window.location.replace(target);
+
+    if(authed){
+      // Remember this as the affiliate this device belongs to, so a
+      // home-screen icon that launches without ?aff= (a known PWA quirk —
+      // the install-time manifest doesn't always carry it) can still land
+      // this affiliate straight back in their own Hub below.
+      try{ localStorage.setItem('avante-hub-last-aff', aff); }catch(e){}
+      return;
     }
+
+    if(!aff){
+      var lastAff = '';
+      try{ lastAff = localStorage.getItem('avante-hub-last-aff') || ''; }catch(e){}
+      if(lastAff){
+        var lastAuthed = false;
+        try{ lastAuthed = localStorage.getItem('avante-hub-auth:' + lastAff) === '1'; }catch(e){}
+        if(lastAuthed){
+          window.location.replace('hub.html?aff=' + encodeURIComponent(lastAff));
+          return;
+        }
+      }
+    }
+
+    var target = 'login.html' + (aff ? ('?aff=' + encodeURIComponent(aff)) : '');
+    window.location.replace(target);
   })();
 </script>
 <link rel="preconnect" href="https://fonts.gstatic.com">
