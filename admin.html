@@ -284,6 +284,36 @@
     .modal-card{ padding:22px 18px 20px; }
     .modal-card h2{ font-size:16px; }
   }
+
+  /* ---- default hooks (admin-managed storefront content) ---- */
+  .hook-grid{ display:grid; grid-template-columns:repeat(2, 1fr); gap:18px; }
+  @media (max-width:640px){ .hook-grid{ grid-template-columns:1fr; } }
+  .hook-card{
+    background:#fff; border:1.5px solid var(--line); border-radius:14px;
+    padding:20px 22px 24px; box-shadow:0 8px 24px rgba(14,47,68,0.05);
+  }
+  .hook-badge{
+    display:inline-block; background:var(--mint); color:var(--teal-dark);
+    font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
+    padding:4px 10px; border-radius:100px; margin-bottom:10px;
+  }
+  .hook-placeholder{
+    width:100%; aspect-ratio:4 / 5; height:auto; display:flex; align-items:center;
+    justify-content:center; text-align:center; background:var(--mint);
+    border:1.5px dashed #bfe6e2; border-radius:10px; color:var(--muted);
+    font-size:12px; margin-bottom:4px;
+  }
+  .hook-image-wrap{ margin-bottom:8px; }
+  .hook-image{
+    display:none; width:100%; aspect-ratio:4 / 5; height:auto; object-fit:contain;
+    background:var(--mint); border-radius:10px; border:1.5px solid var(--line);
+  }
+  .hook-image.show{ display:block; }
+  .hook-image-wrap.has-image .hook-placeholder{ display:none; }
+  .hook-card label{ font-size:11px; margin:12px 0 5px; display:block; }
+  .hook-card input{ padding:8px 10px; font-size:13px; }
+  .hook-card button.primary{ margin-top:16px; padding:10px; font-size:13px; }
+  .hook-updated{ font-size:11px; color:var(--muted); margin-top:8px; }
 </style>
 </head>
 <body>
@@ -389,6 +419,7 @@
     <div class="brand">AVANTE<span>TRAVEL &middot; ADMIN</span></div>
     <nav class="tabs" id="tabs">
       <button class="tab active" data-panel="affiliates">Affiliates</button>
+      <button class="tab" data-panel="defaultHooks">Default Hooks</button>
       <button class="tab" data-panel="payouts">Payouts</button>
       <button class="tab" data-panel="leaderboard">Leaderboard</button>
       <button class="tab" data-panel="tutorial">How Payouts Work</button>
@@ -428,6 +459,15 @@
           <div class="empty-state" id="affiliatesEmpty" style="display:none;">No affiliates added yet — click "+ Add Affiliate" to add your first one.</div>
         </div>
       </div>
+    </section>
+
+    <!-- ===================== DEFAULT HOOKS ===================== -->
+    <section class="panel" id="panel-defaultHooks">
+      <div class="hero">
+        <h1>Default Hooks</h1>
+        <p>The shared fallback ad content for each of the 6 storefront hook slots. Any affiliate hook set to "Let Admin Manage" — or a self-managed hook whose dates have passed — shows this content automatically. Editing a hook here updates it everywhere immediately.</p>
+      </div>
+      <div class="hook-grid" id="defaultHookGrid"></div>
     </section>
 
     <!-- ===================== PAYOUTS ===================== -->
@@ -1561,6 +1601,169 @@
           btn.textContent = 'Add Revenue Entry';
         });
     });
+
+    // ---------- Default Hooks (admin fallback ad content) ----------
+    (function(){
+      var grid = document.getElementById('defaultHookGrid');
+      var HOOK_COUNT = 6;
+      var IMAGE_MAX_BYTES = 4 * 1024 * 1024; // 4MB
+      var ADMIN_AFF = '__admin__';
+      var loaded = false;
+
+      function isValidUrl(v){ return /^https?:\/\//i.test(v); }
+
+      function fmtDate(iso){
+        if(!iso) return 'Never updated';
+        try{
+          var d = new Date(iso);
+          return 'Last updated ' + d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) + ' at ' + d.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
+        }catch(e){ return 'Last updated'; }
+      }
+
+      var html = '';
+      for(var i = 1; i <= HOOK_COUNT; i++){
+        html +=
+          '<div class="hook-card">' +
+            '<div class="hook-badge">Hook ' + i + '</div>' +
+            '<div class="hook-image-wrap" id="dh' + i + '-imageWrap">' +
+              '<img class="hook-image" id="dh' + i + '-image" alt="Default hook ' + i + ' creative">' +
+              '<div class="hook-placeholder" id="dh' + i + '-placeholder">Ad creative placeholder</div>' +
+            '</div>' +
+            '<input type="file" accept="image/*" id="dh' + i + '-imageInput" style="display:none;">' +
+            '<div class="btn-row" style="margin-top:0;">' +
+              '<button type="button" class="btn-outline" data-upload-image="' + i + '">Upload image</button>' +
+            '</div>' +
+            '<div class="status" id="dh' + i + '-imageStatus"></div>' +
+            '<label for="dh' + i + '-booking">Booking link</label>' +
+            '<input id="dh' + i + '-booking" placeholder="Default booking link for this hook slot">' +
+            '<label for="dh' + i + '-landing">Landing page link</label>' +
+            '<input id="dh' + i + '-landing" placeholder="Default landing page link for this hook slot">' +
+            '<button class="primary" data-hook-save="' + i + '">Save default</button>' +
+            '<div class="status" id="dh' + i + '-errorStatus"></div>' +
+            '<div class="hook-updated" id="dh' + i + '-updated"></div>' +
+          '</div>';
+      }
+      grid.innerHTML = html;
+
+      function setImageSrc(n){
+        var img = document.getElementById('dh' + n + '-image');
+        var placeholder = document.getElementById('dh' + n + '-placeholder');
+        img.onload = function(){ img.classList.add('show'); placeholder.style.display = 'none'; };
+        img.onerror = function(){ img.classList.remove('show'); placeholder.style.display = 'flex'; };
+        img.src = '/api/hook-image?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(n) + '&t=' + Date.now();
+      }
+
+      function uploadImage(n, file){
+        var statusEl = document.getElementById('dh' + n + '-imageStatus');
+        statusEl.className = 'status';
+        statusEl.textContent = '';
+
+        if(!/^image\//.test(file.type)){
+          statusEl.textContent = 'Please choose an image file (JPG, PNG, GIF, or WebP).';
+          statusEl.className = 'status show';
+          return;
+        }
+        if(file.size > IMAGE_MAX_BYTES){
+          statusEl.textContent = 'That image is too large — please use one under 4MB.';
+          statusEl.className = 'status show';
+          return;
+        }
+
+        var img = document.getElementById('dh' + n + '-image');
+        var placeholder = document.getElementById('dh' + n + '-placeholder');
+        var previewUrl = URL.createObjectURL(file);
+        img.onerror = null;
+        img.onload = function(){ img.classList.add('show'); placeholder.style.display = 'none'; };
+        img.src = previewUrl;
+
+        fetch('/api/hook-image?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(n), {
+          method: 'POST',
+          headers: { 'content-type': file.type },
+          body: file
+        }).then(function(res){
+          if(!res.ok) throw new Error('upload failed');
+          showToast('Default image uploaded');
+        }).catch(function(){
+          statusEl.textContent = 'The preview looks fine here, but we couldn\'t save the image to the server — please try again.';
+          statusEl.className = 'status show';
+        });
+      }
+
+      function saveHook(n){
+        var p = 'dh' + n + '-';
+        var booking = document.getElementById(p + 'booking').value.trim();
+        var landing = document.getElementById(p + 'landing').value.trim();
+        var errorEl = document.getElementById(p + 'errorStatus');
+        errorEl.className = 'status';
+        errorEl.textContent = '';
+
+        if(booking && !isValidUrl(booking)){
+          errorEl.textContent = 'The booking link should start with https://';
+          errorEl.className = 'status show';
+          return;
+        }
+        if(landing && !isValidUrl(landing)){
+          errorEl.textContent = 'The landing page link should start with https://';
+          errorEl.className = 'status show';
+          return;
+        }
+
+        adminPost('setDefaultHook', { hook: n, booking: booking, landing: landing }).then(function(res){
+          if(res.data && res.data.ok){
+            showToast('Default hook ' + n + ' saved');
+            document.getElementById(p + 'updated').textContent = fmtDate(res.data.record && res.data.record.updatedAt);
+          }else{
+            errorEl.textContent = (res.data && res.data.error) || 'Could not save this default hook.';
+            errorEl.className = 'status show';
+          }
+        }).catch(function(){
+          errorEl.textContent = 'Could not reach the server — please try again.';
+          errorEl.className = 'status show';
+        });
+      }
+
+      function loadDefaultHooks(){
+        return adminGet('defaultHooks').then(function(data){
+          if(!data || !data.ok || !data.hooks) return;
+          data.hooks.forEach(function(h){
+            document.getElementById('dh' + h.hook + '-booking').value = h.booking || '';
+            document.getElementById('dh' + h.hook + '-landing').value = h.landing || '';
+            document.getElementById('dh' + h.hook + '-updated').textContent = fmtDate(h.updatedAt);
+            setImageSrc(h.hook);
+          });
+          loaded = true;
+        });
+      }
+
+      grid.addEventListener('click', function(e){
+        var saveN = e.target.getAttribute('data-hook-save');
+        if(saveN){
+          saveHook(saveN);
+          return;
+        }
+        var uploadN = e.target.getAttribute('data-upload-image');
+        if(uploadN){
+          document.getElementById('dh' + uploadN + '-imageInput').click();
+        }
+      });
+
+      grid.addEventListener('change', function(e){
+        var m = e.target.id && e.target.id.match(/^dh(\d+)-imageInput$/);
+        if(m && e.target.files && e.target.files[0]){
+          uploadImage(m[1], e.target.files[0]);
+          e.target.value = '';
+        }
+      });
+
+      // Load once, the first time the Default Hooks tab is opened.
+      document.querySelectorAll('.tab').forEach(function(btn){
+        if(btn.dataset.panel === 'defaultHooks'){
+          btn.addEventListener('click', function(){
+            if(!loaded) loadDefaultHooks();
+          });
+        }
+      });
+    })();
 
     // ---------- initial load ----------
     loadAffiliates();

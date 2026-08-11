@@ -868,7 +868,11 @@
           var img = document.getElementById('promoImg' + r.n);
           img.onload = function(){ img.classList.add('show'); };
           img.onerror = function(){ img.classList.remove('show'); };
-          img.src = '/api/hook-image?aff=' + encodeURIComponent(aff) + '&hook=' + r.n;
+          // Admin-managed (or expired self-managed) hooks show the admin's
+          // image, which is stored under the reserved "__admin__" key —
+          // not this affiliate's own ID.
+          var imgAff = (r.data.source === 'admin') ? '__admin__' : aff;
+          img.src = '/api/hook-image?aff=' + encodeURIComponent(imgAff) + '&hook=' + r.n;
         });
       });
     }

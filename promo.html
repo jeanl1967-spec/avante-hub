@@ -207,7 +207,11 @@
       var imgEl = document.getElementById('promoImage');
       imgEl.onload = function(){ imgEl.classList.add('show'); };
       imgEl.onerror = function(){ imgEl.classList.remove('show'); };
-      imgEl.src = '/api/hook-image?aff=' + encodeURIComponent(aff) + '&hook=' + encodeURIComponent(hook);
+      // Admin-managed (or expired self-managed) hooks show the admin's
+      // image, which is stored under the reserved "__admin__" key — not
+      // this affiliate's own ID.
+      var imgAff = (data.source === 'admin') ? '__admin__' : aff;
+      imgEl.src = '/api/hook-image?aff=' + encodeURIComponent(imgAff) + '&hook=' + encodeURIComponent(hook);
     }
 
     if(!aff || !hook){

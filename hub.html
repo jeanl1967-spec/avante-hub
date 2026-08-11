@@ -491,6 +491,46 @@
   .hook-card .link-box .url{ font-size:11.5px; }
   .hook-row + .hook-row{ margin-top:14px; }
 
+  /* ---- home / hook mode toggle (self-manage vs admin-manage) ---- */
+  .hook-mode-label{ font-size:11px; margin:14px 0 6px; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; font-weight:700; }
+  .hook-mode-toggle{
+    display:flex;
+    background:var(--mint);
+    border:1.5px solid var(--line);
+    border-radius:10px;
+    padding:3px;
+    gap:3px;
+  }
+  .hook-mode-btn{
+    flex:1;
+    border:none;
+    background:transparent;
+    padding:8px 6px;
+    font-size:12px;
+    font-weight:600;
+    color:var(--muted);
+    border-radius:7px;
+    cursor:pointer;
+    transition:background 0.15s, color 0.15s;
+  }
+  .hook-mode-btn.active{
+    background:#fff;
+    color:var(--teal-dark);
+    box-shadow:0 2px 6px rgba(14,47,68,0.10);
+  }
+  .hook-mode-note{
+    font-size:11px;
+    color:var(--muted);
+    margin-top:8px;
+    padding:8px 10px;
+    background:var(--mint);
+    border-radius:8px;
+    line-height:1.4;
+    display:none;
+  }
+  .hook-mode-note.show{ display:block; }
+  .hook-mode-note.expired{ color:#8a5a00; background:#fff4e0; }
+
   /* ---- home / how the program works ---- */
   .hero-image{
     display:block;
@@ -2461,6 +2501,12 @@
             '<label for="h' + i + '-landing">Landing page link</label>' +
             '<input id="h' + i + '-landing" placeholder="Link to the promo\'s landing page">' +
             '<div class="hint">We\'ll automatically tag this with your affiliate ID (taken from the end of your booking link) so you can tell who sent the traffic.</div>' +
+            '<div class="hook-mode-label">Who manages this hook?</div>' +
+            '<div class="hook-mode-toggle" data-mode-toggle="' + i + '">' +
+              '<button type="button" class="hook-mode-btn" data-mode-btn="' + i + '" data-mode-value="self">Manage my own</button>' +
+              '<button type="button" class="hook-mode-btn" data-mode-btn="' + i + '" data-mode-value="admin">Let admin manage</button>' +
+            '</div>' +
+            '<div class="hook-mode-note" id="h' + i + '-modeNote"></div>' +
             '<button class="primary" data-hook-save="' + i + '">Save hook</button>' +
             '<div class="status" id="h' + i + '-errorStatus"></div>' +
             '<div class="link-box" id="h' + i + '-linkBox">' +
@@ -2537,6 +2583,68 @@
         img.onload = function(){ img.classList.add('show'); placeholder.style.display = 'none'; };
         img.onerror = function(){ img.classList.remove('show'); placeholder.style.display = 'flex'; };
         img.src = '/api/hook-image?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n) + '&t=' + Date.now();
+      }
+
+      // ---- Who manages this hook: "Manage my own" vs "Let admin manage" ----
+      function modeNoteText(mode, expired){
+        if(mode === 'self' && expired){
+          return "Your selected dates have passed, so this hook is automatically showing the admin's default content until you update it with new dates.";
+        }
+        if(mode === 'self'){
+          return 'Currently showing your own content.';
+        }
+        return "Currently showing the admin's default content for this hook.";
+      }
+
+      function setModeUI(n, mode, expired){
+        var toggle = document.querySelector('[data-mode-toggle="' + n + '"]');
+        if(!toggle) return;
+        var btns = toggle.querySelectorAll('.hook-mode-btn');
+        for(var b = 0; b < btns.length; b++){
+          var isActive = btns[b].getAttribute('data-mode-value') === mode;
+          btns[b].classList.toggle('active', isActive);
+        }
+        var note = document.getElementById('h' + n + '-modeNote');
+        if(note){
+          note.textContent = modeNoteText(mode, expired);
+          note.className = 'hook-mode-note show' + (expired ? ' expired' : '');
+        }
+      }
+
+      // Fetches the resolved mode/expiry for this hook and updates the
+      // toggle + note. Falls back to the default ("admin") if there's no
+      // affiliate ID yet or the request fails, since that's the server's
+      // own default for a hook with no saved mode.
+      function loadHookMode(n, affId){
+        if(!affId){ setModeUI(n, 'admin', false); return; }
+        fetch('/api/hook?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n))
+          .then(function(r){ return r.json(); })
+          .then(function(data){
+            var mode = (data && data.mode) || 'admin';
+            var expired = !!(data && data.expired);
+            setModeUI(n, mode, expired);
+          })
+          .catch(function(){ setModeUI(n, 'admin', false); });
+      }
+
+      function saveMode(n, mode){
+        var bookingVal = document.getElementById('h' + n + '-booking').value.trim();
+        var affId = (bookingVal ? extractAffiliateId(bookingVal) : '') || AFF_ID;
+        if(!affId){
+          showToast('Add your booking link above before setting who manages this hook.');
+          return;
+        }
+        setModeUI(n, mode, false); // optimistic — re-synced right after
+        fetch('/api/hook?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ mode: mode })
+        }).then(function(){
+          showToast('Saved');
+          loadHookMode(n, affId);
+        }).catch(function(){
+          showToast("Couldn't save — please try again.");
+        });
       }
 
       function uploadHookImage(n, file){
@@ -2671,12 +2779,20 @@
           var affIdForImage = (bEl.value.trim() ? extractAffiliateId(bEl.value.trim()) : '') || AFF_ID;
           setHookImageSrc(hi, affIdForImage);
         }
+        var affIdForMode = (bEl.value.trim() ? extractAffiliateId(bEl.value.trim()) : '') || AFF_ID;
+        loadHookMode(hi, affIdForMode);
       }
 
       grid.addEventListener('click', function(e){
         var saveN = e.target.getAttribute('data-hook-save');
         if(saveN){
           saveHook(saveN);
+          return;
+        }
+
+        var modeBtn = e.target.getAttribute('data-mode-btn');
+        if(modeBtn){
+          saveMode(modeBtn, e.target.getAttribute('data-mode-value'));
           return;
         }
 
