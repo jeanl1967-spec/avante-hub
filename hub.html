@@ -2745,26 +2745,48 @@
 
       // Netlify Blobs has occasionally shown eventual-consistency lag on
       // this store — a POST can return 200 while the bytes that get read
-      // back moments later are empty. To avoid silently saving a broken
-      // (0-byte) image, we re-fetch right after uploading and confirm real
-      // bytes came back, retrying the upload itself if not.
-      function uploadImageWithVerify(apiUrl, file, attempt){
-        attempt = attempt || 1;
+      // back moments later are still empty. Re-uploading a multi-MB image
+      // on every retry is slow and wasteful (especially on mobile data), so
+      // instead we upload once, then do several cheap read-only checks
+      // with increasing backoff to give the store time to catch up. Only
+      // if reads never come back with real bytes do we attempt one genuine
+      // re-upload, as a fallback for the (much rarer) case the write itself
+      // didn't take.
+      var VERIFY_DELAYS_MS = [500, 1000, 2000, 3000, 4000]; // ~10.5s total
+
+      function verifyImageSaved(apiUrl, step){
+        step = step || 0;
+        return fetch(apiUrl + '&verify=' + Date.now(), { cache: 'no-store' })
+          .then(function(res){ return res.arrayBuffer(); })
+          .then(function(buf){
+            if(buf.byteLength > 0) return true;
+            if(step < VERIFY_DELAYS_MS.length){
+              return new Promise(function(resolve){ setTimeout(resolve, VERIFY_DELAYS_MS[step]); })
+                .then(function(){ return verifyImageSaved(apiUrl, step + 1); });
+            }
+            return false;
+          });
+      }
+
+      function uploadImageWithVerify(apiUrl, file, isRetry, onStatus){
         return fetch(apiUrl, {
           method: 'POST',
           headers: { 'content-type': file.type },
           body: file
         }).then(function(res){
           if(!res.ok) throw new Error('upload failed');
-          return new Promise(function(resolve){ setTimeout(resolve, 700); });
-        }).then(function(){
-          return fetch(apiUrl + '&verify=' + Date.now(), { cache: 'no-store' });
-        }).then(function(res){
-          return res.arrayBuffer();
-        }).then(function(buf){
-          if(buf.byteLength > 0) return true;
-          if(attempt < 3) return uploadImageWithVerify(apiUrl, file, attempt + 1);
-          throw new Error('image saved empty after retries');
+          if(onStatus) onStatus('Saved — confirming it shows up everywhere…');
+          return verifyImageSaved(apiUrl);
+        }).then(function(verified){
+          if(verified) return 'confirmed';
+          if(!isRetry){
+            if(onStatus) onStatus('Still not showing up — trying once more…');
+            return uploadImageWithVerify(apiUrl, file, true, onStatus);
+          }
+          // The upload was accepted twice but we still can't read it back —
+          // most likely just server-side lag catching up a bit slower than
+          // usual, not a real failure, so don't make them keep re-uploading.
+          return 'unconfirmed';
         });
       }
 
@@ -2802,12 +2824,19 @@
         statusEl.className = 'status show';
 
         var apiUrl = '/api/hook-image?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n);
-        uploadImageWithVerify(apiUrl, file).then(function(){
+        uploadImageWithVerify(apiUrl, file, false, function(msg){
+          statusEl.textContent = msg;
+          statusEl.className = 'status show';
+        }).then(function(result){
           statusEl.textContent = '';
           statusEl.className = 'status';
-          showToast('Image uploaded');
+          if(result === 'confirmed'){
+            showToast('Image uploaded');
+          }else{
+            showToast('Image saved — it may take a minute to appear everywhere');
+          }
         }).catch(function(){
-          statusEl.textContent = 'The preview looks fine here, but we couldn\'t confirm the image saved to the server after a few tries — please try uploading again.';
+          statusEl.textContent = 'We couldn\'t save this image to the server — please check your connection and try again.';
           statusEl.className = 'status show';
         });
       }
