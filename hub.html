@@ -2722,6 +2722,31 @@
         });
       }
 
+      // Netlify Blobs has occasionally shown eventual-consistency lag on
+      // this store — a POST can return 200 while the bytes that get read
+      // back moments later are empty. To avoid silently saving a broken
+      // (0-byte) image, we re-fetch right after uploading and confirm real
+      // bytes came back, retrying the upload itself if not.
+      function uploadImageWithVerify(apiUrl, file, attempt){
+        attempt = attempt || 1;
+        return fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'content-type': file.type },
+          body: file
+        }).then(function(res){
+          if(!res.ok) throw new Error('upload failed');
+          return new Promise(function(resolve){ setTimeout(resolve, 700); });
+        }).then(function(){
+          return fetch(apiUrl + '&verify=' + Date.now(), { cache: 'no-store' });
+        }).then(function(res){
+          return res.arrayBuffer();
+        }).then(function(buf){
+          if(buf.byteLength > 0) return true;
+          if(attempt < 3) return uploadImageWithVerify(apiUrl, file, attempt + 1);
+          throw new Error('image saved empty after retries');
+        });
+      }
+
       function uploadHookImage(n, file){
         var statusEl = document.getElementById('h' + n + '-imageStatus');
         statusEl.className = 'status';
@@ -2752,15 +2777,16 @@
         img.onload = function(){ img.classList.add('show'); placeholder.style.display = 'none'; };
         img.src = previewUrl;
 
-        fetch('/api/hook-image?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), {
-          method: 'POST',
-          headers: { 'content-type': file.type },
-          body: file
-        }).then(function(res){
-          if(!res.ok) throw new Error('upload failed');
+        statusEl.textContent = 'Saving image…';
+        statusEl.className = 'status show';
+
+        var apiUrl = '/api/hook-image?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n);
+        uploadImageWithVerify(apiUrl, file).then(function(){
+          statusEl.textContent = '';
+          statusEl.className = 'status';
           showToast('Image uploaded');
         }).catch(function(){
-          statusEl.textContent = 'The preview looks fine here, but we couldn\'t save the image to the server — please try again.';
+          statusEl.textContent = 'The preview looks fine here, but we couldn\'t confirm the image saved to the server after a few tries — please try uploading again.';
           statusEl.className = 'status show';
         });
       }
