@@ -104,6 +104,8 @@ export default async (request, context) => {
   const sessionStore = getStore({ name: "admin-sessions", consistency: "strong" });
   const directoryStore = getStore({ name: "affiliates-directory", consistency: "strong" });
   const payoutStore = getStore({ name: "affiliate-payouts", consistency: "strong" });
+  const hookStore = getStore({ name: "promo-hooks", consistency: "strong" });
+  const DEFAULT_HOOK_COUNT = 6;
 
   async function verifyToken(token) {
     if (!token) return false;
@@ -148,6 +150,20 @@ export default async (request, context) => {
         if (!affId) return json({ ok: false, error: "missing affId" }, 400, cors);
         const entries = (await payoutStore.get(affId, { type: "json" })) || [];
         return json({ ok: true, entries: entries }, 200, cors);
+      }
+
+      if (resource === "defaultHooks") {
+        const hooks = [];
+        for (let n = 1; n <= DEFAULT_HOOK_COUNT; n++) {
+          const rec = await hookStore.get("__admin__:" + n, { type: "json" });
+          hooks.push({
+            hook: n,
+            booking: (rec && rec.booking) || "",
+            landing: (rec && rec.landing) || "",
+            updatedAt: (rec && rec.updatedAt) || null,
+          });
+        }
+        return json({ ok: true, hooks: hooks }, 200, cors);
       }
 
       return json({ ok: false, error: "unknown resource" }, 400, cors);
@@ -314,6 +330,18 @@ export default async (request, context) => {
       };
       await directoryStore.setJSON(affId, record);
       return json({ ok: true, affiliate: record }, 200, cors);
+    }
+
+    if (action === "setDefaultHook") {
+      const n = Number(body.hook);
+      if (!isFinite(n) || n < 1 || n > DEFAULT_HOOK_COUNT) {
+        return json({ ok: false, error: "invalid hook number" }, 400, cors);
+      }
+      const booking = typeof body.booking === "string" ? body.booking.trim() : "";
+      const landing = typeof body.landing === "string" ? body.landing.trim() : "";
+      const record = { booking: booking, landing: landing, updatedAt: new Date().toISOString() };
+      await hookStore.setJSON("__admin__:" + n, record);
+      return json({ ok: true, hook: n, record: record }, 200, cors);
     }
 
     if (action === "deleteAffiliate") {
