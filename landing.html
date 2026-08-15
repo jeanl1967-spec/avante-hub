@@ -475,6 +475,28 @@
     var params = new URLSearchParams(window.location.search);
     var aff = (params.get('aff') || '').trim();
 
+    // ---------- Remembered affiliate fallback (Add to Home Screen) ----------
+    // The manifest's start_url is personalized asynchronously below (it's
+    // rewritten to a blob: URL once we know the affiliate ID). If iOS/the
+    // browser reads the manifest before that swap finishes, an installed
+    // home-screen icon can fall back to the static "landing.html" with no
+    // ?aff= at all, which used to show "This link is incomplete". Since an
+    // installed icon on a device almost always belongs to one specific
+    // affiliate, remember the last affiliate seen here and fall back to it
+    // instead of erroring out.
+    if(aff){
+      try{ localStorage.setItem('avante-landing-last-aff', aff); }catch(e){}
+    } else {
+      var lastAff = '';
+      try{ lastAff = localStorage.getItem('avante-landing-last-aff') || ''; }catch(e){}
+      if(lastAff){
+        var redirectParams = new URLSearchParams(window.location.search);
+        redirectParams.set('aff', lastAff);
+        window.location.replace('landing.html?' + redirectParams.toString());
+        throw new Error('avante-landing: redirecting to remembered affiliate');
+      }
+    }
+
     // ---------- Embed mode ----------
     // ?embed=1 strips the topbar/header/nav, leaving just the promotions
     // grid — meant for embedding this page in an iframe (e.g. on
