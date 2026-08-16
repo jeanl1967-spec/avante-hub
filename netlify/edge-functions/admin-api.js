@@ -1,4 +1,4 @@
-—import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
+import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 
 // No hardcoded default password on purpose — this repo is public, so a
 // baked-in default would be visible to anyone who reads the source. Instead
@@ -307,6 +307,7 @@ export default async (request, context) => {
       if (!affId) return json({ ok: false, error: "Please enter an affiliate ID." }, 400, cors);
       const name = typeof body.name === "string" ? body.name.trim() : "";
       const email = typeof body.email === "string" ? body.email.trim() : "";
+      const siteNr = typeof body.siteNr === "string" ? body.siteNr.trim() : "";
       const revenueShare = sanitizeRevenueShare(body.revenueShare, 0);
       const bank = sanitizeBankDetails(body.bank);
       const notes = typeof body.notes === "string" ? body.notes.trim() : "";
@@ -317,6 +318,10 @@ export default async (request, context) => {
         affId: affId,
         name: name,
         email: email,
+        // The StockNetwork site number that this affiliate's accommodation
+        // booking link is tied to. Admin-set only — shown read-only in the
+        // affiliate's own Hub (Account Details tab).
+        siteNr: siteNr,
         // Not editable from this admin form (yet) — preserve whatever the
         // affiliate has set for themselves via their Hub's Account Details
         // tab, rather than silently wiping it out on every admin save.
