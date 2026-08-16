@@ -854,6 +854,7 @@
       <button class="tab" data-panel="car">Your Car Link</button>
       <button class="tab" data-panel="esim">Your Free E-Sim Link</button>
       <button class="tab" data-panel="shortlinks">Your Short Links</button>
+      <button class="tab" data-panel="account">Account Details</button>
       <button class="tab" data-panel="tutorials">Tutorials</button>
     </nav>
   </header>
@@ -1177,6 +1178,54 @@
         </div>
         <div class="status" id="shortlinks-status"></div>
         <div id="shortlinks-list"></div>
+      </div>
+    </section>
+
+        <!-- ===================== ACCOUNT DETAILS ===================== -->
+    <section class="panel" id="panel-account">
+      <div class="hero">
+        <h1>Account Details</h1>
+        <p>Keep your personal and banking details up to date so payouts reach you without delay</p>
+      </div>
+
+      <div class="card">
+        <h2 class="section-heading" style="margin-top:0;">Personal Details</h2>
+        <label for="acc-name">Full name</label>
+        <input id="acc-name" placeholder="e.g. Jean Louw">
+        <label for="acc-email">Email address</label>
+        <input id="acc-email" type="email" placeholder="e.g. jean@example.com">
+        <label for="acc-phone">Phone number</label>
+        <input id="acc-phone" type="tel" placeholder="e.g. 082 123 4567">
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h2 class="section-heading" style="margin-top:0;">Bank Account Details</h2>
+        <label for="acc-bankName">Bank name</label>
+        <input id="acc-bankName" placeholder="e.g. FNB, Standard Bank">
+        <label for="acc-accountHolder">Account holder name</label>
+        <input id="acc-accountHolder" placeholder="Name on the bank account">
+        <div class="row">
+          <div>
+            <label for="acc-accountNumber">Account number</label>
+            <input id="acc-accountNumber" inputmode="numeric">
+          </div>
+          <div>
+            <label for="acc-branchCode">Branch code</label>
+            <input id="acc-branchCode" inputmode="numeric">
+          </div>
+        </div>
+        <label for="acc-accountType">Account type</label>
+        <input id="acc-accountType" placeholder="e.g. Cheque, Savings">
+        <div class="hint">Used only to pay out your commission — never shared with anyone else.</div>
+      </div>
+
+      <button class="primary" id="acc-saveBtn">Save Account Details</button>
+      <div class="status" id="acc-status"></div>
+
+      <div class="card" style="margin-top:24px;">
+        <h2 class="section-heading" style="margin-top:0;">Revenue Share</h2>
+        <p class="hint" style="margin:-4px 0 14px; text-align:center;">Your commission rate per booking category, set by Avante Travel. This can't be edited here — contact Avante Travel if you'd like to discuss your commission structure.</p>
+        <div id="acc-revenueList"></div>
       </div>
     </section>
 
@@ -3205,7 +3254,140 @@
         });
       }
     })();
-  </script>
+      // ---------- Account Details (personal + bank details; revenue share is read-only) ----------
+    (function(){
+      var nameInput = document.getElementById('acc-name');
+      var emailInput = document.getElementById('acc-email');
+      var phoneInput = document.getElementById('acc-phone');
+      var bankNameInput = document.getElementById('acc-bankName');
+      var accountHolderInput = document.getElementById('acc-accountHolder');
+      var accountNumberInput = document.getElementById('acc-accountNumber');
+      var branchCodeInput = document.getElementById('acc-branchCode');
+      var accountTypeInput = document.getElementById('acc-accountType');
+      var saveBtn = document.getElementById('acc-saveBtn');
+      var statusEl = document.getElementById('acc-status');
+      var revenueListEl = document.getElementById('acc-revenueList');
+      if(!nameInput || !saveBtn) return;
+
+      var CHANNELS = [
+        { key: 'accommodation', label: 'Accommodation' },
+        { key: 'flights', label: 'Flights' },
+        { key: 'activities', label: 'Activities' },
+        { key: 'car', label: 'Car Hire' },
+        { key: 'package', label: 'Packages' }
+      ];
+
+      function formatShare(share){
+        if(!share) return '—';
+        return share.type === 'amount' ? ('R' + Number(share.value).toFixed(2) + ' flat') : (share.value + '%');
+      }
+
+      function renderRevenueShare(revenueShare){
+        revenueListEl.innerHTML = CHANNELS.map(function(c){
+          var share = revenueShare && revenueShare[c.key];
+          return '<div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--line); font-size:13.5px;">' +
+            '<span style="color:var(--navy); font-weight:600;">' + c.label + '</span>' +
+            '<span style="color:var(--teal-dark); font-weight:700;">' + formatShare(share) + '</span>' +
+            '</div>';
+        }).join('');
+      }
+
+      var loaded = false;
+
+      function load(){
+        if(!AFF_ID){
+          statusEl.textContent = 'Open the Hub using your personal affiliate link to manage your account details.';
+          statusEl.className = 'status show';
+          return;
+        }
+        fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'getProfile', aff: AFF_ID })
+        })
+          .then(function(r){ return r.json(); })
+          .then(function(data){
+            loaded = true;
+            if(!data || !data.ok){
+              statusEl.textContent = (data && data.error) || 'Could not load your account details right now.';
+              statusEl.className = 'status show';
+              return;
+            }
+            var p = data.profile || {};
+            var bank = p.bank || {};
+            nameInput.value = p.name || '';
+            emailInput.value = p.email || '';
+            phoneInput.value = p.phone || '';
+            bankNameInput.value = bank.bankName || '';
+            accountHolderInput.value = bank.accountHolder || '';
+            accountNumberInput.value = bank.accountNumber || '';
+            branchCodeInput.value = bank.branchCode || '';
+            accountTypeInput.value = bank.accountType || '';
+            renderRevenueShare(p.revenueShare);
+          })
+          .catch(function(){
+            statusEl.textContent = 'Could not load your account details right now — try refreshing.';
+            statusEl.className = 'status show';
+          });
+      }
+
+      saveBtn.addEventListener('click', function(){
+        if(!AFF_ID){
+          statusEl.textContent = 'Open the Hub using your personal affiliate link to save changes.';
+          statusEl.className = 'status show';
+          return;
+        }
+        statusEl.textContent = '';
+        statusEl.className = 'status';
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+
+        fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            action: 'updateProfile',
+            aff: AFF_ID,
+            name: nameInput.value.trim(),
+            email: emailInput.value.trim(),
+            phone: phoneInput.value.trim(),
+            bank: {
+              bankName: bankNameInput.value.trim(),
+              accountHolder: accountHolderInput.value.trim(),
+              accountNumber: accountNumberInput.value.trim(),
+              branchCode: branchCodeInput.value.trim(),
+              accountType: accountTypeInput.value.trim()
+            }
+          })
+        })
+          .then(function(r){ return r.json(); })
+          .then(function(data){
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Account Details';
+            if(data && data.ok){
+              if(data.profile) renderRevenueShare(data.profile.revenueShare);
+              showToast('Account details saved');
+            }else{
+              statusEl.textContent = (data && data.error) || 'Could not save your details. Please try again.';
+              statusEl.className = 'status show';
+            }
+          })
+          .catch(function(){
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save Account Details';
+            statusEl.textContent = 'Something went wrong. Please try again.';
+            statusEl.className = 'status show';
+          });
+      });
+
+      var accountTab = document.querySelector('.tab[data-panel="account"]');
+      if(accountTab){
+        accountTab.addEventListener('click', function(){
+          if(!loaded) load();
+        });
+      }
+    })();
+</script>
 
 </body>
 </html>
