@@ -165,6 +165,7 @@ export default async (request, context) => {
             name: (dirRecord && dirRecord.name) || "",
             email: (dirRecord && dirRecord.email) || "",
             phone: (dirRecord && dirRecord.phone) || "",
+            siteNr: (dirRecord && dirRecord.siteNr) || "",
             bank: bank,
             revenueShare: revenueShare,
           },
@@ -175,12 +176,12 @@ export default async (request, context) => {
 
     if (action === "updateProfile") {
       // Self-service update of personal + bank details only. Revenue share
-      // is intentionally never read from the request body — whatever (if
-      // anything) an affiliate submits for it is silently ignored, and the
-      // previously stored value (or a 0% default for a brand-new record) is
-      // always what gets carried forward below. Only the Admin dashboard
-      // (admin-api.js's upsertAffiliate action, which requires an admin
-      // session token) can change an affiliate's revenue share.
+      // AND siteNr are intentionally never read from the request body —
+      // whatever (if anything) an affiliate submits for either is silently
+      // ignored, and the previously stored value is always what gets
+      // carried forward below. Only the Admin dashboard (admin-api.js's
+      // upsertAffiliate action, which requires an admin session token) can
+      // change an affiliate's revenue share or StockNetwork site number.
       const name = typeof body.name === "string" ? body.name.trim().slice(0, 200) : "";
       const email = typeof body.email === "string" ? body.email.trim().slice(0, 200) : "";
       const phone = typeof body.phone === "string" ? body.phone.trim().slice(0, 60) : "";
@@ -197,6 +198,7 @@ export default async (request, context) => {
         name: name,
         email: email,
         phone: phone,
+        siteNr: (existing && existing.siteNr) || "",
         bank: bank,
         revenueShare: revenueShare,
         notes: (existing && existing.notes) || "",
@@ -237,3 +239,4 @@ export default async (request, context) => {
 };
 
 export const config = { path: "/api/auth" };
+
