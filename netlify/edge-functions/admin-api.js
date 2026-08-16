@@ -1,4 +1,4 @@
-import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
+—import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 
 // No hardcoded default password on purpose — this repo is public, so a
 // baked-in default would be visible to anyone who reads the source. Instead
@@ -317,6 +317,10 @@ export default async (request, context) => {
         affId: affId,
         name: name,
         email: email,
+        // Not editable from this admin form (yet) — preserve whatever the
+        // affiliate has set for themselves via their Hub's Account Details
+        // tab, rather than silently wiping it out on every admin save.
+        phone: (existing && existing.phone) || "",
         revenueShare: revenueShare,
         bank: bank,
         notes: notes,
