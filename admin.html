@@ -357,6 +357,9 @@
       <input id="affNameInput" placeholder="e.g. Jane Smith">
       <label for="affEmailInput">Email (optional)</label>
       <input id="affEmailInput" placeholder="e.g. jane@example.com">
+      <label for="affSiteNrInput">StockNetwork Site Nr (optional)</label>
+      <input id="affSiteNrInput" placeholder="e.g. 12345">
+      <p class="modal-sub" style="margin:-2px 0 8px;">The StockNetwork site number this affiliate's accommodation bookings are linked to. Shown read-only in their Hub.</p>
       <label>Revenue share — by channel</label>
       <p class="modal-sub" style="margin:-2px 0 8px;">Each channel matches a tab in this affiliate's Hub. For each one, choose <strong>%</strong> for a percentage of revenue, or <strong>R flat</strong> for a fixed Rand amount paid per entry regardless of revenue. Leave at 0 if they don't get a cut of that channel.</p>
       <div class="row" id="affShareFields" style="flex-wrap:wrap; gap:10px 12px;"></div>
@@ -1169,6 +1172,7 @@
       document.getElementById('affIdInput').disabled = !!existing;
       document.getElementById('affNameInput').value = existing ? (existing.name || '') : '';
       document.getElementById('affEmailInput').value = existing ? (existing.email || '') : '';
+      document.getElementById('affSiteNrInput').value = existing ? (existing.siteNr || '') : '';
       buildAffShareFields(existing ? existing.revenueShare : null);
       var bank = (existing && existing.bank) || {};
       document.getElementById('affBankNameInput').value = bank.bankName || '';
@@ -1195,6 +1199,7 @@
       var affId = document.getElementById('affIdInput').value.trim();
       var name = document.getElementById('affNameInput').value.trim();
       var email = document.getElementById('affEmailInput').value.trim();
+      var siteNr = document.getElementById('affSiteNrInput').value.trim();
       var revenueShare = readAffShareFields();
       var bank = {
         bankName: document.getElementById('affBankNameInput').value.trim(),
@@ -1215,7 +1220,7 @@
       btn.disabled = true;
       btn.textContent = 'Saving…';
       adminPost('upsertAffiliate', {
-        affId: affId, name: name, email: email,
+        affId: affId, name: name, email: email, siteNr: siteNr,
         revenueShare: revenueShare, bank: bank, status: status, notes: notes
       }).then(function(res){
         btn.disabled = false;
@@ -1292,6 +1297,7 @@
           '</div>';
         html += '<hr class="detail-divider">';
         html += '<div class="detail-section"><h3>Links</h3>' +
+          detailRow('StockNetwork Site Nr', a.siteNr || '—') +
           detailLinkRow('Hub link', hubLink) +
           detailLinkRow('Booking link', bookingLink) +
           detailLinkRow('Booking link (short)', bookingShort) +
@@ -1333,7 +1339,7 @@
 
         currentDetailsText = (a.name || a.affId) + ' — full details\n\n' +
           'LOGIN\nUsername: ' + a.affId + '\nPassword: 0000 (default)\n\n' +
-          'LINKS\nHub: ' + hubLink + '\nBooking: ' + bookingLink + '\nBooking (short): ' + bookingShort +
+          'LINKS\nStockNetwork Site Nr: ' + (a.siteNr || '—') + '\nHub: ' + hubLink + '\nBooking: ' + bookingLink + '\nBooking (short): ' + bookingShort +
           '\nStorefront: ' + storefrontLink + '\nStorefront (short): ' + storefrontShort +
           '\nPromotions embed link (no header): ' + embedLink +
           '\nFlight: ' + flightLink + '\nFlight (short): ' + flightShort +
