@@ -1223,6 +1223,12 @@
       <div class="status" id="acc-status"></div>
 
       <div class="card" style="margin-top:24px;">
+        <h2 class="section-heading" style="margin-top:0;">StockNetwork Site Nr</h2>
+        <p class="hint" style="margin:-4px 0 14px; text-align:center;">The StockNetwork site number your accommodation bookings are linked to, set by Avante Travel. Contact Avante Travel if this needs to change.</p>
+        <div id="acc-siteNr" style="text-align:center; font-size:20px; font-weight:800; color:var(--teal-dark);">—</div>
+      </div>
+
+      <div class="card" style="margin-top:24px;">
         <h2 class="section-heading" style="margin-top:0;">Revenue Share</h2>
         <p class="hint" style="margin:-4px 0 14px; text-align:center;">Your commission rate per booking category, set by Avante Travel. This can't be edited here — contact Avante Travel if you'd like to discuss your commission structure.</p>
         <div id="acc-revenueList"></div>
@@ -3266,7 +3272,7 @@
       var accountTypeInput = document.getElementById('acc-accountType');
       var saveBtn = document.getElementById('acc-saveBtn');
       var statusEl = document.getElementById('acc-status');
-      var revenueListEl = document.getElementById('acc-revenueList');
+      var revenueListEl = document.getElementById('acc-revenueList');        var siteNrEl = document.getElementById('acc-siteNr');
       if(!nameInput || !saveBtn) return;
 
       var CHANNELS = [
@@ -3323,7 +3329,7 @@
             accountNumberInput.value = bank.accountNumber || '';
             branchCodeInput.value = bank.branchCode || '';
             accountTypeInput.value = bank.accountType || '';
-            renderRevenueShare(p.revenueShare);
+            if(siteNrEl) siteNrEl.textContent = p.siteNr || 'Not set yet - contact Avante Travel'; renderRevenueShare(p.revenueShare);
           })
           .catch(function(){
             statusEl.textContent = 'Could not load your account details right now — try refreshing.';
