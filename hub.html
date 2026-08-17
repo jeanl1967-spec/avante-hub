@@ -855,6 +855,7 @@
       <button class="tab" data-panel="esim">Your Free E-Sim Link</button>
       <button class="tab" data-panel="shortlinks">Your Short Links</button>
       <button class="tab" data-panel="account">Account Details</button>
+      <button class="tab" data-panel="property">Property Affiliate</button>
       <button class="tab" data-panel="tutorials">Tutorials</button>
     </nav>
   </header>
@@ -1235,7 +1236,29 @@
       </div>
     </section>
 
-    <!-- ===================== TUTORIALS ===================== -->
+      <!-- ===================== PROPERTY AFFILIATE ===================== -->
+      <section class="panel" id="panel-property">
+        <div class="card">
+          <h2 class="section-heading">Property Affiliate</h2>
+          <p class="hint">List a property with Avante's short-term rental program — as the property owner yourself, or on behalf of an owner as their appointed affiliate. Fill out the onboarding form below (it opens the same form in a new tab too). Your submission is reviewed by Avante Travel before anything goes live.</p>
+          <a id="propertyFormLink" href="property-form.html" target="_blank" rel="noopener" class="primary" style="display:inline-block; text-decoration:none;">Open Onboarding Form in New Tab</a>
+        </div>
+        <div class="card">
+          <iframe id="propertyFormFrame" src="property-form.html" style="width:100%; min-height:1400px; border:1px solid #e2e8f0; border-radius:12px;" loading="lazy"></iframe>
+        </div>
+        <script>
+          (function(){
+            var aff = new URLSearchParams(window.location.search).get('aff') || '';
+            if(aff){
+              var link = document.getElementById('propertyFormLink');
+              var frame = document.getElementById('propertyFormFrame');
+              if(link) link.href = 'property-form.html?aff=' + encodeURIComponent(aff);
+              if(frame) frame.src = 'property-form.html?aff=' + encodeURIComponent(aff);
+            }
+          })();
+        </script>
+      </section>
+<!-- ===================== TUTORIALS ===================== -->
     <section class="panel" id="panel-tutorials">
       <div class="hero">
         <h1>Tutorials</h1>
