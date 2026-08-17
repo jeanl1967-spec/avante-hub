@@ -610,6 +610,48 @@
       </div>
     </section>
 
+    <!-- ===================== PROPERTY LISTINGS ===================== -->
+    <section class="panel" id="panel-propertyListings">
+      <div class="hero">
+        <h1>Property Listings</h1>
+        <p>Review property listings submitted via the Property Affiliate tab, approve or reject them, and set the StockNetwork Site Nr once a listing goes live</p>
+      </div>
+
+      <div class="card">
+        <label for="notificationEmailInput">Notify this email address when a new listing is submitted</label>
+        <input id="notificationEmailInput" type="email" placeholder="e.g. bookings@avantetravel.co.za">
+        <button class="primary" id="saveNotificationEmailBtn" style="margin-top:10px;">Save</button>
+        <div class="status" id="propertySettingsStatus"></div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="btn-row" style="margin-top:0;">
+          <button class="btn-outline" id="refreshPropertyListingsBtn">Refresh</button>
+        </div>
+        <div class="status" id="propertyListingsStatus"></div>
+        <div style="margin-top:18px;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Property</th>
+                  <th>Owner</th>
+                  <th>Submitted By</th>
+                  <th>Location</th>
+                  <th>Status</th>
+                  <th>Site Nr</th>
+                  <th>Submitted</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="propertyListingsTableBody"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="propertyListingsEmpty" style="display:none;">No property listings submitted yet.</div>
+        </div>
+      </div>
+    </section>
+
     <!-- ===================== TUTORIAL ===================== -->
     <section class="panel" id="panel-tutorial">
       <div class="hero">
