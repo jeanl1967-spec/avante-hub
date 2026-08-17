@@ -421,6 +421,27 @@
     </div>
   </div>
 
+  <div class="modal-overlay" id="propertyDetailsModalOverlay">
+    <div class="modal-card" style="max-width:560px;">
+      <h2 id="propertyDetailsModalTitle">Property Listing</h2>
+      <p class="modal-sub">Review the full submission, then approve, reject, or set the StockNetwork Site Nr.</p>
+      <div id="propertyDetailsModalBody"></div>
+      <label for="propertyStatusInput" style="margin-top:14px;">Status</label>
+      <select id="propertyStatusInput">
+        <option value="Requested">Requested</option>
+        <option value="Listed">Listed</option>
+        <option value="Rejected">Rejected</option>
+      </select>
+      <label for="propertySiteNrInput">StockNetwork Site Nr</label>
+      <input id="propertySiteNrInput" placeholder="e.g. 12345">
+      <div class="modal-status" id="propertyDetailsModalStatus"></div>
+      <div class="modal-actions">
+        <button type="button" class="modal-btn-secondary" id="propertyDetailsCloseBtn">Close</button>
+        <button type="button" class="modal-btn-primary" id="propertyDetailsSaveBtn">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
   <header class="hub-header">
     <div class="brand">AVANTE<span>TRAVEL &middot; ADMIN</span></div>
     <nav class="tabs" id="tabs">
