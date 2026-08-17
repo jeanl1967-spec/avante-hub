@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Property Owner / Affiliate Onboarding — Avante Travel</title>
+<style>
+  :root{ --teal:#0DCDC2; --teal-dark:#0a9c94; --navy:#132433; --ink:#1c2b38; --line:#e2e8f0; --bg:#f6f9fa; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+  header{ background:var(--navy); color:#fff; padding:22px 20px; text-align:center; }
+  header h1{ margin:0 0 6px; font-size:22px; }
+  header p{ margin:0; color:#b9c6cf; font-size:14px; max-width:640px; margin:0 auto; }
+  main{ max-width:760px; margin:0 auto; padding:20px 16px 60px; }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:14px; padding:18px 20px; margin-bottom:18px; }
+  .section-heading{ margin:0 0 4px; font-size:17px; color:var(--navy); }
+  .hint{ color:#5b6b76; font-size:13px; margin:4px 0 12px; }
+  label{ display:block; font-size:13px; font-weight:600; color:#33454f; margin:12px 0 5px; }
+  input[type=text], input[type=email], input[type=tel], input[type=date], input:not([type]), select, textarea{
+    width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; font-size:14px; font-family:inherit; background:#fbfdfd;
+  }
+  textarea{ resize:vertical; }
+  .row{ display:flex; gap:12px; }
+  .row > div{ flex:1; min-width:0; }
+  .radio-line label{ display:inline; font-weight:400; font-size:14px; margin:0; }
+  .radio-line input{ width:auto; margin-right:6px; }
+  button{ font-family:inherit; cursor:pointer; }
+  .btn-secondary{ background:#eef4f4; border:1px solid var(--line); color:var(--navy); padding:9px 16px; border-radius:8px; font-size:14px; font-weight:600; }
+  .btn-primary{ background:var(--teal); border:none; color:#04322f; padding:12px 22px; border-radius:9px; font-size:15px; font-weight:700; }
+  .btn-primary:disabled{ opacity:.6; }
+  .btn-link{ background:none; border:none; color:var(--teal-dark); font-weight:700; font-size:14px; padding:0; text-decoration:underline; }
+  .status{ margin-top:12px; font-size:14px; display:none; padding:10px 12px; border-radius:8px; }
+  .status.show{ display:block; }
+  .status.ok{ background:#e6f9f2; color:#0a6b4f; }
+  .status.err{ background:#fdeceb; color:#a3271d; }
+  .unit-row{ border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:12px; background:#fbfdfd; }
+  .unit-row-head{ display:flex; justify-content:space-between; align-items:center; }
+  .unit-row-head strong{ font-size:14px; }
+  .remove-unit{ background:none; border:none; color:#c0392b; font-size:13px; cursor:pointer; }
+  .amenity-cat{ margin-top:14px; }
+  .amenity-cat h4{ margin:0 0 6px; font-size:13px; color:var(--navy); text-transform:uppercase; letter-spacing:.03em; }
+  .amenity-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:3px 14px; }
+  .amenity-grid label{ font-weight:400; font-size:13px; color:#33454f; margin:2px 0; }
+  .amenity-grid input{ width:auto; margin-right:6px; }
+  .doc-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
+  .doc-row:last-child{ border-bottom:none; }
+  .doc-row label{ margin:0; flex:1; font-weight:600; font-size:13px; }
+  .doc-row input[type=file]{ font-size:12px; max-width:160px; }
+  .doc-status{ font-size:12px; color:#0a6b4f; white-space:nowrap; }
+  .img-list{ margin-top:10px; font-size:13px; color:#33454f; }
+  .img-list div{ padding:2px 0; }
+  .agree-line{ display:flex; align-items:flex-start; gap:8px; margin-top:12px; }
+  .agree-line input{ width:auto; margin-top:3px; }
+  .agree-line span{ font-size:13px; color:#33454f; }
+  .modal-overlay{ display:none; position:fixed; inset:0; background:rgba(19,36,51,.6); align-items:center; justify-content:center; z-index:999; padding:20px; }
+  .modal-overlay.show{ display:flex; }
+  .modal-box{ background:#fff; border-radius:14px; max-width:640px; width:100%; max-height:82vh; display:flex; flex-direction:column; }
+  .modal-box .modal-head{ padding:16px 20px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+  .modal-box .modal-body{ padding:16px 20px; overflow-y:auto; font-size:13px; line-height:1.55; }
+  .modal-box .modal-body h2, .modal-box .modal-body h3{ font-size:14px; }
+  .modal-close{ background:none; border:none; font-size:20px; cursor:pointer; color:#5b6b76; line-height:1; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Property Owner / Affiliate Onboarding</h1>
+  <p>List a property for short-term leisure rental. Fields marked * are required. Your submission is reviewed by Avante Travel before it goes live — nothing is published automatically.</p>
+</header>
+
+<main>
+
+  <div class="card">
+    <h2 class="section-heading">Before You Start</h2>
+    <p class="hint">Every listing is governed by the Short-Term Leisure Rental Listing &amp; Mandate Agreement. Please read it — you'll confirm you accept it at the end of this form.</p>
+    <button type="button" class="btn-secondary" id="viewTermsBtn">View Terms &amp; Mandate Agreement</button>
+  </div>
+
+  <div class="card">
+    <h2 class="section-heading">Who's Submitting This Listing?</h2>
+    <div class="radio-line">
+      <label><input type="radio" name="submittedBy" value="Owner" checked> I am the property Owner</label>
+      &nbsp;&nbsp;
+      <label><input type="radio" name="submittedBy" value="Affiliate"> I am an Affiliate/Agent acting under a signed Mandate</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 class="section-heading">Owner Details</h2>
+    <label for="ownerName">Owner full name *</label>
+    <input id="ownerName">
+    <label for="ownerId">Owner ID / passport number *</label>
+    <input id="ownerId">
+    <div class="row">
+      <div><label for="ownerEmail">Owner email</label><input id="ownerEmail" type="email"></div>
+      <div><label for="ownerPhone">Owner phone</label><input id="ownerPhone" type="tel"></div>
+    </div>
+  </div>
+
+  <div class="card" id="affCard" style="display:none;">
+    <h2 class="section-heading">Affiliate / Agent Details</h2>
+    <p class="hint">You must hold a signed Mandate from the Owner — upload it in the Compliance Documents section below.</p>
+    <label for="affName">Affiliate/Agent name</label>
+    <input id="affName">
+    <label for="affCompany">Affiliate company</label>
+    <input id="affCompany">
+    <div class="row">
+      <div><label for="affEmail">Affiliate email</label><input id="affEmail" type="email"></div>
+      <div><label for="affPhone">Affiliate phone</label><input id="affPhone" type="tel"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 class="section-heading">Property Details</h2>
+    <label for="pName">Property name *</label>
+    <input id="pName">
+    <label for="pName2">Property name (alt/trading name)</label>
+    <input id="pName2">
+    <div class="row">
+      <div><label for="pCountry">Country</label><input id="pCountry" value="South Africa"></div>
+      <div><label for="pProvince">State/Province</label><input id="pProvince"></div>
+    </div>
+    <div class="row">
+      <div><label for="pSuburb">Suburb</label><input id="pSuburb"></div>
+      <div><label for="pCity">City</label><input id="pCity"></div>
+    </div>
+    <div class="row">
+      <div><label for="pCity2">City (alt)</label><input id="pCity2"></div>
+      <div><label for="pArea">Area</label><input id="pArea"></div>
+    </div>
+    <div class="row">
+      <div><label for="pDistrict">District</label><input id="pDistrict"></div>
+      <div><label for="pType">Property type</label><input id="pType" placeholder="e.g. Self Catering, Guest House"></div>
+    </div>
+    <label for="pComplex">Complex/Estate name</label>
+    <input id="pComplex">
+    <div class="row">
+      <div><label for="pInfoLink">Info link (website)</label><input id="pInfoLink"></div>
+      <div><label for="pBookingLink">Booking link</label><input id="pBookingLink"></div>
+    </div>
+    <div class="row">
+      <div><label for="pPhone">Telephone number</label><input id="pPhone" type="tel"></div>
+      <div><label for="pEmail">Property email</label><input id="pEmail" type="email"></div>
+    </div>
+    <div class="row">
+      <div><label for="pLat">Latitude</label><input id="pLat"></div>
+      <div><label for="pLng">Longitude</label><input id="pLng"></div>
+    </div>
+    <div class="row">
+      <div><label for="pRating">Self/supplier rating</label><input id="pRating" placeholder="e.g. 4 Star"></div>
+      <div><label for="pGrading">Tourism board grading</label><input id="pGrading"></div>
+    </div>
+    <label for="pRatingLink">Rating link</label>
+    <input id="pRatingLink">
+    <div class="row">
+      <div><label for="pCheckIn">Check-in time</label><input id="pCheckIn" placeholder="e.g. 15:00"></div>
+      <div><label for="pCheckOut">Check-out time</label><input id="pCheckOut" placeholder="e.g. 09:00"></div>
+    </div>
+    <label for="pDesc">Description</label>
+    <textarea id="pDesc" rows="3"></textarea>
+    <label for="pRules">Conditions / house rules</label>
+    <textarea id="pRules" rows="3"></textarea>
+    <label for="pMoreInfo">More information</label>
+    <textarea id="pMoreInfo" rows="2"></textarea>
+    <label for="pAreaInfo">Area info &amp; attractions</label>
+    <textarea id="pAreaInfo" rows="2"></textarea>
+  </div>
+
+  <div class="card">
+    <h2 class="section-heading">Deposits, Cancellation &amp; Policies</h2>
+    <label for="depositText">Deposit / cancellation policy (text)</label>
+    <textarea id="depositText" rows="2"></textarea>
+    <div class="row">
+      <div><label for="depositPct">Deposit %</label><input id="depositPct" inputmode="numeric"></div>
+      <div><label for="depositDays">Deposit due (days before arrival)</label><input id="depositDays" inputmode="numeric"></div>
+    </div>
+    <label for="childPolicy">Child policy</label>
+    <textarea id="childPolicy" rows="2"></textarea>
+    <div class="radio-line" style="margin-top:10px;">
+      <label><input type="checkbox" id="paymentGateway"> We have our own payment gateway in use</label>
+    </div>
+    <div class="radio-line" style="margin-top:6px;">
+      <label><input type="checkbox" id="sameDay"> Same-day bookings allowed</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 class="section-heading">Unit / Room Types</h2>
+    <p class="hint">Add one row per bedroom/unit/room type this property offers.</p>
+    <div id="unitList"></div>
+    <button type="button" class="btn-secondary" id="addUnitBtn">+ Add Unit Type</button>
+  </div>
+
+  <div class="card">
+    <h2 class="section-heading">Amenities &amp; Activities</h2>
+    <p class="hint">Tick everything that applies — this is what guests use to filter and compare listings.</p>
+    <div id="amenities"></div>
+  </div>
+
+  <div class="card">
+    <h2 class="section-heading">Compliance Documents</h2>
+    <p class="hint">Clear photos or scans are fine (image or PDF, max 10MB each). Required before a listing can go live.</p>
+    <div class="doc-row" data-label="id-document">
+      <label>Owner ID / passport *</label>
+      <input type="file" class="doc-input" accept="image/*,.pdf">
+      <span class="doc-status"></span>
+    </div>
+    <div class="doc-row" data-label="proof-of-ownership">
+      <label>Proof of ownership (title deed / rates account / levy statement) *</label>
+      <input type="file" class="doc-input" accept="image/*,.pdf">
+      <span class="doc-status"></span>
+    </div>
+    <div class="doc-row" data-label="proof-of-residence">
+      <label>Proof of residence (not older than 3 months) *</label>
+      <input type="file" class="doc-input" accept="image/*,.pdf">
+      <span class="doc-status"></span>
+    </div>
+    <div class="doc-row" data-label="mandate" id="mandateRow" style="display:none;">
+      <label>Signed Mandate / Power of Attorney (required for Affiliates)</label>
+      <input type="file" class="doc-input" accept="image/*,.pdf">
+      <span class="doc-status"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 class="section-heading">Property &amp; Unit Photos</h2>
+    <p class="hint">Upload as many as you like — front exterior, living areas, each unit type, views.</p>
+    <input type="file" id="imageInput" accept="image/*" multiple>
+    <div class="img-list" id="imageList"></div>
+  </div>
+
+  <div class="card">
+    <h2 class="section-heading">Signature &amp; Agreement</h2>
+    <p class="hint">By signing, you confirm you're either the registered Owner or a duly authorised Affiliate acting under a valid Mandate, and that you agree to the Terms &amp; Mandate Agreement above.</p>
+    <label for="sigName">Full name *</label>
+    <input id="sigName">
+    <div class="row">
+      <div>
+        <label for="sigCapacity">Capacity</label>
+        <select id="sigCapacity">
+          <option>Owner</option>
+          <option>Legal Representative</option>
+          <option>Duly Authorised Agent</option>
+        </select>
+      </div>
+      <div><label for="sigId">ID / passport / company reg. no.</label><input id="sigId"></div>
+    </div>
+    <div class="row">
+      <div><label for="sigDate">Date</label><input id="sigDate" type="date"></div>
+      <div><label for="sigPlace">Place signed</label><input id="sigPlace"></div>
+    </div>
+    <div class="agree-line">
+      <input type="checkbox" id="agree">
+      <span>I have read, understood, and agree to be bound by the Terms &amp; Mandate Agreement. *</span>
+    </div>
+    <button class="btn-primary" id="submitBtn" style="margin-top:16px;">Submit Listing for Review</button>
+    <div class="status" id="formStatus"></div>
+  </div>
+
+</main>
+
+<div class="modal-overlay" id="termsModal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <strong>Short-Term Leisure Rental Listing &amp; Mandate Agreement</strong>
+      <button class="modal-close" id="termsCloseBtn">&times;</button>
+    </div>
+    <div class="modal-body" id="termsBody"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+
+  // ---------- Terms modal ----------
+  var TERMS_TEXT = "PROPERTY OWNER / MANDATE HOLDER — SHORT-TERM LEISURE RENTAL LISTING & MANDATE AGREEMENT\n\n(Binding agreement — sign electronically via this onboarding form)\n\nThis Agreement is entered into between the Platform (Avante Travel) and the person or entity identified above as the Owner and/or Affiliate (\"the Contracting Party\").\n\n1. Definitions — \"Property\" means the private residential property submitted for listing. \"Owner\" means the registered legal owner. \"Affiliate\" means any person submitting the Property who is not the Owner and who acts under a valid, signed Mandate from the Owner. \"Mandate\" means the written authority from the Owner to the Affiliate to market, list, and manage bookings on the Owner's behalf.\n\n2. Appointment — The Owner (or Affiliate acting under a valid Mandate) appoints the Platform on a non-exclusive basis to market and list the Property, and to facilitate bookings between the Owner/Affiliate and Guests. Where the Contracting Party is an Affiliate, the Affiliate warrants it holds a valid, current, signed Mandate authorising it to list and manage the Property and bind the Owner to the terms submitted in this form.\n\n3. Required Supporting Documents — Before a listing is activated, the Contracting Party must upload: a clear copy of the Owner's ID or passport; proof of ownership (title deed, rates account, levy statement, or equivalent issued within the last 3 months); proof of residence (municipal account, bank statement, or insurance account not older than 3 months); and, if submitted by an Affiliate, a signed Mandate/Power of Attorney from the Owner. The Platform may request further documentation at any time and may suspend or decline a listing pending verification. The Contracting Party warrants all documents are genuine and current, and indemnifies the Platform against loss arising from false or misleading documentation.\n\n4. Listing Information & Accuracy — The Contracting Party is responsible for the accuracy of all information submitted, including location, unit types, rates, images, amenities, and policies, and must promptly update the Platform of any material change. Images must be a true, current representation of the Property, and the Contracting Party warrants it holds the rights to use them.\n\n5. Rates, Deposits & Cancellation Policy — The rates, deposit percentage, deposit deadline, and cancellation/child policy submitted here form part of the binding terms shown to Guests, and are set and controlled by the Contracting Party, who is responsible for honouring confirmed bookings.\n\n6. Commission & Fees — The Platform is entitled to a commission of the total booking value for each confirmed booking, payable per the Platform's fee schedule provided separately.\n\n7. Owner & Affiliate Warranties — The Contracting Party warrants it is the registered Owner or holds a valid Mandate; the Property is free of any legal restriction prohibiting short-term rental; all rates, levies, and municipal accounts are up to date; the Property complies with health, safety, and fire-safety standards; and it has authority to enter into this Agreement.\n\n8. Guest Conduct, Access & Liability — The Contracting Party remains responsible for day-to-day management, maintenance, cleanliness, safety, and Guest check-in/out. The Platform is a marketing and booking facilitation service only and is not a party to, and accepts no liability from, the accommodation relationship, save where required by law.\n\n9. Insurance — The Contracting Party undertakes to maintain adequate public liability and property insurance for the duration of this Agreement.\n\n10. Term & Termination — This Agreement commences on signature and continues until terminated by either Party on 30 days' written notice, or immediately by the Platform for breach of clauses 3, 4, or 7, or failed verification.\n\n11. Indemnity — The Contracting Party indemnifies the Platform against any claim, loss, fine, or damage arising from breach of this Agreement, inaccurate listing information, or failure of the warranties in clause 7.\n\n12. Data Protection — Personal information submitted is processed and stored per the Protection of Personal Information Act 4 of 2013 (POPIA) and the Platform's Privacy Policy, solely to verify the listing and facilitate bookings.\n\n13. Governing Law & Disputes — Governed by the laws of the Republic of South Africa. Disputes will be resolved amicably where possible before arbitration or the courts.\n\n14. General — This Agreement, together with the information submitted in this form, constitutes the entire agreement regarding the listing of the Property. Electronic signature (typed name, ticked acceptance, and/or captured signature) submitted via this form is deemed a valid, binding signature under the Electronic Communications and Transactions Act 25 of 2002.\n\nBy ticking the agreement checkbox and submitting this form, the signatory confirms they have read, understood, and agree to be bound by this Agreement, and that they are either the registered Owner or a duly authorised Affiliate/legal representative acting under a valid Mandate.\n\nLegal note: this is a template starting point only, not reviewed by an attorney and not legal advice. Avante Travel has this Agreement reviewed and adapted by a South African attorney before relying on it.";
+
+  var termsBody = document.getElementById('termsBody');
+  if(termsBody){
+    termsBody.innerHTML = TERMS_TEXT.split('\n\n').map(function(p){ return '<p>' + p.replace(/\n/g,'<br>') + '</p>'; }).join('');
+  }
+  var termsModal = document.getElementById('termsModal');
+  var viewTermsBtn = document.getElementById('viewTermsBtn');
+  var termsCloseBtn = document.getElementById('termsCloseBtn');
+  if(viewTermsBtn) viewTermsBtn.addEventListener('click', function(){ termsModal.classList.add('show'); });
+  if(termsCloseBtn) termsCloseBtn.addEventListener('click', function(){ termsModal.classList.remove('show'); });
+  if(termsModal) termsModal.addEventListener('click', function(e){ if(e.target === termsModal) termsModal.classList.remove('show'); });
+
+  // ---------- Submitted-by toggle ----------
+  var affCard = document.getElementById('affCard');
+  var mandateRow = document.getElementById('mandateRow');
+  Array.prototype.forEach.call(document.getElementsByName('submittedBy'), function(r){
+    r.addEventListener('change', function(){
+      var isAff = document.querySelector('input[name="submittedBy"]:checked').value === 'Affiliate';
+      affCard.style.display = isAff ? '' : 'none';
+      mandateRow.style.display = isAff ? '' : 'none';
+    });
+  });
+
+  // ---------- Amenities ----------
+  var AMENITY_DATA = {
+    "In-Unit / Room Amenities": ["Air-conditioning","Heating","Ceiling fans","TV","DSTV/Satellite TV","Smart TV / Streaming (Netflix etc.)","Wi-Fi","Coffee/tea station","Bar fridge","Kitchenette","Full kitchen in unit","Dishwasher","Microwave","Hairdryer","Iron & ironing board","Study/work desk","Mosquito nets","Blackout curtains","Private balcony/patio","Sea view","Mountain view","En-suite bathroom","Bath","Shower","Toiletries provided","Bathrobes","Extra-length/queen/king bed","Cot/crib available","Safe in room"],
+    "Establishment / Property Facilities": ["Free Wi-Fi","Free parking","Paid parking","Secure/gated parking","Backup power (generator/inverter)","Backup water supply","Borehole water","Swimming pool","Private pool","Shared/communal pool","Jacuzzi/hot tub","Braai/BBQ facilities","Garden","Patio/veranda","Fireplace/boma","Elevator/lift","Laundry facilities/service","Housekeeping/cleaning service","Reception/24hr check-in","Concierge service","Room service","Restaurant on-site","Bar on-site","Conference/meeting facilities","Wedding/function venue"],
+    "Kitchen & Dining": ["Full kitchen","Fridge/freezer","Stove & oven","Microwave","Dishwasher","Kettle","Toaster","Coffee machine","Wine cooler","Braai/outdoor cooking area","Outdoor dining area","Complimentary welcome pack","Breakfast included","Private chef available on request"],
+    "Outdoor & Recreation": ["Swimming pool","Private plunge pool","Beach access","Direct beach frontage","Sea view","Mountain view","Hiking trails on property","Fishing access","Boat launch/jetty","Bicycles available","Tennis court","Golf course access","Games room","Kids' play area","Trampoline"],
+    "Safety & Security": ["Smoke detectors","Fire extinguisher","First aid kit","CCTV cameras","Alarm system","Electric fencing","24-hour security/patrol","Guarded/gated estate","Safe/lockbox","Pool safety fence/net","Child safety gates","Carbon monoxide detector"],
+    "Accessibility": ["Wheelchair-accessible entrance","Step-free access throughout","Accessible bathroom/roll-in shower","Wide doorways","Elevator/lift","Ground-floor unit available","Accessible parking bay"],
+    "Family & Pets": ["Cot/crib available","High chair","Kid-friendly furnishings","Baby-proofed","Babysitting service on request","Pets allowed","Pet-free property","Pet amenities provided (bowls/bed)"],
+    "Activities & Experiences": ["Whale watching","Scuba diving/snorkeling","Surfing lessons","Hiking/nature trails","Golf","Fishing charters","Wine tasting tours","Game drives/safari","Horse riding","Canopy tours/zipline","Kayaking/canoeing","Boat cruises/sunset cruises","Spa & wellness treatments","Cultural/heritage tours","Local craft markets","Cooking classes","Cycling routes","Bird watching","4x4/off-road trails","Stargazing"]
+  };
+
+  var amenitiesEl = document.getElementById('amenities');
+  if(amenitiesEl){
+    var html = '';
+    for(var cat in AMENITY_DATA){
+      html += '<div class="amenity-cat"><h4>' + cat + '</h4><div class="amenity-grid">';
+      AMENITY_DATA[cat].forEach(function(item){
+        html += '<label><input type="checkbox" class="amenity-check" data-cat="' + cat.replace(/"/g,'&quot;') + '" data-item="' + item.replace(/"/g,'&quot;') + '"> ' + item + '</label>';
+      });
+      html += '</div></div>';
+    }
+    amenitiesEl.innerHTML = html;
+  }
+
+  // ---------- Unit types repeater ----------
+  var unitList = document.getElementById('unitList');
+  var addUnitBtn = document.getElementById('addUnitBtn');
+  var unitCount = 0;
+
+  function addUnitRow(){
+    unitCount++;
+    var idx = unitCount;
+    var wrap = document.createElement('div');
+    wrap.className = 'unit-row';
+    wrap.innerHTML =
+      '<div class="unit-row-head"><strong>Unit Type ' + idx + '</strong><button type="button" class="remove-unit">Remove</button></div>' +
+      '<label>Unit type name</label><input class="pu-name">' +
+      '<div class="row"><div><label>Max occupancy</label><input class="pu-maxOcc" inputmode="numeric"></div><div><label>Max adults</label><input class="pu-maxAdults" inputmode="numeric"></div></div>' +
+      '<div class="row"><div><label>Children allowed</label><select class="pu-childOk"><option value="Y">Yes</option><option value="N">No</option></select></div><div><label># of units of this type</label><input class="pu-numUnits" inputmode="numeric"></div></div>' +
+      '<div class="row"><div><label>Rate scheme</label><select class="pu-rateScheme"><option>Per Unit</option><option>Per Person</option></select></div><div><label>Rate basis</label><select class="pu-rateBasis"><option>Self Catering</option><option>B&amp;B</option><option>Room Only</option><option>Half Board</option><option>Full Board</option></select></div></div>' +
+      '<div class="row"><div><label>Season start</label><input class="pu-seasonStart" type="date"></div><div><label>Season end</label><input class="pu-seasonEnd" type="date"></div></div>' +
+      '<label>Rates per pax (1 / 2 / 3 / 4 / 5)</label><div class="row"><input class="pu-rate1" inputmode="numeric"><input class="pu-rate2" inputmode="numeric"><input class="pu-rate3" inputmode="numeric"><input class="pu-rate4" inputmode="numeric"><input class="pu-rate5" inputmode="numeric"></div>' +
+      '<div class="row"><div><label>Child rate (0-6)</label><input class="pu-childRate06" inputmode="numeric"></div><div><label>Child rate (7-12)</label><input class="pu-childRate712" inputmode="numeric"></div></div>' +
+      '<label>Unit description</label><textarea class="pu-desc" rows="2"></textarea>' +
+      '<label>Unit photos</label><input type="file" class="pu-images" accept="image/*" multiple>' +
+      '<div class="img-list pu-images-list"></div>';
+    unitList.appendChild(wrap);
+    wrap.querySelector('.remove-unit').addEventListener('click', function(){ wrap.remove(); });
+    wrap.querySelector('.pu-images').addEventListener('change', function(e){
+      var nameInput = wrap.querySelector('.pu-name');
+      var listEl = wrap.querySelector('.pu-images-list');
+      Array.prototype.forEach.call(e.target.files, function(file){
+        var row = document.createElement('div');
+        row.textContent = file.name + ' — uploading...';
+        listEl.appendChild(row);
+        uploadFile(file, 'image', 'unit', function(data){
+          if(data && data.ok){
+            row.textContent = '✓ ' + file.name;
+            uploadedImages.push({ type: 'Unit', unitTypeName: nameInput.value.trim(), key: data.key, fileName: file.name, cover: 'N' });
+          } else {
+            row.textContent = file.name + ' — upload failed';
+          }
+        });
+      });
+    });
+  }
+  if(addUnitBtn){ addUnitBtn.addEventListener('click', addUnitRow); addUnitRow(); }
+
+  // ---------- File uploads ----------
+  var LISTING_TMP = 'draft-' + Date.now() + '-' + Math.floor(Math.random()*100000);
+  var uploadedDocs = [];
+  var uploadedImages = [];
+
+  function uploadFile(file, kind, label, cb){
+    fetch('/api/property-file?listingId=' + encodeURIComponent(LISTING_TMP) + '&kind=' + encodeURIComponent(kind) + '&label=' + encodeURIComponent(label) + '&fileName=' + encodeURIComponent(file.name), {
+      method: 'POST',
+      headers: { 'content-type': file.type || 'application/octet-stream' },
+      body: file
+    }).then(function(r){ return r.json(); }).then(function(data){ cb(data); })
+      .catch(function(){ cb({ error: 'Upload failed' }); });
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.doc-input'), function(input){
+    input.addEventListener('change', function(){
+      var file = input.files[0];
+      var row = input.closest('.doc-row');
+      var label = row.getAttribute('data-label');
+      var statusEl = row.querySelector('.doc-status');
+      if(!file) return;
+      statusEl.textContent = 'Uploading...';
+      uploadFile(file, 'document', label, function(data){
+        if(data && data.ok){
+          statusEl.textContent = '✓ ' + file.name;
+          uploadedDocs = uploadedDocs.filter(function(d){ return d.type !== label; });
+          uploadedDocs.push({ type: label, key: data.key, fileName: file.name });
+        } else {
+          statusEl.textContent = 'Upload failed';
+        }
+      });
+    });
+  });
+
+  var imageInput = document.getElementById('imageInput');
+  var imageListEl = document.getElementById('imageList');
+  if(imageInput){
+    imageInput.addEventListener('change', function(){
+      Array.prototype.forEach.call(imageInput.files, function(file){
+        var row = document.createElement('div');
+        row.textContent = file.name + ' — uploading...';
+        imageListEl.appendChild(row);
+        uploadFile(file, 'image', 'property', function(data){
+          if(data && data.ok){
+            row.textContent = '✓ ' + file.name;
+            uploadedImages.push({ type: 'Property', unitTypeName: '', key: data.key, fileName: file.name, cover: 'N' });
+          } else {
+            row.textContent = file.name + ' — upload failed';
+          }
+        });
+      });
+    });
+  }
+
+  // ---------- Submit ----------
+  var submitBtn = document.getElementById('submitBtn');
+  var statusEl = document.getElementById('formStatus');
+
+  submitBtn.addEventListener('click', function(){
+    statusEl.className = 'status';
+    statusEl.textContent = '';
+
+    var submittedBy = document.querySelector('input[name="submittedBy"]:checked').value;
+    var ownerName = document.getElementById('ownerName').value.trim();
+    var propName = document.getElementById('pName').value.trim();
+    var agree = document.getElementById('agree').checked;
+
+    if(!propName || !ownerName || !agree){
+      statusEl.textContent = 'Please fill in the property name, owner name, and accept the Agreement before submitting.';
+      statusEl.className = 'status show err';
+      return;
+    }
+
+    var amenities = [];
+    Array.prototype.forEach.call(document.querySelectorAll('.amenity-check'), function(cb){
+      amenities.push({ category: cb.getAttribute('data-cat'), item: cb.getAttribute('data-item'), available: cb.checked ? 'Y' : 'N', notes: '' });
+    });
+
+    var unitTypes = [];
+    Array.prototype.forEach.call(document.querySelectorAll('.unit-row'), function(row){
+      unitTypes.push({
+        name: row.querySelector('.pu-name').value.trim(),
+        maxOccupancy: row.querySelector('.pu-maxOcc').value.trim(),
+        maxAdults: row.querySelector('.pu-maxAdults').value.trim(),
+        childrenAllowed: row.querySelector('.pu-childOk').value,
+        numUnits: row.querySelector('.pu-numUnits').value.trim(),
+        rateScheme: row.querySelector('.pu-rateScheme').value,
+        rateBasis: row.querySelector('.pu-rateBasis').value,
+        seasonStart: row.querySelector('.pu-seasonStart').value,
+        seasonEnd: row.querySelector('.pu-seasonEnd').value,
+        ratePax1: row.querySelector('.pu-rate1').value.trim(),
+        ratePax2: row.querySelector('.pu-rate2').value.trim(),
+        ratePax3: row.querySelector('.pu-rate3').value.trim(),
+        ratePax4: row.querySelector('.pu-rate4').value.trim(),
+        ratePax5: row.querySelector('.pu-rate5').value.trim(),
+        childRate06: row.querySelector('.pu-childRate06').value.trim(),
+        childRate712: row.querySelector('.pu-childRate712').value.trim(),
+        description: row.querySelector('.pu-desc').value.trim()
+      });
+    });
+
+    var aff = new URLSearchParams(window.location.search).get('aff') || '';
+
+    var payload = {
+      action: 'submit',
+      submittedBy: submittedBy,
+      affId: aff,
+      ownerFullName: ownerName,
+      ownerIdPassport: document.getElementById('ownerId').value.trim(),
+      ownerEmail: document.getElementById('ownerEmail').value.trim(),
+      ownerPhone: document.getElementById('ownerPhone').value.trim(),
+      affiliateAgentName: document.getElementById('affName').value.trim(),
+      affiliateCompany: document.getElementById('affCompany').value.trim(),
+      affiliateEmail: document.getElementById('affEmail').value.trim(),
+      affiliatePhone: document.getElementById('affPhone').value.trim(),
+      propertyName: propName,
+      propertyName2: document.getElementById('pName2').value.trim(),
+      country: document.getElementById('pCountry').value.trim(),
+      suburb: document.getElementById('pSuburb').value.trim(),
+      city: document.getElementById('pCity').value.trim(),
+      city2: document.getElementById('pCity2').value.trim(),
+      stateProvince: document.getElementById('pProvince').value.trim(),
+      area: document.getElementById('pArea').value.trim(),
+      district: document.getElementById('pDistrict').value.trim(),
+      propertyType: document.getElementById('pType').value.trim(),
+      complexName: document.getElementById('pComplex').value.trim(),
+      infoLink: document.getElementById('pInfoLink').value.trim(),
+      bookingLink: document.getElementById('pBookingLink').value.trim(),
+      telephone: document.getElementById('pPhone').value.trim(),
+      email: document.getElementById('pEmail').value.trim(),
+      latitude: document.getElementById('pLat').value.trim(),
+      longitude: document.getElementById('pLng').value.trim(),
+      selfSupplierRating: document.getElementById('pRating').value.trim(),
+      tourismBoardGrading: document.getElementById('pGrading').value.trim(),
+      ratingLink: document.getElementById('pRatingLink').value.trim(),
+      checkInTime: document.getElementById('pCheckIn').value.trim(),
+      checkOutTime: document.getElementById('pCheckOut').value.trim(),
+      description: document.getElementById('pDesc').value.trim(),
+      houseRules: document.getElementById('pRules').value.trim(),
+      moreInfo: document.getElementById('pMoreInfo').value.trim(),
+      areaInfo: document.getElementById('pAreaInfo').value.trim(),
+      depositPolicyText: document.getElementById('depositText').value.trim(),
+      depositPct: document.getElementById('depositPct').value.trim(),
+      depositDays: document.getElementById('depositDays').value.trim(),
+      childPolicy: document.getElementById('childPolicy').value.trim(),
+      paymentGatewayInUse: document.getElementById('paymentGateway').checked ? 'Y' : 'N',
+      allowSameDayBooking: document.getElementById('sameDay').checked ? 'Y' : 'N',
+      unitTypes: unitTypes,
+      amenities: amenities,
+      documents: uploadedDocs,
+      images: uploadedImages,
+      agreementSigned: agree,
+      signatoryName: document.getElementById('sigName').value.trim(),
+      signatoryCapacity: document.getElementById('sigCapacity').value,
+      signatoryIdPassport: document.getElementById('sigId').value.trim(),
+      signatureDate: document.getElementById('sigDate').value,
+      signaturePlace: document.getElementById('sigPlace').value.trim()
+    };
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting...';
+
+    fetch('/api/property-onboarding', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function(r){ return r.json(); }).then(function(data){
+      submitBtn.textContent = 'Submit Listing for Review';
+      if(data && data.ok){
+        submitBtn.disabled = true;
+        statusEl.textContent = 'Thank you! Your listing (' + data.listingId + ') has been submitted for review. Avante Travel will be in touch once it is verified.';
+        statusEl.className = 'status show ok';
+        window.scrollTo({ top: statusEl.getBoundingClientRect().top + window.scrollY - 100, behavior: 'smooth' });
+      } else {
+        submitBtn.disabled = false;
+        statusEl.textContent = (data && data.error) || 'Something went wrong. Please try again.';
+        statusEl.className = 'status show err';
+      }
+    }).catch(function(){
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Submit Listing for Review';
+      statusEl.textContent = 'Something went wrong. Please try again.';
+      statusEl.className = 'status show err';
+    });
+  });
+
+})();
+</script>
+
+</body>
+</html>
