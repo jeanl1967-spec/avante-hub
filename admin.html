@@ -785,6 +785,18 @@
       });
     }
 
+    function propAdminPost(action, extraBody){
+      var body = Object.assign({ action: action, token: ADMIN_TOKEN }, extraBody || {});
+      return fetch('/api/property-onboarding', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(function(r){
+        if(r.status === 401){ goToLogin(); return Promise.reject(new Error('unauthenticated')); }
+        return r.json().then(function(data){ return { status: r.status, data: data }; });
+      });
+    }
+
     // ---------- tab switching ----------
     document.querySelectorAll('.tab').forEach(function(btn){
       btn.addEventListener('click', function(){
@@ -1888,6 +1900,205 @@
         if(btn.dataset.panel === 'defaultHooks'){
           btn.addEventListener('click', function(){
             if(!loaded) loadDefaultHooks();
+          });
+        }
+      });
+    })();
+
+    // ---------- Property Listings (admin review of submitted properties) ----------
+    (function(){
+      var tableBody = document.getElementById('propertyListingsTableBody');
+      var emptyEl = document.getElementById('propertyListingsEmpty');
+      var statusEl = document.getElementById('propertyListingsStatus');
+      var settingsStatusEl = document.getElementById('propertySettingsStatus');
+      var overlay = document.getElementById('propertyDetailsModalOverlay');
+      var bodyEl = document.getElementById('propertyDetailsModalBody');
+      var statusInput = document.getElementById('propertyStatusInput');
+      var siteNrInput = document.getElementById('propertySiteNrInput');
+      var modalStatusEl = document.getElementById('propertyDetailsModalStatus');
+      var currentListingId = '';
+      var loadedSettings = false;
+
+      function fmtPropDate(iso){
+        if(!iso) return '\u2014';
+        try{
+          var d = new Date(iso);
+          return d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
+        }catch(e){ return '\u2014'; }
+      }
+
+      function loadPropertySettings(){
+        return propAdminPost('getSettings').then(function(res){
+          if(res.data && res.data.ok){
+            document.getElementById('notificationEmailInput').value = (res.data.settings && res.data.settings.notificationEmail) || '';
+          }
+          loadedSettings = true;
+        });
+      }
+
+      document.getElementById('saveNotificationEmailBtn').addEventListener('click', function(){
+        var email = document.getElementById('notificationEmailInput').value.trim();
+        settingsStatusEl.textContent = 'Saving\u2026';
+        settingsStatusEl.className = 'status show';
+        propAdminPost('setSettings', { notificationEmail: email }).then(function(res){
+          if(res.data && res.data.ok){
+            settingsStatusEl.textContent = 'Saved.';
+          } else {
+            settingsStatusEl.textContent = (res.data && res.data.error) || 'Could not save.';
+          }
+          settingsStatusEl.className = 'status show';
+        }).catch(function(){
+          settingsStatusEl.textContent = 'Could not save.';
+          settingsStatusEl.className = 'status show';
+        });
+      });
+
+      function renderPropertyListingsTable(listings){
+        tableBody.innerHTML = '';
+        if(!listings.length){
+          emptyEl.style.display = 'block';
+          return;
+        }
+        emptyEl.style.display = 'none';
+        listings.forEach(function(l){
+          var tr = document.createElement('tr');
+
+          var tdProp = document.createElement('td');
+          tdProp.textContent = l.propertyName || '\u2014';
+          tr.appendChild(tdProp);
+
+          var tdOwner = document.createElement('td');
+          tdOwner.textContent = l.ownerFullName || '\u2014';
+          tr.appendChild(tdOwner);
+
+          var tdSubmitter = document.createElement('td');
+          tdSubmitter.textContent = l.submittedBy || '\u2014';
+          tr.appendChild(tdSubmitter);
+
+          var tdLoc = document.createElement('td');
+          tdLoc.textContent = [l.city, l.country].filter(Boolean).join(', ') || '\u2014';
+          tr.appendChild(tdLoc);
+
+          var tdStatus = document.createElement('td');
+          var badge = document.createElement('span');
+          var statusClass = l.status === 'Listed' ? 'listed' : (l.status === 'Rejected' ? 'rejected' : 'requested');
+          badge.className = 'badge ' + statusClass;
+          badge.textContent = l.status || 'Requested';
+          tdStatus.appendChild(badge);
+          tr.appendChild(tdStatus);
+
+          var tdSiteNr = document.createElement('td');
+          tdSiteNr.textContent = l.siteNr || '\u2014';
+          tr.appendChild(tdSiteNr);
+
+          var tdDate = document.createElement('td');
+          tdDate.textContent = fmtPropDate(l.dateSubmitted);
+          tr.appendChild(tdDate);
+
+          var tdActions = document.createElement('td');
+          var viewBtn = document.createElement('button');
+          viewBtn.type = 'button';
+          viewBtn.className = 'btn-outline btn-small';
+          viewBtn.textContent = 'View';
+          viewBtn.addEventListener('click', function(){ openPropertyDetailsModal(l.listingId); });
+          tdActions.appendChild(viewBtn);
+          tr.appendChild(tdActions);
+
+          tableBody.appendChild(tr);
+        });
+      }
+
+      function loadPropertyListings(){
+        statusEl.textContent = 'Loading\u2026';
+        statusEl.className = 'status show';
+        return propAdminPost('list').then(function(res){
+          statusEl.textContent = '';
+          statusEl.className = 'status';
+          if(res.data && res.data.ok){
+            renderPropertyListingsTable(res.data.listings || []);
+          } else {
+            statusEl.textContent = (res.data && res.data.error) || 'Could not load listings.';
+            statusEl.className = 'status show';
+          }
+        }).catch(function(){
+          statusEl.textContent = 'Could not load listings.';
+          statusEl.className = 'status show';
+        });
+      }
+
+      function openPropertyDetailsModal(listingId){
+        currentListingId = listingId;
+        modalStatusEl.textContent = '';
+        modalStatusEl.className = 'modal-status';
+        bodyEl.innerHTML = 'Loading\u2026';
+        overlay.classList.add('show');
+        propAdminPost('get', { listingId: listingId }).then(function(res){
+          if(!res.data || !res.data.ok){
+            bodyEl.innerHTML = '';
+            modalStatusEl.textContent = (res.data && res.data.error) || 'Could not load listing.';
+            modalStatusEl.className = 'modal-status show';
+            return;
+          }
+          var l = res.data.listing;
+          bodyEl.innerHTML =
+            detailRow('Listing ID', l.listingId) +
+            detailRow('Property name', l.propertyName) +
+            detailRow('Property type', l.propertyType) +
+            detailRow('Location', [l.suburb, l.city, l.stateProvince, l.country].filter(Boolean).join(', ')) +
+            detailRow('Owner', l.ownerFullName) +
+            detailRow('Owner email', l.ownerEmail) +
+            detailRow('Owner phone', l.ownerPhone) +
+            detailRow('Submitted by', l.submittedBy) +
+            (l.submittedBy === 'Affiliate' ? detailRow('Affiliate', (l.affiliateAgentName || '') + ' (' + (l.affId || '') + ')') : '') +
+            detailLinkRow('Booking link', l.bookingLink) +
+            detailLinkRow('Info link', l.infoLink) +
+            detailRow('Submitted', fmtPropDate(l.dateSubmitted)) +
+            detailRow('Last updated', fmtPropDate(l.dateUpdated));
+          statusInput.value = l.status || 'Requested';
+          siteNrInput.value = l.siteNr || '';
+        }).catch(function(){
+          bodyEl.innerHTML = '';
+          modalStatusEl.textContent = 'Could not load listing.';
+          modalStatusEl.className = 'modal-status show';
+        });
+      }
+
+      document.getElementById('propertyDetailsCloseBtn').addEventListener('click', function(){
+        overlay.classList.remove('show');
+      });
+      overlay.addEventListener('click', function(e){ if(e.target === overlay) overlay.classList.remove('show'); });
+
+      document.getElementById('propertyDetailsSaveBtn').addEventListener('click', function(){
+        if(!currentListingId) return;
+        modalStatusEl.textContent = 'Saving\u2026';
+        modalStatusEl.className = 'modal-status show';
+        propAdminPost('updateStatus', {
+          listingId: currentListingId,
+          status: statusInput.value,
+          siteNr: siteNrInput.value.trim()
+        }).then(function(res){
+          if(res.data && res.data.ok){
+            modalStatusEl.textContent = 'Saved.';
+            loadPropertyListings();
+          } else {
+            modalStatusEl.textContent = (res.data && res.data.error) || 'Could not save.';
+          }
+          modalStatusEl.className = 'modal-status show';
+        }).catch(function(){
+          modalStatusEl.textContent = 'Could not save.';
+          modalStatusEl.className = 'modal-status show';
+        });
+      });
+
+      document.getElementById('refreshPropertyListingsBtn').addEventListener('click', function(){
+        loadPropertyListings();
+      });
+
+      document.querySelectorAll('.tab').forEach(function(btn){
+        if(btn.dataset.panel === 'propertyListings'){
+          btn.addEventListener('click', function(){
+            loadPropertyListings();
+            if(!loadedSettings) loadPropertySettings();
           });
         }
       });
