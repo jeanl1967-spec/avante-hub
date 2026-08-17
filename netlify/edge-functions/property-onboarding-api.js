@@ -115,6 +115,7 @@ export default async (request, context) => {
         complexName: clean(body.complexName, 200),
         infoLink: clean(body.infoLink, 300),
         bookingLink: clean(body.bookingLink, 300),
+        siteNr: clean(body.siteNr, 30),
         telephone: clean(body.telephone, 60),
         email: clean(body.email, 200),
         latitude: clean(body.latitude, 30),
