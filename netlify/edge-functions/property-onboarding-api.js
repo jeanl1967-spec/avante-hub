@@ -1,19 +1,30 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 
-// Backs the "Property Affiliate" onboarding tab in hub.html. A property
-// owner (or an existing travel affiliate acting as their mandated agent)
-// submits a listing here; it's stored as "Pending Verification" for Avante
-// to review and load into the Private Property STR Database. This never
-// auto-publishes a listing — it only records the submission.
+// Backs the "Property Affiliate" onboarding tab in hub.html, and the
+// "Property Listings" tab in admin.html. A property owner (or an existing
+// travel affiliate acting as their mandated agent) submits a listing here;
+// it's stored with status "Requested" for Avante to review. Admin can then
+// change the status to "Listed" (approved, live) or "Rejected". Nothing
+// here auto-publishes a listing anywhere else â it only records/tracks it.
 
 function clean(v, max) {
   return typeof v === "string" ? v.trim().slice(0, max || 500) : "";
+}
+
+function escapeHtml(v) {
+  return String(v == null ? "" : v)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function genListingId() {
   const n = Math.floor(Math.random() * 900000) + 100000;
   return "P-" + n;
 }
+
+const STATUSES = ["Requested", "Listed", "Rejected"];
 
 function sanitizeUnitTypes(input) {
   if (!Array.isArray(input)) return [];
@@ -60,6 +71,43 @@ function sanitizeFileRefs(input, max) {
   }));
 }
 
+async function verifyAdminToken(token) {
+  if (!token) return false;
+  const sessionStore = getStore({ name: "admin-sessions", consistency: "strong" });
+  const session = await sessionStore.get(token, { type: "json" });
+  if (!session) return false;
+  if (new Date(session.expiresAt).getTime() < Date.now()) return false;
+  return true;
+}
+
+async function sendNotificationEmail(to, subject, html) {
+  try {
+    const apiKey = Netlify.env.get("RESEND_API_KEY");
+    if (!apiKey || !to) return;
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer " + apiKey,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        from: "Avante Travel <onboarding@resend.dev>",
+        to: [to],
+        subject: subject,
+        html: html,
+      }),
+    });
+  } catch (e) {
+    // Email failures should never break the listing submit/status flow.
+  }
+}
+
+async function getNotificationEmail() {
+  const settingsStore = getStore({ name: "property-settings", consistency: "strong" });
+  const settings = await settingsStore.get("config", { type: "json" });
+  return (settings && settings.notificationEmail) || "";
+}
+
 export default async (request, context) => {
   const cors = {
     "access-control-allow-origin": "*",
@@ -91,6 +139,18 @@ export default async (request, context) => {
   const action = body.action;
   const store = getStore({ name: "property-listings", consistency: "strong" });
 
+  const json = (data, status) =>
+    new Response(JSON.stringify(data), {
+      status: status || 200,
+      headers: { "content-type": "application/json", ...cors },
+    });
+
+  const requireAdmin = async () => {
+    const authed = await verifyAdminToken(body.token);
+    if (!authed) return json({ error: "Not authenticated." }, 401);
+    return null;
+  };
+
   try {
     if (action === "submit") {
       const listingId = genListingId();
@@ -98,7 +158,7 @@ export default async (request, context) => {
 
       const record = {
         listingId: listingId,
-        status: "Pending Verification",
+        status: "Requested",
         dateSubmitted: now,
         dateUpdated: now,
 
@@ -115,7 +175,7 @@ export default async (request, context) => {
         complexName: clean(body.complexName, 200),
         infoLink: clean(body.infoLink, 300),
         bookingLink: clean(body.bookingLink, 300),
-        siteNr: clean(body.siteNr, 30),
+        siteNr: "",
         telephone: clean(body.telephone, 60),
         email: clean(body.email, 200),
         latitude: clean(body.latitude, 30),
@@ -164,48 +224,138 @@ export default async (request, context) => {
       };
 
       if (!record.propertyName || !record.ownerFullName || record.agreementSigned !== "Y") {
-        return new Response(
-          JSON.stringify({ error: "Property name, owner name, and agreement acceptance are required." }),
-          { status: 400, headers: { "content-type": "application/json", ...cors } }
+        return json(
+          { error: "Property name, owner name, and agreement acceptance are required." },
+          400
         );
       }
 
       await store.setJSON(listingId, record);
 
-      return new Response(JSON.stringify({ ok: true, listingId: listingId }), {
-        headers: { "content-type": "application/json", ...cors },
-      });
+      const notifyTo = await getNotificationEmail();
+      if (notifyTo) {
+        context.waitUntil(
+          sendNotificationEmail(
+            notifyTo,
+            "New property listing submitted â " + record.propertyName,
+            "<p>A new property listing was submitted for review.</p>" +
+              "<p><strong>Listing ID:</strong> " + escapeHtml(listingId) + "<br>" +
+              "<strong>Property:</strong> " + escapeHtml(record.propertyName) + "<br>" +
+              "<strong>Submitted by:</strong> " + escapeHtml(record.submittedBy) + " â " + escapeHtml(record.ownerFullName) + "<br>" +
+              "<strong>Status:</strong> Requested</p>" +
+              "<p>Log in to Admin &gt; Property Listings to review and approve.</p>"
+          )
+        );
+      }
+
+      return json({ ok: true, listingId: listingId });
     }
 
     if (action === "get") {
+      const denied = await requireAdmin();
+      if (denied) return denied;
+
       const listingId = clean(body.listingId, 20);
-      if (!listingId) {
-        return new Response(JSON.stringify({ error: "missing listingId" }), {
-          status: 400,
-          headers: { "content-type": "application/json", ...cors },
-        });
-      }
+      if (!listingId) return json({ error: "missing listingId" }, 400);
       const record = await store.get(listingId, { type: "json" });
-      if (!record) {
-        return new Response(JSON.stringify({ error: "not found" }), {
-          status: 404,
-          headers: { "content-type": "application/json", ...cors },
-        });
-      }
-      return new Response(JSON.stringify({ ok: true, listing: record }), {
-        headers: { "content-type": "application/json", ...cors },
-      });
+      if (!record) return json({ error: "not found" }, 404);
+      return json({ ok: true, listing: record });
     }
 
-    return new Response(JSON.stringify({ error: "unknown action" }), {
-      status: 400,
-      headers: { "content-type": "application/json", ...cors },
-    });
+    if (action === "list") {
+      const denied = await requireAdmin();
+      if (denied) return denied;
+
+      const { blobs } = await store.list();
+      const items = await Promise.all(
+        blobs.map((b) => store.get(b.key, { type: "json" }))
+      );
+      const summaries = items
+        .filter(Boolean)
+        .map((r) => ({
+          listingId: r.listingId,
+          propertyName: r.propertyName,
+          ownerFullName: r.ownerFullName,
+          submittedBy: r.submittedBy,
+          country: r.country,
+          city: r.city,
+          status: r.status || "Requested",
+          siteNr: r.siteNr || "",
+          dateSubmitted: r.dateSubmitted,
+          dateUpdated: r.dateUpdated,
+        }))
+        .sort((a, b) => new Date(b.dateSubmitted) - new Date(a.dateSubmitted));
+
+      return json({ ok: true, listings: summaries });
+    }
+
+    if (action === "updateStatus") {
+      const denied = await requireAdmin();
+      if (denied) return denied;
+
+      const listingId = clean(body.listingId, 20);
+      const status = clean(body.status, 30);
+      const siteNr = typeof body.siteNr === "string" ? clean(body.siteNr, 30) : undefined;
+
+      if (!listingId || STATUSES.indexOf(status) === -1) {
+        return json({ error: "Valid listingId and status are required." }, 400);
+      }
+
+      const record = await store.get(listingId, { type: "json" });
+      if (!record) return json({ error: "not found" }, 404);
+
+      const prevStatus = record.status;
+      record.status = status;
+      record.dateUpdated = new Date().toISOString();
+      if (siteNr !== undefined) record.siteNr = siteNr;
+
+      await store.setJSON(listingId, record);
+
+      if (prevStatus !== status) {
+        const submitterEmail =
+          record.submittedBy === "Affiliate" ? record.affiliateEmail : record.ownerEmail;
+        if (submitterEmail) {
+          context.waitUntil(
+            sendNotificationEmail(
+              submitterEmail,
+              "Your Avante property listing status has changed â " + status,
+              "<p>Hi " + escapeHtml(record.ownerFullName || "") + ",</p>" +
+                "<p>Your property listing <strong>" + escapeHtml(record.propertyName) + "</strong> (" +
+                escapeHtml(listingId) + ") status is now: <strong>" + escapeHtml(status) + "</strong>.</p>" +
+                (status === "Listed"
+                  ? "<p>Your property is now live in Avante's Private Property STR Database.</p>"
+                  : "") +
+                "<p>Questions? Reply to this email or contact Avante Travel directly.</p>"
+            )
+          );
+        }
+      }
+
+      return json({ ok: true, listing: record });
+    }
+
+    if (action === "getSettings") {
+      const denied = await requireAdmin();
+      if (denied) return denied;
+
+      const settingsStore = getStore({ name: "property-settings", consistency: "strong" });
+      const settings = await settingsStore.get("config", { type: "json" });
+      return json({ ok: true, settings: settings || { notificationEmail: "" } });
+    }
+
+    if (action === "setSettings") {
+      const denied = await requireAdmin();
+      if (denied) return denied;
+
+      const notificationEmail = clean(body.notificationEmail, 200);
+      const settingsStore = getStore({ name: "property-settings", consistency: "strong" });
+      await settingsStore.setJSON("config", { notificationEmail: notificationEmail });
+      return json({ ok: true });
+    }
+
+    return json({ error: "unknown action" }, 400);
   } catch (err) {
-    return new Response(JSON.stringify({ error: String((err && err.message) || err) }), {
-      status: 500,
-      headers: { "content-type": "application/json", ...cors },
-    });
+    return json({ error: String((err && err.message) || err) }, 500);
   }
 };
 
