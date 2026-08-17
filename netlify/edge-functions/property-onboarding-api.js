@@ -147,7 +147,7 @@ export default async (request, context) => {
         depositDays: clean(body.depositDays, 10),
         childPolicy: clean(body.childPolicy, 1000),
         paymentGatewayInUse: body.paymentGatewayInUse === "Y" ? "Y" : "N",
-        allowSameDayBooking: body.allowSameDayBooking === "Y" : "N",
+        allowSameDayBooking: body.allowSameDayBooking === "Y" ? "Y" : "N",
 
         unitTypes: sanitizeUnitTypes(body.unitTypes),
         amenities: sanitizeAmenities(body.amenities),
