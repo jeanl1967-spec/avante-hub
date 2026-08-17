@@ -56,7 +56,7 @@ function sanitizeFileRefs(input, max) {
     key: clean(f && f.key, 300),
     fileName: clean(f && f.fileName, 200),
     caption: clean(f && f.caption, 300),
-    cover: (f && f.cover) === "Y" : "N",
+    cover: (f && f.cover) === "Y" ? "Y" : "N",
   }));
 }
 
