@@ -2681,6 +2681,26 @@
               '<button type="button" class="hook-mode-btn" data-mode-btn="' + i + '" data-mode-value="admin">Let admin manage</button>' +
             '</div>' +
             '<div class="hook-mode-note" id="h' + i + '-modeNote"></div>' +
+            '<div class="hook-admin-preview" id="h' + i + '-adminPreview" style="display:none;">' +
+            '<div class="hint">This hook is admin-managed — here\'s exactly what shows on your storefront:</div>' +
+            '<div class="hook-image-wrap"><img class="hook-image" id="h' + i + '-previewImage" alt="Storefront preview"><div class="hook-placeholder" id="h' + i + '-previewPlaceholder">No image set yet</div></div>' +
+            '<div class="hook-row" id="h' + i + '-previewBookingRow" style="display:none;">' +
+              '<div class="label">Booking link (personalized to you)</div>' +
+              '<div class="url" id="h' + i + '-previewBookingUrl"></div>' +
+              '<div class="btn-row">' +
+                '<button class="btn-secondary" data-copy="h' + i + '-previewBookingUrl">Copy</button>' +
+                '<button class="btn-outline" data-open="h' + i + '-previewBookingUrl">Open</button>' +
+              '</div>' +
+            '</div>' +
+            '<div class="hook-row" id="h' + i + '-previewLandingRow" style="display:none;">' +
+              '<div class="label">Landing page link</div>' +
+              '<div class="url" id="h' + i + '-previewLandingUrl"></div>' +
+              '<div class="btn-row">' +
+                '<button class="btn-secondary" data-copy="h' + i + '-previewLandingUrl">Copy</button>' +
+                '<button class="btn-outline" data-open="h' + i + '-previewLandingUrl">Open</button>' +
+              '</div>' +
+            '</div>' +
+          '</div>' +
             '<button class="primary" data-hook-save="' + i + '">Save hook</button>' +
             '<div class="status" id="h' + i + '-errorStatus"></div>' +
             '<div class="link-box" id="h' + i + '-linkBox">' +
@@ -2790,15 +2810,54 @@
       // affiliate ID yet or the request fails, since that's the server's
       // own default for a hook with no saved mode.
       function loadHookMode(n, affId){
-        if(!affId){ setModeUI(n, 'admin', false); return; }
+        if(!affId){ setModeUI(n, 'admin', false); setHookPreview(n, null); return; }
         fetch('/api/hook?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n))
           .then(function(r){ return r.json(); })
           .then(function(data){
             var mode = (data && data.mode) || 'admin';
             var expired = !!(data && data.expired);
             setModeUI(n, mode, expired);
+            setHookPreview(n, data);
           })
-          .catch(function(){ setModeUI(n, 'admin', false); });
+          .catch(function(){ setModeUI(n, 'admin', false); setHookPreview(n, null); });
+      }
+
+      // When a hook is admin-managed, show a read-only preview of exactly
+      // what's live on this affiliate's real storefront (landing.html /
+      // promo.html) — the admin's image plus their own personalized
+      // booking link — instead of leaving the editable fields above as the
+      // only thing visible (which only ever reflect this affiliate's own
+      // draft, not what's actually being shown to customers).
+      function setHookPreview(n, data){
+        var preview = document.getElementById('h' + n + '-adminPreview');
+        if(!preview) return;
+        var isAdmin = !!(data && data.source === 'admin');
+        preview.style.display = isAdmin ? 'block' : 'none';
+        if(!isAdmin) return;
+
+        var img = document.getElementById('h' + n + '-previewImage');
+        var placeholder = document.getElementById('h' + n + '-previewPlaceholder');
+        img.onload = function(){ img.classList.add('show'); placeholder.style.display = 'none'; };
+        img.onerror = function(){ img.classList.remove('show'); placeholder.style.display = 'flex'; };
+        img.src = '/api/hook-image?aff=' + encodeURIComponent('__admin__') + '&hook=' + encodeURIComponent(n) + '&t=' + Date.now();
+
+        var bookingRow = document.getElementById('h' + n + '-previewBookingRow');
+        var bookingUrl = document.getElementById('h' + n + '-previewBookingUrl');
+        if(data.booking){
+          bookingUrl.textContent = data.booking;
+          bookingRow.style.display = 'block';
+        }else{
+          bookingRow.style.display = 'none';
+        }
+
+        var landingRow = document.getElementById('h' + n + '-previewLandingRow');
+        var landingUrl = document.getElementById('h' + n + '-previewLandingUrl');
+        if(data.landing){
+          landingUrl.textContent = data.landing;
+          landingRow.style.display = 'block';
+        }else{
+          landingRow.style.display = 'none';
+        }
       }
 
       function saveMode(n, mode){
