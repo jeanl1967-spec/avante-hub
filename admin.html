@@ -1187,14 +1187,6 @@
         tr.appendChild(tdId);
         tr.appendChild(tdShare);
         tr.appendChild(tdStatus);
-
-          var tdAgreement = document.createElement('td');
-          var ag = l.agreementStatus || 'Not Sent';
-          var agColor = ag === 'Accepted' ? '#2a8f45' : (ag === 'Declined' ? '#b42318' : (ag === 'Sent' ? '#0e2f44' : '#808080'));
-          tdAgreement.textContent = ag;
-          tdAgreement.style.color = agColor;
-          tdAgreement.style.fontWeight = '600';
-          tr.appendChild(tdAgreement);
         tr.appendChild(tdOutstanding);
         tr.appendChild(tdActions);
         body.appendChild(tr);
@@ -2016,6 +2008,13 @@
           badge.textContent = l.status || 'Requested';
           tdStatus.appendChild(badge);
           tr.appendChild(tdStatus);
+          var tdAgreement = document.createElement('td');
+          var ag = l.agreementStatus || 'Not Sent';
+          var agColor = ag === 'Accepted' ? '#2a8f45' : (ag === 'Declined' ? '#b42318' : (ag === 'Sent' ? '#0e2f44' : '#808080'));
+          tdAgreement.textContent = ag;
+          tdAgreement.style.color = agColor;
+          tdAgreement.style.fontWeight = '600';
+          tr.appendChild(tdAgreement);
 
           var tdSiteNr = document.createElement('td');
           tdSiteNr.textContent = l.siteNr || '\u2014';
