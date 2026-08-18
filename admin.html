@@ -457,6 +457,7 @@
       <input id="propertySiteNrInput" placeholder="e.g. 12345">
       <div class="modal-status" id="propertyDetailsModalStatus"></div>
       <div class="modal-actions">
+        <button type="button" class="btn-danger" id="propertyDetailsDeleteBtn" style="margin-right:auto;">Delete Listing</button>
         <button type="button" class="modal-btn-secondary" id="propertyDetailsCloseBtn">Close</button>
         <button type="button" class="modal-btn-primary" id="propertyDetailsSaveBtn">Save Changes</button>
       </div>
@@ -2183,6 +2184,25 @@
           });
         }).catch(function(){
           modalStatusEl.textContent = 'Could not save.';
+          modalStatusEl.className = 'modal-status show';
+        });
+      });
+
+      document.getElementById('propertyDetailsDeleteBtn').addEventListener('click', function(){
+        if(!currentListingId) return;
+        if(!window.confirm('Delete this listing permanently? This cannot be undone.')) return;
+        modalStatusEl.textContent = 'Deleting...';
+        modalStatusEl.className = 'modal-status show';
+        propAdminPost('deleteListing', { listingId: currentListingId }).then(function(res){
+          if(res.data && res.data.ok){
+            overlay.classList.remove('show');
+            loadPropertyListings();
+          } else {
+            modalStatusEl.textContent = (res.data && res.data.error) || 'Could not delete listing.';
+            modalStatusEl.className = 'modal-status show';
+          }
+        }).catch(function(){
+          modalStatusEl.textContent = 'Could not delete listing.';
           modalStatusEl.className = 'modal-status show';
         });
       });
