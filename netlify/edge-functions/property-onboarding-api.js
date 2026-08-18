@@ -557,7 +557,21 @@ export default async (request, context) => {
       return json({ ok: true, listing: record });
     }
 
-    if (action === "getSettings") {
+        if (action === "deleteListing") {
+      const denied = await requireAdmin();
+      if (denied) return denied;
+
+      const listingId = clean(body.listingId, 20);
+      if (!listingId) return json({ error: "missing listingId" }, 400);
+
+      const record = await store.get(listingId, { type: "json" });
+      if (!record) return json({ error: "not found" }, 404);
+
+      await store.delete(listingId);
+      return json({ ok: true });
+    }
+
+if (action === "getSettings") {
       const denied = await requireAdmin();
       if (denied) return denied;
 
