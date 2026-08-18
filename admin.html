@@ -1,6 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script>
+  // This admin panel has no offline/installable needs, but a site-wide
+  // service worker (registered from hub.html/landing.html for PWA support)
+  // has scope '/' and can end up controlling this page too, occasionally
+  // causing 'Could not reach the server' style fetch failures. Actively
+  // unregister any service worker controlling this page on load.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(function(regs){
+      regs.forEach(function(reg){ reg.unregister(); });
+    }).catch(function(){});
+  }
+</script>
+
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Avante Travel — Admin</title>
