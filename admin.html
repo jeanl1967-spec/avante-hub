@@ -422,11 +422,19 @@
   </div>
 
   <div class="modal-overlay" id="propertyDetailsModalOverlay">
-    <div class="modal-card" style="max-width:560px;">
+    <div class="modal-card" style="max-width:640px;">
       <h2 id="propertyDetailsModalTitle">Property Listing</h2>
-      <p class="modal-sub">Review the full submission, then approve, reject, or set the StockNetwork Site Nr.</p>
+      <p class="modal-sub">Edit the listing details below, set commission &amp; agreement terms, then save. Send the agreement to the owner/affiliate for acceptance before marking a listing as Listed.</p>
       <div id="propertyDetailsModalBody"></div>
-      <label for="propertyStatusInput" style="margin-top:14px;">Status</label>
+      <label for="propCommissionInput" style="margin-top:14px;">Commission / Revenue Share</label>
+      <input id="propCommissionInput" placeholder="e.g. 15% of booking value">
+      <label for="propDurationInput">Listing Duration</label>
+      <input id="propDurationInput" placeholder="e.g. 12 months from listing date">
+      <label for="propAgreementTermsInput">Agreement Terms</label>
+      <textarea id="propAgreementTermsInput" style="min-height:140px;"></textarea>
+      <div class="modal-sub" id="propertyAgreementStatusRow" style="margin:-2px 0 10px;">Agreement status: Not Sent</div>
+      <button type="button" class="btn-outline" id="propertySendAgreementBtn" style="margin-bottom:14px;">Send Agreement for Acceptance</button>
+      <label for="propertyStatusInput">Status</label>
       <select id="propertyStatusInput">
         <option value="Requested">Requested</option>
         <option value="Listed">Listed</option>
@@ -639,6 +647,7 @@
                   <th>Submitted By</th>
                   <th>Location</th>
                   <th>Status</th>
+                  <th>Agreement</th>
                   <th>Site Nr</th>
                   <th>Submitted</th>
                   <th>Actions</th>
@@ -1165,6 +1174,14 @@
         tr.appendChild(tdId);
         tr.appendChild(tdShare);
         tr.appendChild(tdStatus);
+
+          var tdAgreement = document.createElement('td');
+          var ag = l.agreementStatus || 'Not Sent';
+          var agColor = ag === 'Accepted' ? '#2a8f45' : (ag === 'Declined' ? '#b42318' : (ag === 'Sent' ? '#0e2f44' : '#808080'));
+          tdAgreement.textContent = ag;
+          tdAgreement.style.color = agColor;
+          tdAgreement.style.fontWeight = '600';
+          tr.appendChild(tdAgreement);
         tr.appendChild(tdOutstanding);
         tr.appendChild(tdActions);
         body.appendChild(tr);
@@ -2026,6 +2043,40 @@
         });
       }
 
+      var EDIT_FIELDS = [
+        { key: 'propertyName', label: 'Property name', el: 'input' },
+        { key: 'propertyType', label: 'Property type', el: 'input' },
+        { key: 'suburb', label: 'Suburb', el: 'input' },
+        { key: 'city', label: 'City', el: 'input' },
+        { key: 'stateProvince', label: 'State / Province', el: 'input' },
+        { key: 'country', label: 'Country', el: 'input' },
+        { key: 'ownerFullName', label: 'Owner name', el: 'input' },
+        { key: 'ownerEmail', label: 'Owner email', el: 'input' },
+        { key: 'ownerPhone', label: 'Owner phone', el: 'input' },
+        { key: 'telephone', label: 'Property telephone', el: 'input' },
+        { key: 'email', label: 'Property email', el: 'input' },
+        { key: 'infoLink', label: 'Info link', el: 'input' },
+        { key: 'bookingLink', label: 'Booking link', el: 'input' },
+        { key: 'description', label: 'Description', el: 'textarea' },
+        { key: 'houseRules', label: 'House rules', el: 'textarea' }
+      ];
+
+      function defaultAgreementTerms(l){
+        return 'This agreement confirms that ' + (l.propertyName || 'the property') + ', represented by ' +
+          (l.ownerFullName || 'the owner/agent') + ', will be listed on Avante Travel\'s Private Property STR Database.\n\n' +
+          'By accepting this agreement, the property owner (or their authorised agent) confirms that all information submitted is accurate, and agrees to the commission and listing duration terms stated in this agreement. Avante Travel will process and forward qualifying bookings in line with these terms.\n\n' +
+          'Either party may cancel this listing agreement with 30 days\' written notice.\n\n' +
+          'This is a summary agreement for the purposes of listing approval and does not replace any separate signed supplier agreement already in place.';
+      }
+
+      function fmtAgreementStatus(l){
+        var s = l.agreementStatus || 'Not Sent';
+        var extra = '';
+        if(s === 'Sent' && l.agreementSentAt) extra = ' (sent ' + fmtPropDate(l.agreementSentAt) + ')';
+        if((s === 'Accepted' || s === 'Declined') && l.agreementRespondedAt) extra = ' (' + fmtPropDate(l.agreementRespondedAt) + ')';
+        return 'Agreement status: ' + s + extra;
+      }
+
       function openPropertyDetailsModal(listingId){
         currentListingId = listingId;
         modalStatusEl.textContent = '';
@@ -2040,22 +2091,33 @@
             return;
           }
           var l = res.data.listing;
-          bodyEl.innerHTML =
+
+          var html =
             detailRow('Listing ID', l.listingId) +
-            detailRow('Property name', l.propertyName) +
-            detailRow('Property type', l.propertyType) +
-            detailRow('Location', [l.suburb, l.city, l.stateProvince, l.country].filter(Boolean).join(', ')) +
-            detailRow('Owner', l.ownerFullName) +
-            detailRow('Owner email', l.ownerEmail) +
-            detailRow('Owner phone', l.ownerPhone) +
-            detailRow('Submitted by', l.submittedBy) +
-            (l.submittedBy === 'Affiliate' ? detailRow('Affiliate', (l.affiliateAgentName || '') + ' (' + (l.affId || '') + ')') : '') +
-            detailLinkRow('Booking link', l.bookingLink) +
-            detailLinkRow('Info link', l.infoLink) +
+            detailRow('Submitted by', l.submittedBy + (l.submittedBy === 'Affiliate' ? ' \u2014 ' + (l.affiliateAgentName || '') + ' (' + (l.affId || '') + ')' : '')) +
             detailRow('Submitted', fmtPropDate(l.dateSubmitted)) +
             detailRow('Last updated', fmtPropDate(l.dateUpdated));
+          EDIT_FIELDS.forEach(function(f){
+            var val = escapeHtml(l[f.key] || '');
+            if(f.el === 'textarea'){
+              html += '<label for="propField_' + f.key + '">' + escapeHtml(f.label) + '</label>' +
+                '<textarea id="propField_' + f.key + '">' + val + '</textarea>';
+            } else {
+              html += '<label for="propField_' + f.key + '">' + escapeHtml(f.label) + '</label>' +
+                '<input id="propField_' + f.key + '" value="' + val + '">';
+            }
+          });
+          bodyEl.innerHTML = html;
+
+          document.getElementById('propCommissionInput').value = l.commissionRate || '';
+          document.getElementById('propDurationInput').value = l.listingDuration || '';
+          document.getElementById('propAgreementTermsInput').value = l.agreementTerms || defaultAgreementTerms(l);
+          document.getElementById('propertyAgreementStatusRow').textContent = fmtAgreementStatus(l);
+
           statusInput.value = l.status || 'Requested';
           siteNrInput.value = l.siteNr || '';
+          var listedOption = statusInput.querySelector('option[value="Listed"]');
+          listedOption.disabled = l.agreementStatus !== 'Accepted';
         }).catch(function(){
           bodyEl.innerHTML = '';
           modalStatusEl.textContent = 'Could not load listing.';
@@ -2072,20 +2134,67 @@
         if(!currentListingId) return;
         modalStatusEl.textContent = 'Saving\u2026';
         modalStatusEl.className = 'modal-status show';
-        propAdminPost('updateStatus', {
-          listingId: currentListingId,
-          status: statusInput.value,
-          siteNr: siteNrInput.value.trim()
+
+        var listingPayload = { listingId: currentListingId,
+          commissionRate: document.getElementById('propCommissionInput').value,
+          listingDuration: document.getElementById('propDurationInput').value,
+          agreementTerms: document.getElementById('propAgreementTermsInput').value
+        };
+        EDIT_FIELDS.forEach(function(f){
+          listingPayload[f.key] = document.getElementById('propField_' + f.key).value;
+        });
+
+        propAdminPost('updateListing', listingPayload).then(function(updRes){
+          if(!updRes.data || !updRes.data.ok){
+            modalStatusEl.textContent = (updRes.data && updRes.data.error) || 'Could not save listing details.';
+            modalStatusEl.className = 'modal-status show';
+            return;
+          }
+          return propAdminPost('updateStatus', {
+            listingId: currentListingId,
+            status: statusInput.value,
+            siteNr: siteNrInput.value.trim()
+          }).then(function(res){
+            if(res.data && res.data.ok){
+              modalStatusEl.textContent = 'Saved.';
+              loadPropertyListings();
+            } else {
+              modalStatusEl.textContent = (res.data && res.data.error) || 'Could not save.';
+            }
+            modalStatusEl.className = 'modal-status show';
+          });
+        }).catch(function(){
+          modalStatusEl.textContent = 'Could not save.';
+          modalStatusEl.className = 'modal-status show';
+        });
+      });
+
+      document.getElementById('propertySendAgreementBtn').addEventListener('click', function(){
+        if(!currentListingId) return;
+        modalStatusEl.textContent = 'Sending agreement\u2026';
+        modalStatusEl.className = 'modal-status show';
+
+        var listingPayload = { listingId: currentListingId,
+          commissionRate: document.getElementById('propCommissionInput').value,
+          listingDuration: document.getElementById('propDurationInput').value,
+          agreementTerms: document.getElementById('propAgreementTermsInput').value
+        };
+
+        propAdminPost('updateListing', listingPayload).then(function(){
+          return propAdminPost('sendAgreement', { listingId: currentListingId });
         }).then(function(res){
           if(res.data && res.data.ok){
-            modalStatusEl.textContent = 'Saved.';
+            modalStatusEl.textContent = 'Agreement sent.';
+            document.getElementById('propertyAgreementStatusRow').textContent = fmtAgreementStatus(res.data.listing);
+            var listedOption = statusInput.querySelector('option[value="Listed"]');
+            listedOption.disabled = true;
             loadPropertyListings();
           } else {
-            modalStatusEl.textContent = (res.data && res.data.error) || 'Could not save.';
+            modalStatusEl.textContent = (res.data && res.data.error) || 'Could not send agreement.';
           }
           modalStatusEl.className = 'modal-status show';
         }).catch(function(){
-          modalStatusEl.textContent = 'Could not save.';
+          modalStatusEl.textContent = 'Could not send agreement.';
           modalStatusEl.className = 'modal-status show';
         });
       });
