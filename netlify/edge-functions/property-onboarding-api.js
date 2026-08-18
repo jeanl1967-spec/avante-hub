@@ -1,11 +1,14 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 
-// Backs the "Property Affiliate" onboarding tab in hub.html, and the
-// "Property Listings" tab in admin.html. A property owner (or an existing
-// travel affiliate acting as their mandated agent) submits a listing here;
-// it's stored with status "Requested" for Avante to review. Admin can then
-// change the status to "Listed" (approved, live) or "Rejected". Nothing
-// here auto-publishes a listing anywhere else â it only records/tracks it.
+// Backs the "Property Affiliate" onboarding tab in hub.html, the
+// "Property Listings" tab in admin.html, and the public property-agreement.html
+// acceptance page. A property owner (or an existing travel affiliate acting
+// as their mandated agent) submits a listing here; it's stored with status
+// "Requested" for Avante to review. Admin can edit the listing details, set
+// commission/duration/agreement terms, send that agreement to the submitter
+// for acceptance, and once accepted, change status to "Listed" (approved,
+// live) or "Rejected" at any point. Nothing here auto-publishes a listing
+// anywhere else — it only records/tracks it.
 
 function clean(v, max) {
   return typeof v === "string" ? v.trim().slice(0, max || 500) : "";
@@ -19,12 +22,47 @@ function escapeHtml(v) {
     .replace(/"/g, "&quot;");
 }
 
+function nl2br(v) {
+  return escapeHtml(v).replace(/\n/g, "<br>");
+}
+
 function genListingId() {
   const n = Math.floor(Math.random() * 900000) + 100000;
   return "P-" + n;
 }
 
+function genToken() {
+  try {
+    return (
+      crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "")
+    );
+  } catch (e) {
+    return Math.random().toString(36).slice(2) + Date.now().toString(36) + Math.random().toString(36).slice(2);
+  }
+}
+
 const STATUSES = ["Requested", "Listed", "Rejected"];
+const AGREEMENT_STATUSES = ["Not Sent", "Sent", "Accepted", "Declined"];
+
+// Fields an admin is allowed to edit via the "updateListing" action. This is
+// deliberately the core identifying/contact/descriptive information plus the
+// commercial terms — not the large nested unitTypes/amenities/documents/images
+// arrays, which stay as originally submitted for now.
+const EDITABLE_FIELDS = [
+  "propertyName", "propertyName2", "country", "suburb", "city", "city2",
+  "stateProvince", "area", "district", "propertyType", "complexName",
+  "infoLink", "bookingLink", "telephone", "email", "latitude", "longitude",
+  "selfSupplierRating", "tourismBoardGrading", "ratingLink",
+  "ownerFullName", "ownerIdPassport", "ownerEmail", "ownerPhone",
+  "checkInTime", "checkOutTime", "description", "houseRules", "moreInfo",
+  "areaInfo", "depositPolicyText", "depositPct", "depositDays", "childPolicy",
+  "commissionRate", "listingDuration", "agreementTerms",
+];
+
+const EDITABLE_FIELD_MAX = {
+  description: 4000, houseRules: 4000, moreInfo: 4000, areaInfo: 4000,
+  agreementTerms: 6000, depositPolicyText: 2000, childPolicy: 1000,
+};
 
 function sanitizeUnitTypes(input) {
   if (!Array.isArray(input)) return [];
@@ -106,6 +144,24 @@ async function getNotificationEmail() {
   const settingsStore = getStore({ name: "property-settings", consistency: "strong" });
   const settings = await settingsStore.get("config", { type: "json" });
   return (settings && settings.notificationEmail) || "";
+}
+
+function submitterEmailFor(record) {
+  return record.submittedBy === "Affiliate" ? record.affiliateEmail : record.ownerEmail;
+}
+
+function withAgreementDefaults(record) {
+  if (!record) return record;
+  if (!record.commissionRate) record.commissionRate = "";
+  if (!record.listingDuration) record.listingDuration = "";
+  if (!record.agreementTerms) record.agreementTerms = "";
+  if (!record.agreementStatus || AGREEMENT_STATUSES.indexOf(record.agreementStatus) === -1) {
+    record.agreementStatus = "Not Sent";
+  }
+  if (!record.agreementToken) record.agreementToken = "";
+  if (!record.agreementSentAt) record.agreementSentAt = "";
+  if (!record.agreementRespondedAt) record.agreementRespondedAt = "";
+  return record;
 }
 
 export default async (request, context) => {
@@ -221,6 +277,18 @@ export default async (request, context) => {
         signatoryIdPassport: clean(body.signatoryIdPassport, 60),
         signatureDate: clean(body.signatureDate, 20),
         signaturePlace: clean(body.signaturePlace, 200),
+
+        // Commission / listing agreement (set by admin later, before a
+        // listing can go live) — distinct from the onboarding "agreementSigned"
+        // checkbox above, which just confirms the submitter accepted the
+        // general onboarding terms when filling in this form.
+        commissionRate: "",
+        listingDuration: "",
+        agreementTerms: "",
+        agreementStatus: "Not Sent",
+        agreementToken: "",
+        agreementSentAt: "",
+        agreementRespondedAt: "",
       };
 
       if (!record.propertyName || !record.ownerFullName || record.agreementSigned !== "Y") {
@@ -237,11 +305,11 @@ export default async (request, context) => {
         context.waitUntil(
           sendNotificationEmail(
             notifyTo,
-            "New property listing submitted â " + record.propertyName,
+            "New property listing submitted — " + record.propertyName,
             "<p>A new property listing was submitted for review.</p>" +
               "<p><strong>Listing ID:</strong> " + escapeHtml(listingId) + "<br>" +
               "<strong>Property:</strong> " + escapeHtml(record.propertyName) + "<br>" +
-              "<strong>Submitted by:</strong> " + escapeHtml(record.submittedBy) + " â " + escapeHtml(record.ownerFullName) + "<br>" +
+              "<strong>Submitted by:</strong> " + escapeHtml(record.submittedBy) + " — " + escapeHtml(record.ownerFullName) + "<br>" +
               "<strong>Status:</strong> Requested</p>" +
               "<p>Log in to Admin &gt; Property Listings to review and approve.</p>"
           )
@@ -259,7 +327,7 @@ export default async (request, context) => {
       if (!listingId) return json({ error: "missing listingId" }, 400);
       const record = await store.get(listingId, { type: "json" });
       if (!record) return json({ error: "not found" }, 404);
-      return json({ ok: true, listing: record });
+      return json({ ok: true, listing: withAgreementDefaults(record) });
     }
 
     if (action === "list") {
@@ -272,6 +340,7 @@ export default async (request, context) => {
       );
       const summaries = items
         .filter(Boolean)
+        .map(withAgreementDefaults)
         .map((r) => ({
           listingId: r.listingId,
           propertyName: r.propertyName,
@@ -281,12 +350,159 @@ export default async (request, context) => {
           city: r.city,
           status: r.status || "Requested",
           siteNr: r.siteNr || "",
+          agreementStatus: r.agreementStatus,
           dateSubmitted: r.dateSubmitted,
           dateUpdated: r.dateUpdated,
         }))
         .sort((a, b) => new Date(b.dateSubmitted) - new Date(a.dateSubmitted));
 
       return json({ ok: true, listings: summaries });
+    }
+
+    if (action === "updateListing") {
+      const denied = await requireAdmin();
+      if (denied) return denied;
+
+      const listingId = clean(body.listingId, 20);
+      if (!listingId) return json({ error: "missing listingId" }, 400);
+
+      const record = await store.get(listingId, { type: "json" });
+      if (!record) return json({ error: "not found" }, 404);
+
+      EDITABLE_FIELDS.forEach((field) => {
+        if (typeof body[field] === "string") {
+          record[field] = clean(body[field], EDITABLE_FIELD_MAX[field] || 500);
+        }
+      });
+      if (typeof body.paymentGatewayInUse === "string") {
+        record.paymentGatewayInUse = body.paymentGatewayInUse === "Y" ? "Y" : "N";
+      }
+      if (typeof body.allowSameDayBooking === "string") {
+        record.allowSameDayBooking = body.allowSameDayBooking === "Y" ? "Y" : "N";
+      }
+
+      record.dateUpdated = new Date().toISOString();
+      await store.setJSON(listingId, record);
+
+      return json({ ok: true, listing: withAgreementDefaults(record) });
+    }
+
+    if (action === "sendAgreement") {
+      const denied = await requireAdmin();
+      if (denied) return denied;
+
+      const listingId = clean(body.listingId, 20);
+      if (!listingId) return json({ error: "missing listingId" }, 400);
+
+      const record = await store.get(listingId, { type: "json" });
+      if (!record) return json({ error: "not found" }, 404);
+      withAgreementDefaults(record);
+
+      if (!record.agreementTerms) {
+        return json({ error: "Add the agreement terms before sending." }, 400);
+      }
+
+      const to = submitterEmailFor(record);
+      if (!to) {
+        return json({ error: "No email address on file for the submitter." }, 400);
+      }
+
+      record.agreementToken = genToken();
+      record.agreementStatus = "Sent";
+      record.agreementSentAt = new Date().toISOString();
+      record.agreementRespondedAt = "";
+      record.dateUpdated = record.agreementSentAt;
+      await store.setJSON(listingId, record);
+
+      const origin = new URL(request.url).origin;
+      const link =
+        origin + "/property-agreement.html?id=" + encodeURIComponent(listingId) +
+        "&token=" + encodeURIComponent(record.agreementToken);
+
+      context.waitUntil(
+        sendNotificationEmail(
+          to,
+          "Listing agreement for " + record.propertyName + " — action needed",
+          "<p>Hi " + escapeHtml(record.ownerFullName || "") + ",</p>" +
+            "<p>Please review and accept the listing agreement for <strong>" +
+            escapeHtml(record.propertyName) + "</strong> so we can proceed with getting it live " +
+            "on Avante Travel's Private Property STR Database.</p>" +
+            "<p><a href=\"" + link + "\">Review and accept the agreement</a></p>" +
+            "<p>If the link above doesn't work, copy and paste this into your browser:<br>" +
+            escapeHtml(link) + "</p>"
+        )
+      );
+
+      return json({ ok: true, listing: record });
+    }
+
+    if (action === "getAgreement") {
+      const listingId = clean(body.listingId, 20);
+      const token = clean(body.token, 200);
+      if (!listingId || !token) return json({ error: "missing listingId or token" }, 400);
+
+      const record = await store.get(listingId, { type: "json" });
+      if (!record || !record.agreementToken || record.agreementToken !== token) {
+        return json({ error: "This agreement link is invalid or has expired." }, 404);
+      }
+      withAgreementDefaults(record);
+
+      return json({
+        ok: true,
+        agreement: {
+          listingId: record.listingId,
+          propertyName: record.propertyName,
+          ownerFullName: record.ownerFullName,
+          commissionRate: record.commissionRate,
+          listingDuration: record.listingDuration,
+          agreementTerms: record.agreementTerms,
+          agreementStatus: record.agreementStatus,
+          agreementRespondedAt: record.agreementRespondedAt,
+        },
+      });
+    }
+
+    if (action === "acceptAgreement") {
+      const listingId = clean(body.listingId, 20);
+      const token = clean(body.token, 200);
+      const decision = body.decision === "Declined" ? "Declined" : "Accepted";
+      if (!listingId || !token) return json({ error: "missing listingId or token" }, 400);
+
+      const record = await store.get(listingId, { type: "json" });
+      if (!record || !record.agreementToken || record.agreementToken !== token) {
+        return json({ error: "This agreement link is invalid or has expired." }, 404);
+      }
+      withAgreementDefaults(record);
+
+      if (record.agreementStatus !== "Sent") {
+        return json(
+          { error: "This agreement has already been responded to (" + record.agreementStatus + ")." },
+          400
+        );
+      }
+
+      record.agreementStatus = decision;
+      record.agreementRespondedAt = new Date().toISOString();
+      record.dateUpdated = record.agreementRespondedAt;
+      await store.setJSON(listingId, record);
+
+      const notifyTo = await getNotificationEmail();
+      if (notifyTo) {
+        context.waitUntil(
+          sendNotificationEmail(
+            notifyTo,
+            "Agreement " + decision.toLowerCase() + " — " + record.propertyName,
+            "<p>" + escapeHtml(record.ownerFullName || "The submitter") + " has <strong>" +
+              decision.toLowerCase() + "</strong> the listing agreement for <strong>" +
+              escapeHtml(record.propertyName) + "</strong> (" + escapeHtml(listingId) + ").</p>" +
+              (decision === "Accepted"
+                ? "<p>You can now mark this listing as Listed in Admin &gt; Property Listings.</p>"
+                : "<p>Log in to Admin &gt; Property Listings to follow up.</p>")
+          )
+        );
+      }
+
+      return json({ ok: true, agreementStatus: record.agreementStatus });
     }
 
     if (action === "updateStatus") {
@@ -303,6 +519,14 @@ export default async (request, context) => {
 
       const record = await store.get(listingId, { type: "json" });
       if (!record) return json({ error: "not found" }, 404);
+      withAgreementDefaults(record);
+
+      if (status === "Listed" && record.agreementStatus !== "Accepted") {
+        return json(
+          { error: "The listing agreement must be sent and accepted before this listing can be marked as Listed." },
+          400
+        );
+      }
 
       const prevStatus = record.status;
       record.status = status;
@@ -312,13 +536,12 @@ export default async (request, context) => {
       await store.setJSON(listingId, record);
 
       if (prevStatus !== status) {
-        const submitterEmail =
-          record.submittedBy === "Affiliate" ? record.affiliateEmail : record.ownerEmail;
-        if (submitterEmail) {
+        const to = submitterEmailFor(record);
+        if (to) {
           context.waitUntil(
             sendNotificationEmail(
-              submitterEmail,
-              "Your Avante property listing status has changed â " + status,
+              to,
+              "Your Avante property listing status has changed — " + status,
               "<p>Hi " + escapeHtml(record.ownerFullName || "") + ",</p>" +
                 "<p>Your property listing <strong>" + escapeHtml(record.propertyName) + "</strong> (" +
                 escapeHtml(listingId) + ") status is now: <strong>" + escapeHtml(status) + "</strong>.</p>" +
