@@ -496,6 +496,7 @@
                 <tr>
                   <th>Affiliate</th>
                   <th>ID</th>
+                  <th>Site Nr</th>
                   <th>Share</th>
                   <th>Status</th>
                   <th>Outstanding</th>
@@ -1086,6 +1087,10 @@
         tdId.style.fontSize = '11px';
         tdId.style.color = 'var(--muted)';
         tdId.style.wordBreak = 'break-all';
+        var tdSiteNr = document.createElement('td');
+        tdSiteNr.textContent = a.siteNr ? ('Affiliate ' + a.siteNr) : '\u2014';
+        tdSiteNr.style.fontSize = '12px';
+        tdSiteNr.style.color = a.siteNr ? 'inherit' : 'var(--muted)';
         var tdShare = document.createElement('td');
         tdShare.textContent = formatShareSummary(a.revenueShare);
         tdShare.style.fontSize = '12px';
@@ -1185,6 +1190,7 @@
 
         tr.appendChild(tdName);
         tr.appendChild(tdId);
+        tr.appendChild(tdSiteNr);
         tr.appendChild(tdShare);
         tr.appendChild(tdStatus);
         tr.appendChild(tdOutstanding);
