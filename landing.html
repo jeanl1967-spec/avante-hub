@@ -251,7 +251,12 @@
     display:block;
   }
   @media (max-width: 700px){
-    .iframe-wrap iframe{ height:calc(100vh - 66px); }
+    /* The StockNetwork accommodation widget's own top search form has a
+       -80px negative top margin (it expects a hero banner above it, which
+       this narrow embed doesn't have), clipping the "Where to" label at
+       narrow widths. Compensate from our side by nudging the whole iframe
+       down slightly and trimming its height by the same amount. */
+    .iframe-wrap iframe{ height:calc(100vh - 66px - 24px); margin-top:24px; }
   }
 
   /* Book Now / See full details open here as a true full-screen panel —
