@@ -129,7 +129,7 @@ async function sendNotificationEmail(to, subject, html) {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        from: "Avante Travel <onboarding@resend.dev>",
+        from: "Avante Travel <bookings@go.avantetravel.co.za>",
         to: [to],
         subject: subject,
         html: html,
