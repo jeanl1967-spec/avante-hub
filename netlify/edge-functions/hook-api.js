@@ -5,6 +5,12 @@ import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 // GUIDs / affiliate numbers never contain double underscores).
 const ADMIN_KEY = "__admin__";
 
+// Host used by the link shortener (go-redirect.js). Admin-set booking links
+// are sometimes shortened before being saved — to personalize the real
+// destination per affiliate we need to resolve the short link back to its
+// original long URL first.
+const SHORT_HOST = "go.avantetravel.co.za";
+
 // Pull the CheckInDT=YYYY-MM-DD date off a booking link built by the
 // Accommodation Link Builder, if present. Links pasted in by hand (or built
 // from other tools) may not have one at all — that's fine, it just means
@@ -26,6 +32,64 @@ function parseCheckInDate(bookingUrl) {
 function todayUTCDateOnly() {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+// StockNetwork's "/ui/<id>" booking links carry the site identifier as the
+// last path segment. Self-managed hooks put the affiliate's own Hub ID
+// there; admin-authored promo links instead often use a short
+// "Affiliate <number>" form (StockNetwork's own site number) so the
+// booking gets attributed to whichever site the admin built the promo for.
+// To make an admin-managed hook still credit the *viewing* affiliate, we
+// swap that number out for their own StockNetwork Site Nr wherever we
+// recognize this exact pattern. Any other URL shape is left untouched —
+// we only ever touch a link we can confidently recognize.
+function personalizeStockNetworkUrl(rawUrl, siteNr) {
+  if (!rawUrl || !siteNr) return rawUrl;
+  try {
+    const u = new URL(rawUrl);
+    const parts = u.pathname.split("/");
+    let lastIdx = -1;
+    for (let i = parts.length - 1; i >= 0; i--) {
+      if (parts[i]) { lastIdx = i; break; }
+    }
+    if (lastIdx === -1) return rawUrl;
+    let seg;
+    try {
+      seg = decodeURIComponent(parts[lastIdx]);
+    } catch (e) {
+      return rawUrl;
+    }
+    if (!/^Affiliate\s+\d+$/i.test(seg)) return rawUrl;
+    parts[lastIdx] = encodeURIComponent("Affiliate " + siteNr);
+    u.pathname = parts.join("/");
+    return u.toString();
+  } catch (e) {
+    return rawUrl;
+  }
+}
+
+// If the admin's stored booking link is one of our own shortened
+// go.avantetravel.co.za links, resolve it back to the real destination so
+// we have something we can actually personalize. Falls back to the
+// original URL untouched if it isn't one of ours or the lookup fails.
+async function resolveShortLink(rawUrl) {
+  if (!rawUrl) return rawUrl;
+  try {
+    const u = new URL(rawUrl);
+    if (u.hostname !== SHORT_HOST) return rawUrl;
+    const slug = u.pathname.replace(/^\/+/, "").replace(/\/+$/, "");
+    if (!slug) return rawUrl;
+    const shortStore = getStore({ name: "short-links", consistency: "strong" });
+    const record = await shortStore.get(slug, { type: "json" });
+    return record && record.url ? record.url : rawUrl;
+  } catch (e) {
+    return rawUrl;
+  }
+}
+
+async function personalizeBooking(rawUrl, siteNr) {
+  const resolved = await resolveShortLink(rawUrl);
+  return personalizeStockNetworkUrl(resolved, siteNr);
 }
 
 export default async (request, context) => {
@@ -62,9 +126,9 @@ export default async (request, context) => {
       if (typeof body.booking === "string") record.booking = body.booking;
       if (typeof body.landing === "string") record.landing = body.landing;
       if (body.mode === "self" || body.mode === "admin") record.mode = body.mode;
-      if (!record.mode) record.mode = "admin"; // default per hook, per spec
-
+      if (!record.mode) record.mode = "admin";
       record.savedAt = new Date().toISOString();
+
       await store.setJSON(key, record);
       return new Response(JSON.stringify({ ok: true, record: record }), {
         headers: { "content-type": "application/json", ...cors },
@@ -96,8 +160,24 @@ export default async (request, context) => {
 
     if (source === "admin") {
       const adminRecord = await store.get(ADMIN_KEY + ":" + hook, { type: "json" });
+
+      let personalizedBooking = adminRecord ? adminRecord.booking || "" : "";
+      if (personalizedBooking) {
+        // Look up this affiliate's StockNetwork Site Nr so admin-authored
+        // booking links can be attributed to them, not to whichever site
+        // the admin happened to build the link for.
+        try {
+          const directoryStore = getStore({ name: "affiliates-directory", consistency: "strong" });
+          const affDirRecord = await directoryStore.get(aff, { type: "json" });
+          const siteNr = (affDirRecord && affDirRecord.siteNr) || "";
+          personalizedBooking = await personalizeBooking(personalizedBooking, siteNr);
+        } catch (e) {
+          // Best-effort — fall back to the admin's link exactly as saved.
+        }
+      }
+
       const data = adminRecord
-        ? { booking: adminRecord.booking || "", landing: adminRecord.landing || "", mode: mode, source: "admin", expired: expired }
+        ? { booking: personalizedBooking, landing: adminRecord.landing || "", mode: mode, source: "admin", expired: expired }
         : { mode: mode, source: "admin", expired: expired };
       // If there's genuinely nothing to show (no admin default set either),
       // return null so callers treat this hook slot as inactive — same as
