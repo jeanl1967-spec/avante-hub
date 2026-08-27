@@ -71,6 +71,80 @@ function sanitizeBankDetails(input) {
   };
 }
 
+function sanitizeAlias_(v) {
+  return (typeof v === "string" ? v : "").trim().toLowerCase();
+}
+
+// Turns whatever cellphone format StockNetwork emails contain into a
+// Green-API chatId. Assumes South African numbers when no country code is
+// present (a bare leading 0 becomes 27), since that's this business's
+// market — adjust here if that assumption ever needs to change.
+function normalizeChatId_(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  let digits = raw.replace(/[^\d]/g, "");
+  if (!digits) return "";
+  if (!raw.trim().startsWith("+") && digits.startsWith("0")) {
+    digits = "27" + digits.slice(1);
+  }
+  if (digits.length < 10) return "";
+  return digits + "@c.us";
+}
+
+function formatGroupMessage_(b) {
+  const ref = b.paymentRef || b.refNo || "?";
+  return (
+    "🏨 *New Booking*\n" +
+    "Ref: *" + ref + "*\n" +
+    "Guest: " + (b.name || "?") + "\n" +
+    "Cell: " + (b.cellphone || "?") + "\n" +
+    "Email: " + (b.email || "?") + "\n" +
+    "Resort: " + (b.resort || "(check email — could not auto-read)") + "\n" +
+    "Dates: " + (b.fromDate || "?") + " to " + (b.toDate || "?") + "\n\n" +
+    "_First agent to respond services this client._"
+  );
+}
+
+function formatClientMessage_(b) {
+  const ref = b.paymentRef || b.refNo || "";
+  return (
+    "🏨 *Booking Confirmation — Avante Travel*\n\n" +
+    "Hi " + (b.name || "there") + ", thank you for your booking!\n\n" +
+    (ref ? "*Reference:* " + ref + "\n" : "") +
+    "*Resort:* " + (b.resort || "-") + "\n" +
+    "*Check-in:* " + (b.fromDate || "-") + "\n" +
+    "*Check-out:* " + (b.toDate || "-") + "\n\n" +
+    "One of our agents will be in touch shortly if there's anything further needed. " +
+    "If you have any questions in the meantime, just reply to this message."
+  );
+}
+
+async function sendGreenApiMessage_(chatId, message) {
+  const instanceId = Deno.env.get("GREEN_API_INSTANCE_ID") || "";
+  const token = Deno.env.get("GREEN_API_TOKEN") || "";
+  if (!instanceId || !token) {
+    return { ok: false, status: 0, body: "Green-API credentials are not configured on the server (GREEN_API_INSTANCE_ID / GREEN_API_TOKEN)." };
+  }
+  const url = "https://api.green-api.com/waInstance" + instanceId + "/sendMessage/" + token;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chatId: chatId, message: message }),
+    });
+    const text = await res.text();
+    return { ok: res.ok, status: res.status, body: text };
+  } catch (err) {
+    return { ok: false, status: 0, body: String((err && err.message) || err) };
+  }
+}
+
+async function appendWhatsappLog_(store, entry) {
+  const list = (await store.get("recent", { type: "json" })) || [];
+  list.unshift(entry);
+  if (list.length > 200) list.length = 200;
+  await store.setJSON("recent", list);
+}
+
 function randomToken() {
   const bytes = crypto.getRandomValues(new Uint8Array(24));
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -105,6 +179,7 @@ export default async (request, context) => {
   const directoryStore = getStore({ name: "affiliates-directory", consistency: "strong" });
   const payoutStore = getStore({ name: "affiliate-payouts", consistency: "strong" });
   const hookStore = getStore({ name: "promo-hooks", consistency: "strong" });
+  const whatsappLogStore = getStore({ name: "whatsapp-log", consistency: "strong" });
   const DEFAULT_HOOK_COUNT = 6;
 
   async function verifyToken(token) {
@@ -164,6 +239,11 @@ export default async (request, context) => {
           });
         }
         return json({ ok: true, hooks: hooks }, 200, cors);
+      }
+
+      if (resource === "whatsappLog") {
+        const list = (await whatsappLogStore.get("recent", { type: "json" })) || [];
+        return json({ ok: true, entries: list }, 200, cors);
       }
 
       return json({ ok: false, error: "unknown resource" }, 400, cors);
@@ -269,6 +349,73 @@ export default async (request, context) => {
       return json({ ok: true, token: token }, 200, cors);
     }
 
+    if (action === "sendBookingWhatsapp") {
+      // Called by the Google Apps Script Gmail watcher, not a logged-in
+      // admin browser session — so it authenticates with its own long
+      // shared secret instead of a session token.
+      const botKey = typeof body.botKey === "string" ? body.botKey : "";
+      const expectedKey = Deno.env.get("WHATSAPP_BOT_KEY") || "";
+      if (!expectedKey || botKey !== expectedKey) {
+        return json({ ok: false, error: "Not authorized." }, 401, cors);
+      }
+
+      const alias = sanitizeAlias_(body.alias || "");
+      const booking = body.booking && typeof body.booking === "object" ? body.booking : {};
+
+      // Find the affiliate whose bookingEmailAlias matches the address this
+      // booking email was addressed to (e.g. jeanl1967+aff123@gmail.com).
+      let matched = null;
+      if (alias) {
+        const { blobs } = await directoryStore.list();
+        for (const b of blobs) {
+          const rec = await directoryStore.get(b.key, { type: "json" });
+          if (rec && rec.bookingEmailAlias && sanitizeAlias_(rec.bookingEmailAlias) === alias) {
+            matched = rec;
+            break;
+          }
+        }
+      }
+
+      // No match (e.g. the original un-aliased address, or a new affiliate
+      // not set up yet) falls back to a default group, so existing behavior
+      // keeps working during the transition to per-affiliate aliases.
+      const defaultGroupId = Deno.env.get("DEFAULT_WHATSAPP_GROUP_ID") || "";
+      const groupId = (matched && matched.whatsappGroupId) || defaultGroupId;
+
+      const result = { ok: true, matchedAffId: matched ? matched.affId : null, group: null, client: null };
+
+      if (groupId) {
+        const send = await sendGreenApiMessage_(groupId, formatGroupMessage_(booking));
+        result.group = { chatId: groupId, ok: send.ok, status: send.status, detail: send.ok ? undefined : send.body };
+      } else {
+        result.group = { ok: false, error: "No WhatsApp group configured for this alias, and no default group set." };
+      }
+
+      const clientChatId = normalizeChatId_(booking.cellphone || "");
+      if (clientChatId) {
+        const send2 = await sendGreenApiMessage_(clientChatId, formatClientMessage_(booking));
+        result.client = { chatId: clientChatId, ok: send2.ok, status: send2.status, detail: send2.ok ? undefined : send2.body };
+      } else {
+        result.client = { ok: false, error: "No usable cellphone number extracted from the booking email." };
+      }
+
+      context.waitUntil(
+        appendWhatsappLog_(whatsappLogStore, {
+          at: new Date().toISOString(),
+          alias: alias,
+          affId: matched ? matched.affId : null,
+          affName: matched ? matched.name : null,
+          refNo: booking.paymentRef || booking.refNo || "",
+          guest: booking.name || "",
+          resort: booking.resort || "",
+          groupOk: !!(result.group && result.group.ok),
+          clientOk: !!(result.client && result.client.ok),
+        })
+      );
+
+      return json(result, 200, cors);
+    }
+
     // Every other action requires a valid session token.
     const authed = await verifyToken(body.token);
     if (!authed) return json({ ok: false, error: "Not authenticated." }, 401, cors);
@@ -339,6 +486,50 @@ export default async (request, context) => {
       };
       await directoryStore.setJSON(affId, record);
       return json({ ok: true, affiliate: record }, 200, cors);
+    }
+
+    if (action === "setWhatsappRouting") {
+      // Separate from upsertAffiliate on purpose: upsertAffiliate rewrites
+      // the whole record from the Affiliates tab's form fields, which
+      // don't include these two — saving from the WhatsApp Messaging tab
+      // must only touch bookingEmailAlias/whatsappGroupId, never wipe out
+      // the affiliate's name, share, bank details, etc.
+      const affId = typeof body.affId === "string" ? body.affId.trim() : "";
+      if (!affId) return json({ ok: false, error: "missing affId" }, 400, cors);
+      const existing = await directoryStore.get(affId, { type: "json" });
+      if (!existing) return json({ ok: false, error: "Unknown affiliate." }, 404, cors);
+      existing.bookingEmailAlias = sanitizeAlias_(body.bookingEmailAlias || "");
+      existing.whatsappGroupId = typeof body.whatsappGroupId === "string" ? body.whatsappGroupId.trim() : "";
+      existing.updatedAt = new Date().toISOString();
+      await directoryStore.setJSON(affId, existing);
+      return json({ ok: true, affiliate: existing }, 200, cors);
+    }
+
+    if (action === "listWhatsappGroups") {
+      const instanceId = Deno.env.get("GREEN_API_INSTANCE_ID") || "";
+      const token = Deno.env.get("GREEN_API_TOKEN") || "";
+      if (!instanceId || !token) {
+        return json({ ok: false, error: "Green-API credentials are not configured on the server." }, 400, cors);
+      }
+      try {
+        const url = "https://api.green-api.com/waInstance" + instanceId + "/getChats/" + token;
+        const res = await fetch(url);
+        const chats = await res.json();
+        const groups = (Array.isArray(chats) ? chats : []).filter((c) => c && c.id && c.id.endsWith("@g.us"));
+        return json({ ok: true, groups: groups }, 200, cors);
+      } catch (err) {
+        return json({ ok: false, error: String((err && err.message) || err) }, 502, cors);
+      }
+    }
+
+    if (action === "testWhatsappGroup") {
+      const groupId = typeof body.groupId === "string" ? body.groupId.trim() : "";
+      if (!groupId) return json({ ok: false, error: "Enter a WhatsApp group chat ID first." }, 400, cors);
+      const send = await sendGreenApiMessage_(
+        groupId,
+        "✅ Test message from Avante Admin — WhatsApp Messaging is wired up correctly."
+      );
+      return json({ ok: send.ok, status: send.status, detail: send.body }, send.ok ? 200 : 502, cors);
     }
 
     if (action === "setDefaultHook") {
