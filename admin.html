@@ -1,2259 +1,671 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<script>
-  // This admin panel has no offline/installable needs, but a site-wide
-  // service worker (registered from hub.html/landing.html for PWA support)
-  // has scope '/' and can end up controlling this page too, occasionally
-  // causing 'Could not reach the server' style fetch failures. Actively
-  // unregister any service worker controlling this page on load.
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistrations().then(function(regs){
-      regs.forEach(function(reg){ reg.unregister(); });
-    }).catch(function(){});
-  }
-</script>
+import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Avante Travel — Admin</title>
-<script>
-  // ---------- Auth gate ----------
-  // Runs before the page renders, so the dashboard never flashes on screen
-  // for an unauthenticated visitor. A session token is issued by /api/admin
-  // on login/setup and kept only in sessionStorage (cleared when the tab
-  // closes), not localStorage — this is admin-level access to affiliate
-  // revenue data, so it shouldn't linger indefinitely on a shared machine.
-  (function(){
-    var token = '';
-    try{ token = sessionStorage.getItem('avante-admin-token') || ''; }catch(e){}
-    if(!token){
-      window.location.replace('admin-login.html');
+// No hardcoded default password on purpose — this repo is public, so a
+// baked-in default would be visible to anyone who reads the source. Instead
+// the very first login is a one-time "setup" that creates the admin account.
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+// Revenue channels — these keys must stay in sync with the CHANNELS list in
+// admin.html. They map onto the actual booking tabs an affiliate sees in
+// their Hub header (hub.html), since each one is tracked/paid separately.
+const CHANNEL_KEYS = ["accommodation", "flights", "activities", "car", "package"];
+
+// Each channel's share can be a percentage of revenue, or a flat Rand
+// amount (e.g. R200 per booking logged), regardless of the revenue figure.
+function sanitizeChannelShare(raw, fallbackPct) {
+  if (raw && typeof raw === "object") {
+    const type = raw.type === "amount" ? "amount" : "percent";
+    let value = Number(raw.value);
+    if (!isFinite(value) || value < 0) value = 0;
+    if (type === "percent" && value > 100) value = 100;
+    return { type: type, value: value };
+  }
+  // Legacy: a plain number meant a flat percentage.
+  let v = Number(raw);
+  if (!isFinite(v)) v = isFinite(fallbackPct) ? Number(fallbackPct) : 0;
+  v = Math.max(0, Math.min(100, v));
+  return { type: "percent", value: v };
+}
+
+function sanitizeRevenueShare(input, fallbackPct) {
+  const out = {};
+  for (const key of CHANNEL_KEYS) {
+    const raw = input && typeof input === "object" ? input[key] : undefined;
+    out[key] = sanitizeChannelShare(raw, fallbackPct);
+  }
+  return out;
+}
+
+// Legacy records saved before per-channel shares existed only have a flat
+// revenueSharePct (or an older revenueShare object of plain numbers). This
+// upgrades them to the current { type, value } shape on the fly (read-only,
+// not persisted) so the UI never sees a blank/broken affiliate.
+function withRevenueShare(record) {
+  if (!record) return record;
+  record.revenueShare = sanitizeRevenueShare(record.revenueShare, record.revenueSharePct);
+  return record;
+}
+
+// Revenue logged per channel, kept separately from totalRevenue so the
+// Leaderboard can rank affiliates within a single channel, not just overall.
+function withChannelRevenue(record) {
+  if (!record) return record;
+  const out = {};
+  for (const key of CHANNEL_KEYS) {
+    const v = record.channelRevenue && Number(record.channelRevenue[key]);
+    out[key] = isFinite(v) && v > 0 ? v : 0;
+  }
+  record.channelRevenue = out;
+  return record;
+}
+
+function sanitizeBankDetails(input) {
+  const src = input && typeof input === "object" ? input : {};
+  const clean = (v) => (typeof v === "string" ? v.trim().slice(0, 200) : "");
+  return {
+    bankName: clean(src.bankName),
+    accountHolder: clean(src.accountHolder),
+    accountNumber: clean(src.accountNumber),
+    branchCode: clean(src.branchCode),
+    accountType: clean(src.accountType),
+  };
+}
+
+function sanitizeAlias_(v) {
+  return (typeof v === "string" ? v : "").trim().toLowerCase();
+}
+
+// Turns whatever cellphone format StockNetwork emails contain into a
+// Green-API chatId. Assumes South African numbers when no country code is
+// present (a bare leading 0 becomes 27), since that's this business's
+// market — adjust here if that assumption ever needs to change.
+function normalizeChatId_(raw) {
+  if (!raw || typeof raw !== "string") return "";
+  let digits = raw.replace(/[^\d]/g, "");
+  if (!digits) return "";
+  if (!raw.trim().startsWith("+") && digits.startsWith("0")) {
+    digits = "27" + digits.slice(1);
+  }
+  if (digits.length < 10) return "";
+  return digits + "@c.us";
+}
+
+function formatGroupMessage_(b) {
+  const ref = b.paymentRef || b.refNo || "?";
+  return (
+    "🏨 *New Booking*\n" +
+    "Ref: *" + ref + "*\n" +
+    "Guest: " + (b.name || "?") + "\n" +
+    "Cell: " + (b.cellphone || "?") + "\n" +
+    "Email: " + (b.email || "?") + "\n" +
+    "Resort: " + (b.resort || "(check email — could not auto-read)") + "\n" +
+    "Dates: " + (b.fromDate || "?") + " to " + (b.toDate || "?") + "\n\n" +
+    "_First agent to respond services this client._"
+  );
+}
+
+function formatClientMessage_(b) {
+  const ref = b.paymentRef || b.refNo || "";
+  return (
+    "🏨 *Booking Confirmation — Avante Travel*\n\n" +
+    "Hi " + (b.name || "there") + ", thank you for your booking!\n\n" +
+    (ref ? "*Reference:* " + ref + "\n" : "") +
+    "*Resort:* " + (b.resort || "-") + "\n" +
+    "*Check-in:* " + (b.fromDate || "-") + "\n" +
+    "*Check-out:* " + (b.toDate || "-") + "\n\n" +
+    "One of our agents will be in touch shortly if there's anything further needed. " +
+    "If you have any questions in the meantime, just reply to this message."
+  );
+}
+
+async function sendGreenApiMessage_(chatId, message) {
+  const instanceId = Deno.env.get("GREEN_API_INSTANCE_ID") || "";
+  const token = Deno.env.get("GREEN_API_TOKEN") || "";
+  if (!instanceId || !token) {
+    return { ok: false, status: 0, body: "Green-API credentials are not configured on the server (GREEN_API_INSTANCE_ID / GREEN_API_TOKEN)." };
+  }
+  const url = "https://api.green-api.com/waInstance" + instanceId + "/sendMessage/" + token;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chatId: chatId, message: message }),
+    });
+    const text = await res.text();
+    return { ok: res.ok, status: res.status, body: text };
+  } catch (err) {
+    return { ok: false, status: 0, body: String((err && err.message) || err) };
+  }
+}
+
+async function appendWhatsappLog_(store, entry) {
+  const list = (await store.get("recent", { type: "json" })) || [];
+  list.unshift(entry);
+  if (list.length > 200) list.length = 200;
+  await store.setJSON("recent", list);
+}
+
+function randomToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function sha256Hex(str) {
+  const data = new TextEncoder().encode(str);
+  const hashBuf = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function json(data, status, cors) {
+  return new Response(JSON.stringify(data), {
+    status: status || 200,
+    headers: { "content-type": "application/json", ...cors },
+  });
+}
+
+export default async (request, context) => {
+  const cors = {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-headers": "content-type",
+  };
+
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: cors });
+  }
+
+  const authStore = getStore({ name: "admin-auth", consistency: "strong" });
+  const sessionStore = getStore({ name: "admin-sessions", consistency: "strong" });
+  const directoryStore = getStore({ name: "affiliates-directory", consistency: "strong" });
+  const payoutStore = getStore({ name: "affiliate-payouts", consistency: "strong" });
+  const hookStore = getStore({ name: "promo-hooks", consistency: "strong" });
+  const whatsappLogStore = getStore({ name: "whatsapp-log", consistency: "strong" });
+  const DEFAULT_HOOK_COUNT = 6;
+
+  async function verifyToken(token) {
+    if (!token) return false;
+    const session = await sessionStore.get(token, { type: "json" });
+    if (!session) return false;
+    if (new Date(session.expiresAt).getTime() < Date.now()) {
+      context.waitUntil(sessionStore.delete(token));
+      return false;
     }
-  })();
-</script>
-<link rel="preconnect" href="https://fonts.gstatic.com">
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --teal:#0DCDC2;
-    --teal-dark:#0aa89f;
-    --navy:#0e2f44;
-    --ink:#333333;
-    --muted:#808080;
-    --mint:#f4fbfa;
-    --line:#e3e9e8;
-  }
-  *{box-sizing:border-box;}
-  body{
-    margin:0;
-    font-family:'Noto Sans', sans-serif;
-    color:var(--ink);
-    background:#ffffff;
-  }
-  h1,h2,h3,.brand,.tab,button{ font-family:'Montserrat', sans-serif; }
-
-  .topbar{
-    background:var(--navy);
-    color:#fff;
-    font-size:12.5px;
-    padding:6px 24px;
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:12px;
-    flex-wrap:wrap;
-  }
-  .topbar-actions{ display:flex; gap:16px; }
-  .topbar-actions a{ color:#fff; text-decoration:none; opacity:0.9; cursor:pointer; }
-  .topbar-actions a:hover{ text-decoration:underline; opacity:1; }
-
-  .modal-overlay{
-    display:none;
-    position:fixed; inset:0;
-    background:rgba(14,47,68,0.45);
-    align-items:center; justify-content:center;
-    padding:20px;
-    z-index:100;
-    overflow-y:auto;
-  }
-  .modal-overlay.show{ display:flex; }
-  .modal-card{
-    width:100%; max-width:420px;
-    background:#fff;
-    border-radius:14px;
-    padding:26px 24px 24px;
-    box-shadow:0 20px 60px rgba(14,47,68,0.25);
-    margin:auto;
-  }
-  .modal-card h2{ margin:0 0 4px; font-size:17px; color:var(--navy); }
-  .modal-card .modal-sub{ margin:0 0 16px; font-size:12.5px; color:var(--muted); }
-  .modal-card label{
-    display:block; font-size:11px; font-weight:600; text-transform:uppercase;
-    letter-spacing:0.05em; color:var(--teal-dark); margin:12px 0 5px;
-  }
-  .modal-card label:first-of-type{ margin-top:0; }
-  .modal-card input, .modal-card select, .modal-card textarea{
-    width:100%; padding:10px 11px; border:1.5px solid var(--line); border-radius:8px;
-    font-size:13.5px; font-family:inherit; color:var(--navy); background:var(--mint);
-    box-sizing:border-box;
-  }
-  .modal-card textarea{ resize:vertical; min-height:60px; }
-  .modal-card input:focus, .modal-card select:focus, .modal-card textarea:focus{ outline:none; border-color:var(--teal); }
-  .modal-status{
-    margin-top:12px; padding:9px 12px; border-radius:8px; font-size:12px;
-    display:none; background:#fbeae8; color:#c0453a; border:1px solid #f0c8c2;
-  }
-  .modal-status.show{ display:block; }
-  .modal-actions{ display:flex; gap:10px; margin-top:20px; }
-  .modal-actions button{
-    flex:1; padding:10px; border-radius:8px; font-size:13px; font-weight:700;
-    cursor:pointer; border:1.5px solid transparent; font-family:'Montserrat', sans-serif;
-  }
-  .modal-btn-primary{ background:var(--teal); color:#fff; }
-  .modal-btn-primary:hover{ background:var(--teal-dark); }
-  .modal-btn-primary:disabled{ background:#bcd9d6; cursor:not-allowed; }
-  .modal-btn-secondary{ background:var(--mint); color:var(--navy); border-color:var(--line); }
-
-  .detail-section{ margin-top:16px; }
-  .detail-section:first-child{ margin-top:0; }
-  .detail-section h3{ margin:0 0 8px; font-size:12.5px; color:var(--navy); text-transform:uppercase; letter-spacing:0.05em; }
-  .detail-row{ margin-bottom:8px; }
-  .detail-row:last-child{ margin-bottom:0; }
-  .detail-label{ font-size:10.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--teal-dark); font-weight:700; margin-bottom:2px; }
-  .detail-value{ font-size:13px; color:var(--navy); word-break:break-all; line-height:1.5; }
-  .detail-divider{ border:none; border-top:1px solid var(--line); margin:16px 0; }
-  .detail-value-row{ display:flex; align-items:center; gap:8px; }
-  .detail-value-row .detail-value{ flex:1; min-width:0; }
-  .detail-value-row .detail-copy-btn{ flex:none; }
-
-  header.hub-header{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    padding:18px 32px;
-    border-bottom:1px solid var(--line);
-    flex-wrap:wrap;
-    gap:16px;
-  }
-  .brand{
-    font-weight:800;
-    font-size:22px;
-    color:var(--teal);
-    letter-spacing:0.01em;
-    line-height:1.1;
-  }
-  .brand span{ display:block; color:var(--navy); font-size:14px; font-weight:600; letter-spacing:0.08em;}
-
-  nav.tabs{ display:flex; gap:4px; flex-wrap:wrap; }
-  .tab{
-    appearance:none; border:none; background:transparent; color:var(--navy);
-    font-weight:600; font-size:13.5px; padding:10px 16px; border-radius:8px;
-    cursor:pointer; transition:background .15s ease, color .15s ease;
-  }
-  .tab:hover{ background:var(--mint); }
-  .tab.active{ background:var(--navy); color:#fff; }
-
-  @media (max-width: 900px){
-    nav.tabs{ flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; width:100%; padding-bottom:4px; scrollbar-width:thin; }
-    .tab{ flex:none; white-space:nowrap; }
-  }
-  nav.tabs::-webkit-scrollbar{ height:4px; }
-  nav.tabs::-webkit-scrollbar-thumb{ background:var(--line); border-radius:10px; }
-
-  main{ max-width:1080px; margin:0 auto; padding:36px 24px 80px; }
-  .panel{ display:none; }
-  .panel.active{ display:block; }
-
-  .hero{ margin-bottom:24px; }
-  .hero h1{ color:var(--navy); font-size:24px; margin:0 0 6px; }
-  .hero p{ color:var(--muted); margin:0; font-size:14px; }
-
-  .card{
-    background:#fff; border:1.5px solid var(--line); border-radius:14px;
-    padding:26px 28px 30px; box-shadow:0 10px 30px rgba(14,47,68,0.06);
-  }
-  .card + .card{ margin-top:20px; }
-  label{
-    display:block; font-size:11.5px; font-weight:700; text-transform:uppercase;
-    letter-spacing:0.06em; color:var(--teal-dark); margin:16px 0 6px;
-  }
-  label:first-child{ margin-top:0; }
-  input, select, textarea{
-    width:100%; padding:10px 12px; border:1.5px solid #dcdcdc; border-radius:8px;
-    font-size:14px; font-family:'Noto Sans', sans-serif; color:var(--navy); background:var(--mint);
-  }
-  textarea{ resize:vertical; min-height:60px; }
-  input:focus, select:focus, textarea:focus{ outline:none; border-color:var(--teal); }
-  .row{ display:flex; gap:12px; }
-  .row > div{ flex:1; }
-  .hint{ font-size:11.5px; color:var(--muted); margin-top:5px; }
-
-  button.primary{
-    margin-top:22px; width:auto; padding:12px 24px; background:var(--teal); color:#fff;
-    border:none; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer;
-  }
-  button.primary:hover{ background:var(--teal-dark); }
-  button.primary:disabled{ background:#bcd9d6; cursor:not-allowed; }
-
-  .status{
-    margin-top:12px; padding:10px 13px; border-radius:8px; font-size:12.5px;
-    display:none; background:#fdeceb; color:#c0453a; border:1px solid #f3cfc9;
-  }
-  .status.show{ display:block; }
-  .status.ok{ background:var(--mint); color:var(--teal-dark); border-color:#bfe6e2; }
-
-  .btn-row{ display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }
-  .btn-secondary{
-    width:auto; margin-top:0; padding:9px 18px; font-size:12.5px;
-    background:var(--navy); color:#fff; border:none; border-radius:8px; font-weight:700; cursor:pointer;
-  }
-  .btn-secondary:hover{ background:#0a2333; }
-  .btn-outline{
-    width:auto; margin-top:0; padding:9px 18px; font-size:12.5px;
-    background:#fff; color:var(--teal-dark); border:1.5px solid var(--teal); border-radius:8px; font-weight:700; cursor:pointer;
-  }
-  .btn-outline:hover{ background:var(--mint); }
-  .btn-danger{
-    width:auto; margin-top:0; padding:7px 14px; font-size:11.5px;
-    background:#fff; color:#c0453a; border:1.5px solid #f0c8c2; border-radius:8px; font-weight:700; cursor:pointer;
-  }
-  .btn-danger:hover{ background:#fdeceb; }
-  .btn-small{ padding:6px 12px; font-size:11px; }
-
-  /* ---- summary stat cards ---- */
-  .stat-grid{
-    display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin-bottom:22px;
-  }
-  @media (max-width:700px){ .stat-grid{ grid-template-columns:repeat(2, 1fr); } }
-  .stat-card{
-    background:var(--mint); border:1.5px solid #bfe6e2; border-radius:12px; padding:16px 18px;
-  }
-  .stat-card .num{ font-size:22px; font-weight:800; color:var(--navy); font-family:'Montserrat',sans-serif; }
-  .stat-card .lbl{ font-size:11px; color:var(--teal-dark); text-transform:uppercase; letter-spacing:0.05em; font-weight:700; margin-top:4px; }
-  .stat-card.outstanding{ background:#fff6da; border-color:#f0d98a; }
-  .stat-card.outstanding .num{ color:#7a5b00; }
-  .stat-card.outstanding .lbl{ color:#7a5b00; }
-
-  /* ---- tables ---- */
-  .table-wrap{ overflow-x:auto; border-radius:12px; border:1.5px solid var(--line); }
-  table.data-table{ width:100%; border-collapse:collapse; font-size:13px; min-width:640px; }
-  table.data-table th{
-    background:var(--navy); color:#fff; text-align:left; padding:10px 14px;
-    font-size:10.5px; letter-spacing:0.04em; text-transform:uppercase; white-space:nowrap;
-  }
-  table.data-table td{ padding:10px 14px; border-top:1px solid var(--line); color:var(--ink); vertical-align:middle; }
-  table.data-table tr:nth-child(even) td{ background:var(--mint); }
-  .badge{
-    display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:0.04em;
-    text-transform:uppercase; padding:3px 9px; border-radius:100px;
-  }
-  .badge.active{ background:#e3f7e6; color:#2a8f45; }
-  .badge.inactive{ background:#f1f1f1; color:var(--muted); }
-  .badge.paid{ background:#e3f7e6; color:#2a8f45; }
-  .badge.unpaid{ background:#fff6da; color:#7a5b00; }
-  .badge.requested{ background:#fff6da; color:#7a5b00; }
-  .badge.listed{ background:#e3f7e6; color:#2a8f45; }
-  .badge.rejected{ background:#fde8e8; color:#b42318; }
-  .row-actions{ display:flex; gap:6px; flex-wrap:wrap; }
-
-  .empty-state{
-    text-align:center; padding:36px 20px; color:var(--muted); font-size:13.5px;
+    return true;
   }
 
-  /* ---- tutorial ---- */
-  .tutorial-step{
-    display:flex; gap:16px; background:#fff; border:1.5px solid var(--line);
-    border-left:4px solid var(--teal); border-radius:12px; padding:18px 20px; margin-bottom:14px;
-  }
-  .tutorial-step .num{
-    flex:none; width:30px; height:30px; border-radius:50%; background:var(--teal); color:#fff;
-    font-weight:800; font-size:13px; display:flex; align-items:center; justify-content:center;
-  }
-  .tutorial-step h3{ margin:0 0 5px; font-size:15px; color:var(--navy); }
-  .tutorial-step p{ margin:0; font-size:13px; color:var(--ink); line-height:1.6; }
-  .tutorial-step code{ background:var(--mint); padding:1px 6px; border-radius:4px; font-size:12px; color:var(--teal-dark); }
-  .tutorial-note{
-    background:#fff6da; border:1.5px solid #f0d98a; border-radius:10px; padding:14px 18px;
-    font-size:13px; color:#7a5b00; margin-top:6px;
-  }
+  try {
+    if (request.method === "GET") {
+      const url = new URL(request.url);
+      const resource = url.searchParams.get("resource") || "";
 
-  .toast{
-    position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px);
-    background:var(--navy); color:#fff; padding:10px 20px; border-radius:8px; font-size:13px;
-    opacity:0; transition:all 0.25s ease; pointer-events:none; z-index:9999;
-  }
-  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+      if (resource === "setupStatus") {
+        const record = await authStore.get("admin", { type: "json" });
+        return json({ ok: true, needsSetup: !record }, 200, cors);
+      }
 
-  @media (max-width: 700px){
-    header.hub-header{ padding:14px 16px; gap:10px; }
-    .brand{ font-size:19px; }
-    .brand span{ font-size:11.5px; }
-    main{ padding:24px 16px 56px; }
-    .hero h1{ font-size:20px; }
-    .card{ padding:20px 16px 24px; }
-    .row{ flex-direction:column; }
-  }
-  @media (max-width: 480px){
-    .topbar{ padding:6px 16px; font-size:11.5px; gap:8px; }
-    .topbar-actions{ gap:12px; }
-    .modal-card{ padding:22px 18px 20px; }
-    .modal-card h2{ font-size:16px; }
-  }
+      const token = url.searchParams.get("token") || "";
+      const authed = await verifyToken(token);
+      if (!authed) return json({ ok: false, error: "Not authenticated." }, 401, cors);
 
-  /* ---- default hooks (admin-managed storefront content) ---- */
-  .hook-grid{ display:grid; grid-template-columns:repeat(2, 1fr); gap:18px; }
-  @media (max-width:640px){ .hook-grid{ grid-template-columns:1fr; } }
-  .hook-card{
-    background:#fff; border:1.5px solid var(--line); border-radius:14px;
-    padding:20px 22px 24px; box-shadow:0 8px 24px rgba(14,47,68,0.05);
-  }
-  .hook-badge{
-    display:inline-block; background:var(--mint); color:var(--teal-dark);
-    font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
-    padding:4px 10px; border-radius:100px; margin-bottom:10px;
-  }
-  .hook-placeholder{
-    width:100%; aspect-ratio:4 / 5; height:auto; display:flex; align-items:center;
-    justify-content:center; text-align:center; background:var(--mint);
-    border:1.5px dashed #bfe6e2; border-radius:10px; color:var(--muted);
-    font-size:12px; margin-bottom:4px;
-  }
-  .hook-image-wrap{ margin-bottom:8px; }
-  .hook-image{
-    display:none; width:100%; aspect-ratio:4 / 5; height:auto; object-fit:contain;
-    background:var(--mint); border-radius:10px; border:1.5px solid var(--line);
-  }
-  .hook-image.show{ display:block; }
-  .hook-image-wrap.has-image .hook-placeholder{ display:none; }
-  .hook-card label{ font-size:11px; margin:12px 0 5px; display:block; }
-  .hook-card input{ padding:8px 10px; font-size:13px; }
-  .hook-card button.primary{ margin-top:16px; padding:10px; font-size:13px; }
-  .hook-updated{ font-size:11px; color:var(--muted); margin-top:8px; }
-</style>
-</head>
-<body>
-
-  <div class="topbar">
-    <span>Avante Travel &middot; Admin</span>
-    <span class="topbar-actions">
-      <a id="changePasswordLink">Change Password</a>
-      <a id="logoutLink">Log Out</a>
-    </span>
-  </div>
-
-  <div class="modal-overlay" id="pwModalOverlay">
-    <div class="modal-card">
-      <h2>Change Admin Password</h2>
-      <p class="modal-sub">Update the password used to log into this admin panel.</p>
-      <label for="pwOld">Current password</label>
-      <input id="pwOld" type="password" autocomplete="current-password">
-      <label for="pwNew">New password</label>
-      <input id="pwNew" type="password" autocomplete="new-password">
-      <label for="pwNew2">Confirm new password</label>
-      <input id="pwNew2" type="password" autocomplete="new-password">
-      <label for="pwRecovery">Recovery phrase (optional)</label>
-      <input id="pwRecovery" type="text" placeholder="e.g. a memorable phrase only you'd know" autocomplete="off">
-      <p class="modal-sub" style="margin:4px 0 0;">Lets you reset your password later if you forget it, without needing your old one. Leave blank to keep your current recovery phrase unchanged.</p>
-      <div class="modal-status" id="pwStatus"></div>
-      <div class="modal-actions">
-        <button type="button" class="modal-btn-secondary" id="pwCancelBtn">Cancel</button>
-        <button type="button" class="modal-btn-primary" id="pwSaveBtn">Save Password</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-overlay" id="affModalOverlay">
-    <div class="modal-card">
-      <h2 id="affModalTitle">Add Affiliate</h2>
-      <p class="modal-sub">This ID must match the affiliate's own Hub link ID exactly.</p>
-      <label for="affIdInput">Affiliate ID</label>
-      <input id="affIdInput" placeholder="e.g. c2fef00f-7330-4eb3-b993-f5f43fc73dff">
-      <label for="affNameInput">Name</label>
-      <input id="affNameInput" placeholder="e.g. Jane Smith">
-      <label for="affEmailInput">Email (optional)</label>
-      <input id="affEmailInput" placeholder="e.g. jane@example.com">
-      <label for="affSiteNrInput">StockNetwork Site Nr (optional)</label>
-      <input id="affSiteNrInput" placeholder="e.g. 12345">
-      <p class="modal-sub" style="margin:-2px 0 8px;">The StockNetwork site number this affiliate's accommodation bookings are linked to. Shown read-only in their Hub.</p>
-      <label>Revenue share — by channel</label>
-      <p class="modal-sub" style="margin:-2px 0 8px;">Each channel matches a tab in this affiliate's Hub. For each one, choose <strong>%</strong> for a percentage of revenue, or <strong>R flat</strong> for a fixed Rand amount paid per entry regardless of revenue. Leave at 0 if they don't get a cut of that channel.</p>
-      <div class="row" id="affShareFields" style="flex-wrap:wrap; gap:10px 12px;"></div>
-      <label for="affStatusInput">Status</label>
-      <select id="affStatusInput">
-        <option value="active">Active</option>
-        <option value="inactive">Inactive</option>
-      </select>
-      <label>Bank account (for payouts, optional)</label>
-      <p class="modal-sub" style="margin:-2px 0 8px;">Used only when you pay this affiliate — not shown to them.</p>
-      <div class="row">
-        <div>
-          <label for="affBankNameInput" style="margin-top:0;">Bank name</label>
-          <input id="affBankNameInput" placeholder="e.g. Standard Bank">
-        </div>
-        <div>
-          <label for="affAccountTypeInput" style="margin-top:0;">Account type</label>
-          <select id="affAccountTypeInput">
-            <option value="">— Select —</option>
-            <option value="Cheque/Current">Cheque / Current</option>
-            <option value="Savings">Savings</option>
-          </select>
-        </div>
-      </div>
-      <label for="affAccountHolderInput">Account holder name</label>
-      <input id="affAccountHolderInput" placeholder="e.g. Jane Smith">
-      <div class="row">
-        <div>
-          <label for="affAccountNumberInput">Account number</label>
-          <input id="affAccountNumberInput" placeholder="e.g. 123456789">
-        </div>
-        <div>
-          <label for="affBranchCodeInput">Branch code</label>
-          <input id="affBranchCodeInput" placeholder="e.g. 051001">
-        </div>
-      </div>
-      <label for="affNotesInput">Notes (optional)</label>
-      <textarea id="affNotesInput" placeholder="Anything worth remembering about this affiliate"></textarea>
-      <div class="modal-status" id="affModalStatus"></div>
-      <div class="modal-actions">
-        <button type="button" class="modal-btn-secondary" id="affCancelBtn">Cancel</button>
-        <button type="button" class="modal-btn-primary" id="affSaveBtn">Save Affiliate</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-overlay" id="detailsModalOverlay">
-    <div class="modal-card" style="max-width:520px;">
-      <h2 id="detailsModalTitle">Affiliate Details</h2>
-      <p class="modal-sub">Everything about this affiliate in one place — credentials, links, revenue share, and banking.</p>
-      <div id="detailsModalBody"></div>
-      <div class="modal-actions">
-        <button type="button" class="modal-btn-secondary" id="detailsCloseBtn">Close</button>
-        <button type="button" class="modal-btn-primary" id="detailsCopyBtn">Copy All</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-overlay" id="propertyDetailsModalOverlay">
-    <div class="modal-card" style="max-width:640px;">
-      <h2 id="propertyDetailsModalTitle">Property Listing</h2>
-      <p class="modal-sub">Edit the listing details below, set commission &amp; agreement terms, then save. Send the agreement to the owner/affiliate for acceptance before marking a listing as Listed.</p>
-      <div id="propertyDetailsModalBody"></div>
-      <label for="propCommissionInput" style="margin-top:14px;">Commission / Revenue Share</label>
-      <input id="propCommissionInput" placeholder="e.g. 15% of booking value">
-      <label for="propDurationInput">Listing Duration</label>
-      <input id="propDurationInput" placeholder="e.g. 12 months from listing date">
-      <label for="propAgreementTermsInput">Agreement Terms</label>
-      <textarea id="propAgreementTermsInput" style="min-height:140px;"></textarea>
-      <div class="modal-sub" id="propertyAgreementStatusRow" style="margin:-2px 0 10px;">Agreement status: Not Sent</div>
-      <button type="button" class="btn-outline" id="propertySendAgreementBtn" style="margin-bottom:14px;">Send Agreement for Acceptance</button>
-      <label for="propertyStatusInput">Status</label>
-      <select id="propertyStatusInput">
-        <option value="Requested">Requested</option>
-        <option value="Listed">Listed</option>
-        <option value="Rejected">Rejected</option>
-      </select>
-      <label for="propertySiteNrInput">StockNetwork Site Nr</label>
-      <input id="propertySiteNrInput" placeholder="e.g. 12345">
-      <div class="modal-status" id="propertyDetailsModalStatus"></div>
-      <div class="modal-actions">
-        <button type="button" class="btn-danger" id="propertyDetailsDeleteBtn" style="margin-right:auto;">Delete Listing</button>
-        <button type="button" class="modal-btn-secondary" id="propertyDetailsCloseBtn">Close</button>
-        <button type="button" class="modal-btn-primary" id="propertyDetailsSaveBtn">Save Changes</button>
-      </div>
-    </div>
-  </div>
-
-  <header class="hub-header">
-    <div class="brand">AVANTE<span>TRAVEL &middot; ADMIN</span></div>
-    <nav class="tabs" id="tabs">
-      <button class="tab active" data-panel="affiliates">Affiliates</button>
-      <button class="tab" data-panel="defaultHooks">Default Hooks</button>
-      <button class="tab" data-panel="payouts">Payouts</button>
-      <button class="tab" data-panel="leaderboard">Leaderboard</button>
-      <button class="tab" data-panel="propertyListings">Property Listings</button>
-      <button class="tab" data-panel="tutorial">How Payouts Work</button>
-    </nav>
-  </header>
-
-  <main>
-
-    <!-- ===================== AFFILIATES ===================== -->
-    <section class="panel active" id="panel-affiliates">
-      <div class="hero">
-        <h1>Manage Affiliates</h1>
-        <p>Every affiliate you're tracking, their revenue share, and how much you currently owe them</p>
-      </div>
-      <div class="card">
-        <div class="btn-row" style="margin-top:0;">
-          <button class="primary" style="margin-top:0;" id="addAffiliateBtn">+ Add Affiliate</button>
-          <button class="btn-outline" id="refreshAffiliatesBtn">Refresh</button>
-        </div>
-        <div class="status" id="affiliatesStatus"></div>
-        <div style="margin-top:18px;">
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Affiliate</th>
-                  <th>ID</th>
-                  <th>Site Nr</th>
-                  <th>Share</th>
-                  <th>Status</th>
-                  <th>Outstanding</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="affiliatesTableBody"></tbody>
-            </table>
-          </div>
-          <div class="empty-state" id="affiliatesEmpty" style="display:none;">No affiliates added yet — click "+ Add Affiliate" to add your first one.</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ===================== DEFAULT HOOKS ===================== -->
-    <section class="panel" id="panel-defaultHooks">
-      <div class="hero">
-        <h1>Default Hooks</h1>
-        <p>The shared fallback ad content for each of the 6 storefront hook slots. Any affiliate hook set to "Let Admin Manage" — or a self-managed hook whose dates have passed — shows this content automatically. Editing a hook here updates it everywhere immediately.</p>
-      </div>
-      <div class="hook-grid" id="defaultHookGrid"></div>
-    </section>
-
-    <!-- ===================== PAYOUTS ===================== -->
-    <section class="panel" id="panel-payouts">
-      <div class="hero">
-        <h1>Payouts</h1>
-        <p>Log each affiliate's revenue for a period — their share is calculated automatically</p>
-      </div>
-      <div class="card">
-        <label for="payoutAffPicker">Select an affiliate</label>
-        <select id="payoutAffPicker">
-          <option value="">— Select an affiliate —</option>
-        </select>
-        <div class="status" id="payoutsStatus"></div>
-      </div>
-
-      <div id="payoutsDetail" style="display:none;">
-        <div class="card" style="margin-top:20px;">
-          <div class="stat-grid">
-            <div class="stat-card">
-              <div class="num" id="statRevenue">R0.00</div>
-              <div class="lbl">Total revenue logged</div>
-            </div>
-            <div class="stat-card">
-              <div class="num" id="statShare">0%</div>
-              <div class="lbl" id="statShareLbl">Share for selected channel</div>
-            </div>
-            <div class="stat-card">
-              <div class="num" id="statPaid">R0.00</div>
-              <div class="lbl">Total paid out</div>
-            </div>
-            <div class="stat-card outstanding">
-              <div class="num" id="statOutstanding">R0.00</div>
-              <div class="lbl">Outstanding</div>
-            </div>
-          </div>
-
-          <div class="hint" id="channelShareBreakdown" style="margin:0 0 16px;"></div>
-
-          <label for="entryChannel">Revenue channel</label>
-          <select id="entryChannel">
-            <option value="">— Select a channel —</option>
-          </select>
-          <div class="hint">Matches the tab this affiliate used to drive the booking (e.g. their Flight Link or Accommodation Link Builder).</div>
-
-          <label for="entryPeriod">Period</label>
-          <input id="entryPeriod" placeholder="e.g. August 2026">
-          <div class="row">
-            <div>
-              <label for="entryRevenue">Revenue for this period (R)</label>
-              <input id="entryRevenue" type="number" min="0" step="0.01" placeholder="e.g. 12000">
-            </div>
-            <div>
-              <label for="entryNote">Note (optional)</label>
-              <input id="entryNote" placeholder="e.g. Impact.com SubID report">
-            </div>
-          </div>
-          <button class="primary" id="addEntryBtn">Add Revenue Entry</button>
-          <div class="status" id="entryStatus"></div>
-        </div>
-
-        <div class="card" style="margin-top:20px;">
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Channel</th>
-                  <th>Period</th>
-                  <th>Revenue</th>
-                  <th>Share</th>
-                  <th>Owed</th>
-                  <th>Note</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="entriesTableBody"></tbody>
-            </table>
-          </div>
-          <div class="empty-state" id="entriesEmpty" style="display:none;">No revenue entries logged for this affiliate yet.</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ===================== LEADERBOARD ===================== -->
-    <section class="panel" id="panel-leaderboard">
-      <div class="hero">
-        <h1>Leaderboard</h1>
-        <p>Rank your affiliates by total turnover, or drill into a single revenue channel</p>
-      </div>
-      <div class="card">
-        <label for="leaderboardMetric">Rank by</label>
-        <select id="leaderboardMetric">
-          <option value="total">Total Turnover (all channels)</option>
-        </select>
-        <div style="margin-top:18px;">
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>Affiliate</th>
-                  <th>Turnover</th>
-                  <th>% of Total</th>
-                </tr>
-              </thead>
-              <tbody id="leaderboardTableBody"></tbody>
-            </table>
-          </div>
-          <div class="empty-state" id="leaderboardEmpty" style="display:none;">No affiliates added yet — add some on the Affiliates tab first.</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ===================== PROPERTY LISTINGS ===================== -->
-    <section class="panel" id="panel-propertyListings">
-      <div class="hero">
-        <h1>Property Listings</h1>
-        <p>Review property listings submitted via the Property Affiliate tab, approve or reject them, and set the StockNetwork Site Nr once a listing goes live</p>
-      </div>
-
-      <div class="card">
-        <label for="notificationEmailInput">Notify this email address when a new listing is submitted</label>
-        <input id="notificationEmailInput" type="email" placeholder="e.g. bookings@avantetravel.co.za">
-        <button class="primary" id="saveNotificationEmailBtn" style="margin-top:10px;">Save</button>
-        <div class="status" id="propertySettingsStatus"></div>
-      </div>
-
-      <div class="card" style="margin-top:20px;">
-        <div class="btn-row" style="margin-top:0;">
-          <button class="btn-outline" id="refreshPropertyListingsBtn">Refresh</button>
-        </div>
-        <div class="status" id="propertyListingsStatus"></div>
-        <div style="margin-top:18px;">
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Property</th>
-                  <th>Owner</th>
-                  <th>Submitted By</th>
-                  <th>Location</th>
-                  <th>Status</th>
-                  <th>Agreement</th>
-                  <th>Site Nr</th>
-                  <th>Submitted</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="propertyListingsTableBody"></tbody>
-            </table>
-          </div>
-          <div class="empty-state" id="propertyListingsEmpty" style="display:none;">No property listings submitted yet.</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ===================== TUTORIAL ===================== -->
-    <section class="panel" id="panel-tutorial">
-      <div class="hero">
-        <h1>How Payouts Work</h1>
-        <p>Where the numbers come from, and how to get each affiliate paid</p>
-      </div>
-
-      <div class="tutorial-step">
-        <div class="num">1</div>
-        <div>
-          <h3>Add the affiliate here first</h3>
-          <p>On the <strong>Affiliates</strong> tab, add each affiliate with their exact Hub affiliate ID (the same ID that's in their personal Hub link and their flight/booking links) and set what they earn <strong>for each channel</strong> — Accommodation, Flights, Activities, Car Hire, and Packages. These match the tabs in their own Hub. For each channel choose either a <strong>%</strong> of the revenue you log, or a fixed <strong>R flat</strong> amount paid every time you log an entry for that channel — whichever suits how you pay that affiliate.</p>
-        </div>
-      </div>
-
-      <div class="tutorial-step">
-        <div class="num">2</div>
-        <div>
-          <h3>Pull flight booking numbers from Impact.com</h3>
-          <p>Log into <code>app.impact.com</code>, then in the top navigation go to <strong>Reports → More Reports → Performance by Sub ID and Shared ID</strong> (or <strong>Reports → Advanced Action Listing</strong> for a booking-by-booking view). Every affiliate's flight bookings are tagged with their Hub affiliate ID as the Sub ID, since the Hub's "Your Flight Link" appends it automatically. Filter or group by Sub ID to see each affiliate's revenue for the period.</p>
-        </div>
-      </div>
-
-      <div class="tutorial-step">
-        <div class="num">3</div>
-        <div>
-          <h3>Pull accommodation numbers from StockNetwork</h3>
-          <p>Accommodation bookings run through each affiliate's own personal StockNetwork booking link rather than through Impact.com, so check StockNetwork's own reporting for booking revenue per affiliate over the same period.</p>
-        </div>
-      </div>
-
-      <div class="tutorial-step">
-        <div class="num">4</div>
-        <div>
-          <h3>Log the revenue on the Payouts tab</h3>
-          <p>Select the affiliate, choose which <strong>channel</strong> the revenue came from (Accommodation, Flights, Activities, Car Hire, or Packages), enter a period label (e.g. "August 2026") and the total revenue for that period, then click <strong>Add Revenue Entry</strong>. The amount you owe them is calculated automatically using that channel's own revenue share percentage.</p>
-        </div>
-      </div>
-
-      <div class="tutorial-step">
-        <div class="num">5</div>
-        <div>
-          <h3>Pay them, then mark it paid</h3>
-          <p>Once you've paid an affiliate (EFT, etc.), find that entry in their Payouts table and click <strong>Mark Paid</strong>. This updates their outstanding balance so you always know who's still owed money at a glance.</p>
-        </div>
-      </div>
-
-      <div class="tutorial-note">
-        💡 If you enter more than one revenue entry for the same period by mistake, just delete the wrong one from the entries table — deleting an entry automatically reverses its effect on that affiliate's totals.
-      </div>
-    </section>
-
-  </main>
-
-  <div class="toast" id="toast">Saved</div>
-
-  <script>
-    // ---------- Revenue channels ----------
-    // Keys must stay in sync with CHANNEL_KEYS in admin-api.js. Labels match
-    // the tabs an affiliate sees in their own Hub header (hub.html), since
-    // each of these is tracked and paid out separately.
-    var CHANNELS = [
-      { key: 'accommodation', label: 'Accommodation' },
-      { key: 'flights', label: 'Flights' },
-      { key: 'activities', label: 'Activities' },
-      { key: 'car', label: 'Car Hire' },
-      { key: 'package', label: 'Packages' }
-    ];
-    function channelLabel(key){
-      var found = CHANNELS.filter(function(c){ return c.key === key; })[0];
-      return found ? found.label : key;
-    }
-
-    // Same base used throughout the Hub/landing page for an affiliate's
-    // personal StockNetwork accommodation booking link.
-    var STOCKNETWORK_BASE = 'https://stock.stocknetwork.co.za/ui/';
-    // Same Impact.com/Travelstart tracking link used in hub.html/landing.html,
-    // with each affiliate's ID appended as a Sub ID.
-    var FLIGHT_BASE_URL = 'https://travelstart.zwjlk6.net/LPVYJM';
-    // Car rental — test/placeholder link, kept in sync with the same
-    // constant in hub.html and landing.html. Swap out for a real car rental
-    // affiliate tracking URL once one is signed up.
-    var CAR_BASE_URL = 'https://www.avis.co.za';
-    // Free E-Sim — same subId1 tracking pattern, kept in sync with the same
-    // constant in hub.html and landing.html.
-    var ESIM_BASE_URL = 'https://avante.1-esim.com/';
-
-    // Shortens a link via the existing go.avantetravel.co.za shortener,
-    // tagged to this affiliate. Falls back to the long URL if the shorten
-    // call fails, so Welcome Info still works even if that API is down.
-    function shortenLink(url, affId){
-      return fetch('/api/shorten', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ url: url, aff: affId })
-      })
-        .then(function(r){ return r.json(); })
-        .then(function(data){ return (data && data.ok && data.shortUrl) ? data.shortUrl : url; })
-        .catch(function(){ return url; });
-    }
-
-    // ---------- Auth / token helpers ----------
-    var ADMIN_TOKEN = '';
-    try{ ADMIN_TOKEN = sessionStorage.getItem('avante-admin-token') || ''; }catch(e){}
-
-    function goToLogin(){
-      try{ sessionStorage.removeItem('avante-admin-token'); }catch(e){}
-      window.location.href = 'admin-login.html';
-    }
-
-    function adminGet(resource, extraParams){
-      var params = new URLSearchParams(extraParams || {});
-      params.set('resource', resource);
-      params.set('token', ADMIN_TOKEN);
-      return fetch('/api/admin?' + params.toString())
-        .then(function(r){
-          if(r.status === 401){ goToLogin(); return Promise.reject(new Error('unauthenticated')); }
-          return r.json();
-        });
-    }
-
-    function adminPost(action, extraBody){
-      var body = Object.assign({ action: action, token: ADMIN_TOKEN }, extraBody || {});
-      return fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body)
-      }).then(function(r){
-        if(r.status === 401){ goToLogin(); return Promise.reject(new Error('unauthenticated')); }
-        return r.json().then(function(data){ return { status: r.status, data: data }; });
-      });
-    }
-
-    function propAdminPost(action, extraBody){
-      var body = Object.assign({ action: action, token: ADMIN_TOKEN }, extraBody || {});
-      return fetch('/api/property-onboarding', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body)
-      }).then(function(r){
-        if(r.status === 401){ goToLogin(); return Promise.reject(new Error('unauthenticated')); }
-        return r.json().then(function(data){ return { status: r.status, data: data }; });
-      });
-    }
-
-    // ---------- tab switching ----------
-    document.querySelectorAll('.tab').forEach(function(btn){
-      btn.addEventListener('click', function(){
-        document.querySelectorAll('.tab').forEach(function(b){ b.classList.remove('active'); });
-        document.querySelectorAll('.panel').forEach(function(p){ p.classList.remove('active'); });
-        btn.classList.add('active');
-        document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
-        if(btn.dataset.panel === 'payouts') populatePayoutPicker();
-        if(btn.dataset.panel === 'leaderboard'){
-          if(affiliatesCache.length) renderLeaderboard();
-          else loadAffiliates().then(renderLeaderboard);
+      if (resource === "affiliates") {
+        const { blobs } = await directoryStore.list();
+        const list = [];
+        for (const b of blobs) {
+          const rec = await directoryStore.get(b.key, { type: "json" });
+          if (rec) list.push(withChannelRevenue(withRevenueShare(rec)));
         }
-      });
-    });
-
-    // ---------- toast ----------
-    var toast = document.getElementById('toast');
-    function showToast(msg){
-      toast.textContent = msg;
-      toast.classList.add('show');
-      setTimeout(function(){ toast.classList.remove('show'); }, 2200);
-    }
-
-    function money(n){
-      n = Number(n) || 0;
-      return 'R' + n.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    }
-
-    function escapeHtml(s){
-      var d = document.createElement('div');
-      d.textContent = (s === undefined || s === null) ? '' : String(s);
-      return d.innerHTML;
-    }
-
-    // ---------- Per-channel revenue share helpers ----------
-    // Each channel's share is either a percentage of revenue, or a flat
-    // Rand amount (paid regardless of how much revenue was logged).
-    function normalizeChannelShare(raw, legacyPct){
-      if(raw && typeof raw === 'object'){
-        var type = raw.type === 'amount' ? 'amount' : 'percent';
-        var value = Number(raw.value);
-        if(!isFinite(value) || value < 0) value = 0;
-        if(type === 'percent' && value > 100) value = 100;
-        return { type: type, value: value };
+        list.sort(function (a, b) {
+          return (a.name || a.affId).localeCompare(b.name || b.affId);
+        });
+        return json({ ok: true, affiliates: list, channels: CHANNEL_KEYS }, 200, cors);
       }
-      // Legacy: a plain number meant a flat percentage.
-      var v = Number(raw);
-      if(!isFinite(v)) v = (legacyPct !== undefined && legacyPct !== null) ? Number(legacyPct) || 0 : 0;
-      v = Math.max(0, Math.min(100, v));
-      return { type: 'percent', value: v };
-    }
 
-    function normalizeRevenueShare(revenueShare, legacyPct){
-      var out = {};
-      CHANNELS.forEach(function(c){
-        out[c.key] = normalizeChannelShare(revenueShare && revenueShare[c.key], legacyPct);
-      });
-      return out;
-    }
-
-    function formatChannelShare(share){
-      return share.type === 'amount' ? money(share.value) + ' flat' : share.value + '%';
-    }
-
-    function formatShareSummary(revenueShare){
-      var share = normalizeRevenueShare(revenueShare);
-      var active = CHANNELS.filter(function(c){ return share[c.key].value > 0; });
-      if(!active.length) return '—';
-      return active.map(function(c){ return c.label + ' ' + formatChannelShare(share[c.key]); }).join(' · ');
-    }
-
-    // Builds the 5 per-channel share controls (type + value) inside the
-    // Add/Edit Affiliate modal. Called once per modal open so it always
-    // reflects the current CHANNELS list.
-    function buildAffShareFields(revenueShare){
-      var share = normalizeRevenueShare(revenueShare);
-      var wrap = document.getElementById('affShareFields');
-      wrap.innerHTML = '';
-      CHANNELS.forEach(function(c){
-        var div = document.createElement('div');
-        div.style.minWidth = '220px';
-        var label = document.createElement('label');
-        label.setAttribute('for', 'affShareValue_' + c.key);
-        label.style.margin = '0 0 5px';
-        label.textContent = c.label;
-        div.appendChild(label);
-
-        var inner = document.createElement('div');
-        inner.style.display = 'flex';
-        inner.style.gap = '6px';
-
-        var typeSelect = document.createElement('select');
-        typeSelect.id = 'affShareType_' + c.key;
-        typeSelect.style.flex = '0 0 auto';
-        typeSelect.style.width = '92px';
-        var optPct = document.createElement('option');
-        optPct.value = 'percent'; optPct.textContent = '%';
-        var optAmt = document.createElement('option');
-        optAmt.value = 'amount'; optAmt.textContent = 'R flat';
-        typeSelect.appendChild(optPct);
-        typeSelect.appendChild(optAmt);
-        typeSelect.value = share[c.key].type;
-
-        var valueInput = document.createElement('input');
-        valueInput.type = 'number';
-        valueInput.min = '0';
-        valueInput.step = '0.5';
-        valueInput.id = 'affShareValue_' + c.key;
-        valueInput.placeholder = '0';
-        valueInput.value = share[c.key].value || '';
-        valueInput.style.flex = '1';
-
-        // Percent inputs get a 0–100 cap; flat-amount inputs don't.
-        function applyMax(){ if(typeSelect.value === 'percent') valueInput.max = '100'; else valueInput.removeAttribute('max'); }
-        applyMax();
-        typeSelect.addEventListener('change', applyMax);
-
-        inner.appendChild(typeSelect);
-        inner.appendChild(valueInput);
-        div.appendChild(inner);
-        wrap.appendChild(div);
-      });
-    }
-
-    function readAffShareFields(){
-      var out = {};
-      CHANNELS.forEach(function(c){
-        var typeEl = document.getElementById('affShareType_' + c.key);
-        var valueEl = document.getElementById('affShareValue_' + c.key);
-        var type = (typeEl && typeEl.value === 'amount') ? 'amount' : 'percent';
-        var v = valueEl ? Number(valueEl.value) : 0;
-        if(!isFinite(v) || v < 0) v = 0;
-        if(type === 'percent' && v > 100) v = 100;
-        out[c.key] = { type: type, value: v };
-      });
-      return out;
-    }
-
-    function copyToClipboard(text, successMsg){
-      function fallbackCopy(){
-        var ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.position = 'fixed';
-        ta.style.left = '-9999px';
-        document.body.appendChild(ta);
-        ta.focus(); ta.select();
-        var ok = false;
-        try{ ok = document.execCommand('copy'); }catch(e){ ok = false; }
-        document.body.removeChild(ta);
-        showToast(ok ? successMsg : 'Could not copy — please copy manually');
+      if (resource === "payouts") {
+        const affId = (url.searchParams.get("affId") || "").trim();
+        if (!affId) return json({ ok: false, error: "missing affId" }, 400, cors);
+        const entries = (await payoutStore.get(affId, { type: "json" })) || [];
+        return json({ ok: true, entries: entries }, 200, cors);
       }
-      if(navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(text).then(function(){
-          showToast(successMsg);
-        }).catch(fallbackCopy);
-      }else{
-        fallbackCopy();
-      }
-    }
 
-    // ---------- Log out ----------
-    document.getElementById('logoutLink').addEventListener('click', function(e){
-      e.preventDefault();
-      adminPost('logout').catch(function(){}).then(function(){ goToLogin(); });
-    });
-
-    // ---------- Change password modal ----------
-    (function(){
-      var overlay = document.getElementById('pwModalOverlay');
-      var changeLink = document.getElementById('changePasswordLink');
-      var cancelBtn = document.getElementById('pwCancelBtn');
-      var saveBtn = document.getElementById('pwSaveBtn');
-      var oldInput = document.getElementById('pwOld');
-      var newInput = document.getElementById('pwNew');
-      var new2Input = document.getElementById('pwNew2');
-      var recoveryInput = document.getElementById('pwRecovery');
-      var statusEl = document.getElementById('pwStatus');
-
-      function openModal(){
-        oldInput.value = ''; newInput.value = ''; new2Input.value = ''; recoveryInput.value = '';
-        statusEl.classList.remove('show');
-        overlay.classList.add('show');
-        oldInput.focus();
-      }
-      function closeModal(){ overlay.classList.remove('show'); }
-      function showModalError(msg){ statusEl.textContent = msg; statusEl.classList.add('show'); }
-
-      changeLink.addEventListener('click', function(e){ e.preventDefault(); openModal(); });
-      cancelBtn.addEventListener('click', closeModal);
-      overlay.addEventListener('click', function(e){ if(e.target === overlay) closeModal(); });
-
-      saveBtn.addEventListener('click', function(){
-        var oldPw = oldInput.value;
-        var newPw = newInput.value;
-        var newPw2 = new2Input.value;
-        var recoveryPhrase = recoveryInput.value.trim();
-        statusEl.classList.remove('show');
-
-        if(!oldPw){ showModalError('Enter your current password.'); return; }
-        if(!newPw || newPw.length < 6){ showModalError('New password must be at least 6 characters.'); return; }
-        if(newPw !== newPw2){ showModalError('New passwords do not match.'); return; }
-
-        saveBtn.disabled = true;
-        saveBtn.textContent = 'Saving…';
-        adminPost('changePassword', { oldPassword: oldPw, newPassword: newPw, recoveryPhrase: recoveryPhrase })
-          .then(function(res){
-            saveBtn.disabled = false;
-            saveBtn.textContent = 'Save Password';
-            if(res.data && res.data.ok){
-              showToast('Password updated');
-              closeModal();
-            }else{
-              showModalError((res.data && res.data.error) || 'Could not update password.');
-            }
-          })
-          .catch(function(){
-            saveBtn.disabled = false;
-            saveBtn.textContent = 'Save Password';
+      if (resource === "defaultHooks") {
+        const hooks = [];
+        for (let n = 1; n <= DEFAULT_HOOK_COUNT; n++) {
+          const rec = await hookStore.get("__admin__:" + n, { type: "json" });
+          hooks.push({
+            hook: n,
+            booking: (rec && rec.booking) || "",
+            landing: (rec && rec.landing) || "",
+            updatedAt: (rec && rec.updatedAt) || null,
           });
+        }
+        return json({ ok: true, hooks: hooks }, 200, cors);
+      }
+
+      if (resource === "whatsappLog") {
+        const list = (await whatsappLogStore.get("recent", { type: "json" })) || [];
+        return json({ ok: true, entries: list }, 200, cors);
+      }
+
+      return json({ ok: false, error: "unknown resource" }, 400, cors);
+    }
+
+    if (request.method !== "POST") {
+      return json({ error: "method not allowed" }, 405, cors);
+    }
+
+    let body;
+    try {
+      body = await request.json();
+    } catch (e) {
+      return json({ ok: false, error: "invalid JSON" }, 400, cors);
+    }
+
+    const action = body.action;
+
+    if (action === "setup") {
+      const existing = await authStore.get("admin", { type: "json" });
+      if (existing) {
+        return json({ ok: false, error: "An admin account already exists — please log in instead." }, 409, cors);
+      }
+      const password = typeof body.password === "string" ? body.password : "";
+      if (!password || password.length < 6) {
+        return json({ ok: false, error: "Password must be at least 6 characters." }, 400, cors);
+      }
+      const hash = await sha256Hex(password);
+      await authStore.setJSON("admin", { passwordHash: hash, createdAt: new Date().toISOString() });
+
+      const token = randomToken();
+      await sessionStore.setJSON(token, {
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString(),
       });
-    })();
+      return json({ ok: true, token: token }, 200, cors);
+    }
 
-    // ---------- Affiliates directory ----------
-    var affiliatesCache = [];
+    if (action === "login") {
+      const record = await authStore.get("admin", { type: "json" });
+      if (!record) {
+        return json({ ok: false, error: "No admin account exists yet — please set one up first." }, 404, cors);
+      }
+      const password = typeof body.password === "string" ? body.password : "";
+      const hash = await sha256Hex(password);
+      if (hash !== record.passwordHash) {
+        return json({ ok: false, error: "Incorrect password." }, 401, cors);
+      }
+      const token = randomToken();
+      await sessionStore.setJSON(token, {
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString(),
+      });
+      return json({ ok: true, token: token }, 200, cors);
+    }
 
-    function loadAffiliates(){
-      var statusEl = document.getElementById('affiliatesStatus');
-      statusEl.className = 'status';
-      return adminGet('affiliates')
-        .then(function(data){
-          if(data && data.ok){
-            affiliatesCache = data.affiliates || [];
-            renderAffiliatesTable();
-            renderLeaderboard();
-          }else{
-            statusEl.textContent = (data && data.error) || 'Could not load affiliates.';
-            statusEl.className = 'status show';
+    if (action === "forgotPassword") {
+      // No email system exists in this app, so recovery relies on a
+      // recovery phrase the admin sets themselves (via Change Password)
+      // ahead of time. If none was ever set, there's no automated way
+      // back in — only someone with access to the Netlify dashboard can
+      // clear the "admin" key in the admin-auth Blobs store, which brings
+      // back the one-time account setup screen.
+      const record = await authStore.get("admin", { type: "json" });
+      if (!record) {
+        return json({ ok: false, error: "No admin account exists yet." }, 404, cors);
+      }
+      if (!record.recoveryPhraseHash) {
+        return json(
+          {
+            ok: false,
+            error:
+              "No recovery phrase has been set for this account, so automatic recovery isn't available. Only someone with access to the Netlify dashboard can reset it manually (Blobs → admin-auth → delete the \"admin\" key), which brings back the account setup screen.",
+          },
+          400,
+          cors
+        );
+      }
+      const recoveryPhrase = typeof body.recoveryPhrase === "string" ? body.recoveryPhrase.trim().toLowerCase() : "";
+      const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
+      if (!recoveryPhrase) return json({ ok: false, error: "Enter your recovery phrase." }, 400, cors);
+
+      const phraseHash = await sha256Hex(recoveryPhrase);
+      if (phraseHash !== record.recoveryPhraseHash) {
+        return json({ ok: false, error: "That recovery phrase doesn't match." }, 401, cors);
+      }
+      if (!newPassword || newPassword.length < 6) {
+        return json({ ok: false, error: "New password must be at least 6 characters." }, 400, cors);
+      }
+
+      const newHash = await sha256Hex(newPassword);
+      await authStore.setJSON("admin", {
+        passwordHash: newHash,
+        recoveryPhraseHash: record.recoveryPhraseHash,
+        updatedAt: new Date().toISOString(),
+      });
+
+      const token = randomToken();
+      await sessionStore.setJSON(token, {
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + SESSION_TTL_MS).toISOString(),
+      });
+      return json({ ok: true, token: token }, 200, cors);
+    }
+
+    if (action === "sendBookingWhatsapp") {
+      // Called by the Google Apps Script Gmail watcher, not a logged-in
+      // admin browser session — so it authenticates with its own long
+      // shared secret instead of a session token.
+      const botKey = typeof body.botKey === "string" ? body.botKey : "";
+      const expectedKey = Deno.env.get("WHATSAPP_BOT_KEY") || "";
+      if (!expectedKey || botKey !== expectedKey) {
+        return json({ ok: false, error: "Not authorized." }, 401, cors);
+      }
+
+      const alias = sanitizeAlias_(body.alias || "");
+      const booking = body.booking && typeof body.booking === "object" ? body.booking : {};
+
+      // Find the affiliate whose bookingEmailAlias matches the address this
+      // booking email was addressed to (e.g. jeanl1967+aff123@gmail.com).
+      let matched = null;
+      if (alias) {
+        const { blobs } = await directoryStore.list();
+        for (const b of blobs) {
+          const rec = await directoryStore.get(b.key, { type: "json" });
+          if (rec && rec.bookingEmailAlias && sanitizeAlias_(rec.bookingEmailAlias) === alias) {
+            matched = rec;
+            break;
           }
+        }
+      }
+
+      // No match (e.g. the original un-aliased address, or a new affiliate
+      // not set up yet) falls back to a default group, so existing behavior
+      // keeps working during the transition to per-affiliate aliases.
+      const defaultGroupId = Deno.env.get("DEFAULT_WHATSAPP_GROUP_ID") || "";
+      const groupId = (matched && matched.whatsappGroupId) || defaultGroupId;
+
+      const result = { ok: true, matchedAffId: matched ? matched.affId : null, group: null, client: null };
+
+      if (groupId) {
+        const send = await sendGreenApiMessage_(groupId, formatGroupMessage_(booking));
+        result.group = { chatId: groupId, ok: send.ok, status: send.status, detail: send.ok ? undefined : send.body };
+      } else {
+        result.group = { ok: false, error: "No WhatsApp group configured for this alias, and no default group set." };
+      }
+
+      const clientChatId = normalizeChatId_(booking.cellphone || "");
+      if (clientChatId) {
+        const send2 = await sendGreenApiMessage_(clientChatId, formatClientMessage_(booking));
+        result.client = { chatId: clientChatId, ok: send2.ok, status: send2.status, detail: send2.ok ? undefined : send2.body };
+      } else {
+        result.client = { ok: false, error: "No usable cellphone number extracted from the booking email." };
+      }
+
+      context.waitUntil(
+        appendWhatsappLog_(whatsappLogStore, {
+          at: new Date().toISOString(),
+          alias: alias,
+          affId: matched ? matched.affId : null,
+          affName: matched ? matched.name : null,
+          refNo: booking.paymentRef || booking.refNo || "",
+          guest: booking.name || "",
+          resort: booking.resort || "",
+          groupOk: !!(result.group && result.group.ok),
+          clientOk: !!(result.client && result.client.ok),
         })
-        .catch(function(){
-          statusEl.textContent = 'Could not reach the server.';
-          statusEl.className = 'status show';
-        });
+      );
+
+      return json(result, 200, cors);
     }
 
-    function renderAffiliatesTable(){
-      var body = document.getElementById('affiliatesTableBody');
-      var empty = document.getElementById('affiliatesEmpty');
-      body.innerHTML = '';
+    // Every other action requires a valid session token.
+    const authed = await verifyToken(body.token);
+    if (!authed) return json({ ok: false, error: "Not authenticated." }, 401, cors);
 
-      if(!affiliatesCache.length){
-        empty.style.display = 'block';
-        return;
+    if (action === "logout") {
+      await sessionStore.delete(body.token);
+      return json({ ok: true }, 200, cors);
+    }
+
+    if (action === "changePassword") {
+      const oldPassword = typeof body.oldPassword === "string" ? body.oldPassword : "";
+      const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
+      const recoveryPhrase = typeof body.recoveryPhrase === "string" ? body.recoveryPhrase.trim() : "";
+      if (!newPassword || newPassword.length < 6) {
+        return json({ ok: false, error: "New password must be at least 6 characters." }, 400, cors);
       }
-      empty.style.display = 'none';
-
-      affiliatesCache.forEach(function(a){
-        var outstanding = (a.totalOwed || 0) - (a.totalPaid || 0);
-        var tr = document.createElement('tr');
-
-        var tdName = document.createElement('td');
-        tdName.textContent = a.name || '(no name)';
-        var tdId = document.createElement('td');
-        tdId.textContent = a.affId;
-        tdId.style.fontSize = '11px';
-        tdId.style.color = 'var(--muted)';
-        tdId.style.whiteSpace = 'nowrap';
-        var tdSiteNr = document.createElement('td');
-        tdSiteNr.textContent = a.siteNr ? ('Affiliate ' + a.siteNr) : '\u2014';
-        tdSiteNr.style.fontSize = '12px';
-        tdSiteNr.style.color = a.siteNr ? 'inherit' : 'var(--muted)';
-        var tdShare = document.createElement('td');
-        tdShare.textContent = formatShareSummary(a.revenueShare);
-        tdShare.style.fontSize = '12px';
-        var tdStatus = document.createElement('td');
-        var badge = document.createElement('span');
-        badge.className = 'badge ' + (a.status === 'inactive' ? 'inactive' : 'active');
-        badge.textContent = a.status === 'inactive' ? 'Inactive' : 'Active';
-        tdStatus.appendChild(badge);
-        var tdOutstanding = document.createElement('td');
-        tdOutstanding.textContent = money(outstanding);
-        tdOutstanding.style.fontWeight = '700';
-        tdOutstanding.style.color = outstanding > 0 ? '#7a5b00' : 'var(--navy)';
-
-        var tdActions = document.createElement('td');
-        var actionsWrap = document.createElement('div');
-        actionsWrap.className = 'row-actions';
-
-        var payoutsBtn = document.createElement('button');
-        payoutsBtn.className = 'btn-outline btn-small';
-        payoutsBtn.textContent = 'Payouts';
-        payoutsBtn.addEventListener('click', function(){
-          document.querySelector('.tab[data-panel="payouts"]').click();
-          populatePayoutPicker(function(){
-            document.getElementById('payoutAffPicker').value = a.affId;
-            document.getElementById('payoutAffPicker').dispatchEvent(new Event('change'));
-          });
-        });
-
-        var welcomeBtn = document.createElement('button');
-        welcomeBtn.className = 'btn-outline btn-small';
-        welcomeBtn.textContent = 'Welcome Info';
-        welcomeBtn.addEventListener('click', function(){
-          var originalLabel = welcomeBtn.textContent;
-          welcomeBtn.disabled = true;
-          welcomeBtn.textContent = 'Preparing…';
-
-          var hubLink = window.location.origin + '/hub.html?aff=' + encodeURIComponent(a.affId);
-          var bookingLink = STOCKNETWORK_BASE + encodeURIComponent(a.affId);
-          var storefrontLink = window.location.origin + '/landing.html?aff=' + encodeURIComponent(a.affId);
-
-          Promise.all([
-            shortenLink(bookingLink, a.affId),
-            shortenLink(storefrontLink, a.affId)
-          ]).then(function(shortened){
-            var bookingShort = shortened[0];
-            var storefrontShort = shortened[1];
-            var msg = 'Welcome to the Avante Travel Affiliate Hub' + (a.name ? ', ' + a.name : '') + '!\n\n' +
-              'Your personal Hub link:\n' + hubLink + '\n\n' +
-              'Log in with:\n' +
-              'Username (affiliate number): ' + a.affId + '\n' +
-              'Password: 0000 (default — you can change it once you\'re logged in, under "Change Password" in the top right)\n\n' +
-              'Your booking link:\n' + bookingLink + '\n' +
-              'Short link: ' + bookingShort + '\n\n' +
-              'Your affiliate storefront — share this one link with your clients:\n' + storefrontLink + '\n' +
-              'Short link: ' + storefrontShort + '\n\n' +
-              'Once inside you\'ll find your booking links, flight link, and marketing tools all in one place.';
-            copyToClipboard(msg, 'Welcome message copied — paste it into an email');
-          }).catch(function(){
-            showToast('Could not prepare the welcome message — please try again.');
-          }).then(function(){
-            welcomeBtn.disabled = false;
-            welcomeBtn.textContent = originalLabel;
-          });
-        });
-
-        var detailsBtn = document.createElement('button');
-        detailsBtn.className = 'btn-outline btn-small';
-        detailsBtn.textContent = 'Details';
-        detailsBtn.addEventListener('click', function(){ openDetailsModal(a); });
-
-        var editBtn = document.createElement('button');
-        editBtn.className = 'btn-secondary btn-small';
-        editBtn.textContent = 'Edit';
-        editBtn.addEventListener('click', function(){ openAffiliateModal(a); });
-
-        var deleteBtn = document.createElement('button');
-        deleteBtn.className = 'btn-danger btn-small';
-        deleteBtn.textContent = 'Delete';
-        deleteBtn.addEventListener('click', function(){
-          if(!window.confirm('Remove ' + (a.name || a.affId) + ' and all their logged payout history? This cannot be undone.')) return;
-          adminPost('deleteAffiliate', { affId: a.affId }).then(function(res){
-            if(res.data && res.data.ok){
-              showToast('Affiliate removed');
-              loadAffiliates();
-            }else{
-              showToast((res.data && res.data.error) || 'Could not remove affiliate.');
-            }
-          });
-        });
-
-        actionsWrap.appendChild(payoutsBtn);
-        actionsWrap.appendChild(welcomeBtn);
-        actionsWrap.appendChild(detailsBtn);
-        actionsWrap.appendChild(editBtn);
-        actionsWrap.appendChild(deleteBtn);
-        tdActions.appendChild(actionsWrap);
-
-        tr.appendChild(tdName);
-        tr.appendChild(tdId);
-        tr.appendChild(tdSiteNr);
-        tr.appendChild(tdShare);
-        tr.appendChild(tdStatus);
-        tr.appendChild(tdOutstanding);
-        tr.appendChild(tdActions);
-        body.appendChild(tr);
-      });
-    }
-
-    document.getElementById('refreshAffiliatesBtn').addEventListener('click', loadAffiliates);
-
-    // ---------- Leaderboard ----------
-    (function(){
-      var select = document.getElementById('leaderboardMetric');
-      var populated = false;
-      function populateMetrics(){
-        if(populated) return;
-        CHANNELS.forEach(function(c){
-          var opt = document.createElement('option');
-          opt.value = c.key;
-          opt.textContent = c.label;
-          select.appendChild(opt);
-        });
-        populated = true;
+      const record = await authStore.get("admin", { type: "json" });
+      const storedHash = record && record.passwordHash;
+      const oldHash = await sha256Hex(oldPassword);
+      if (!storedHash || oldHash !== storedHash) {
+        return json({ ok: false, error: "Current password is incorrect." }, 401, cors);
       }
-      populateMetrics();
-      select.addEventListener('change', renderLeaderboard);
-    })();
-
-    function renderLeaderboard(){
-      var metric = document.getElementById('leaderboardMetric').value || 'total';
-      var body = document.getElementById('leaderboardTableBody');
-      var empty = document.getElementById('leaderboardEmpty');
-      body.innerHTML = '';
-
-      var rows = affiliatesCache.map(function(a){
-        var value = metric === 'total'
-          ? (a.totalRevenue || 0)
-          : ((a.channelRevenue && a.channelRevenue[metric]) || 0);
-        return { a: a, value: value };
-      });
-      rows.sort(function(x, y){ return y.value - x.value; });
-
-      if(!rows.length){
-        empty.style.display = 'block';
-        return;
+      const newHash = await sha256Hex(newPassword);
+      const updated = { passwordHash: newHash, updatedAt: new Date().toISOString() };
+      if (recoveryPhrase) {
+        updated.recoveryPhraseHash = await sha256Hex(recoveryPhrase.toLowerCase());
+      } else if (record && record.recoveryPhraseHash) {
+        updated.recoveryPhraseHash = record.recoveryPhraseHash;
       }
-      empty.style.display = 'none';
-
-      var total = rows.reduce(function(sum, r){ return sum + r.value; }, 0);
-
-      rows.forEach(function(r, i){
-        var tr = document.createElement('tr');
-
-        var tdRank = document.createElement('td');
-        tdRank.textContent = '#' + (i + 1);
-        tdRank.style.fontWeight = '800';
-        tdRank.style.color = i === 0 ? 'var(--teal-dark)' : 'var(--navy)';
-
-        var tdName = document.createElement('td');
-        tdName.textContent = r.a.name || r.a.affId;
-
-        var tdValue = document.createElement('td');
-        tdValue.textContent = money(r.value);
-        tdValue.style.fontWeight = '700';
-
-        var tdPct = document.createElement('td');
-        tdPct.textContent = total > 0 ? (Math.round((r.value / total) * 1000) / 10) + '%' : '0%';
-        tdPct.style.color = 'var(--muted)';
-
-        tr.appendChild(tdRank);
-        tr.appendChild(tdName);
-        tr.appendChild(tdValue);
-        tr.appendChild(tdPct);
-        body.appendChild(tr);
-      });
+      await authStore.setJSON("admin", updated);
+      return json({ ok: true }, 200, cors);
     }
 
-    // ---------- Add / Edit affiliate modal ----------
-    var editingAffId = null;
-    var affOverlay = document.getElementById('affModalOverlay');
+    if (action === "upsertAffiliate") {
+      const affId = typeof body.affId === "string" ? body.affId.trim() : "";
+      if (!affId) return json({ ok: false, error: "Please enter an affiliate ID." }, 400, cors);
+      const name = typeof body.name === "string" ? body.name.trim() : "";
+      const email = typeof body.email === "string" ? body.email.trim() : "";
+      const siteNr = typeof body.siteNr === "string" ? body.siteNr.trim() : "";
+      const revenueShare = sanitizeRevenueShare(body.revenueShare, 0);
+      const bank = sanitizeBankDetails(body.bank);
+      const notes = typeof body.notes === "string" ? body.notes.trim() : "";
+      const status = body.status === "inactive" ? "inactive" : "active";
 
-    function openAffiliateModal(existing){
-      editingAffId = existing ? existing.affId : null;
-      document.getElementById('affModalTitle').textContent = existing ? 'Edit Affiliate' : 'Add Affiliate';
-      document.getElementById('affIdInput').value = existing ? existing.affId : '';
-      document.getElementById('affIdInput').disabled = !!existing;
-      document.getElementById('affNameInput').value = existing ? (existing.name || '') : '';
-      document.getElementById('affEmailInput').value = existing ? (existing.email || '') : '';
-      document.getElementById('affSiteNrInput').value = existing ? (existing.siteNr || '') : '';
-      buildAffShareFields(existing ? existing.revenueShare : null);
-      var bank = (existing && existing.bank) || {};
-      document.getElementById('affBankNameInput').value = bank.bankName || '';
-      document.getElementById('affAccountTypeInput').value = bank.accountType || '';
-      document.getElementById('affAccountHolderInput').value = bank.accountHolder || '';
-      document.getElementById('affAccountNumberInput').value = bank.accountNumber || '';
-      document.getElementById('affBranchCodeInput').value = bank.branchCode || '';
-      document.getElementById('affStatusInput').value = existing ? (existing.status || 'active') : 'active';
-      document.getElementById('affNotesInput').value = existing ? (existing.notes || '') : '';
-      document.getElementById('affModalStatus').classList.remove('show');
-      affOverlay.classList.add('show');
-    }
-    function closeAffiliateModal(){ affOverlay.classList.remove('show'); }
-
-    document.getElementById('addAffiliateBtn').addEventListener('click', function(){ openAffiliateModal(null); });
-    document.getElementById('affCancelBtn').addEventListener('click', closeAffiliateModal);
-    affOverlay.addEventListener('click', function(e){ if(e.target === affOverlay) closeAffiliateModal(); });
-
-    document.getElementById('affSaveBtn').addEventListener('click', function(){
-      var btn = this;
-      var statusEl = document.getElementById('affModalStatus');
-      statusEl.classList.remove('show');
-
-      var affId = document.getElementById('affIdInput').value.trim();
-      var name = document.getElementById('affNameInput').value.trim();
-      var email = document.getElementById('affEmailInput').value.trim();
-      var siteNr = document.getElementById('affSiteNrInput').value.trim();
-      var revenueShare = readAffShareFields();
-      var bank = {
-        bankName: document.getElementById('affBankNameInput').value.trim(),
-        accountType: document.getElementById('affAccountTypeInput').value,
-        accountHolder: document.getElementById('affAccountHolderInput').value.trim(),
-        accountNumber: document.getElementById('affAccountNumberInput').value.trim(),
-        branchCode: document.getElementById('affBranchCodeInput').value.trim()
+      const existing = await directoryStore.get(affId, { type: "json" });
+      const record = {
+        affId: affId,
+        name: name,
+        email: email,
+        // The StockNetwork site number that this affiliate's accommodation
+        // booking link is tied to. Admin-set only — shown read-only in the
+        // affiliate's own Hub (Account Details tab).
+        siteNr: siteNr,
+        // Not editable from this admin form (yet) — preserve whatever the
+        // affiliate has set for themselves via their Hub's Account Details
+        // tab, rather than silently wiping it out on every admin save.
+        phone: (existing && existing.phone) || "",
+        revenueShare: revenueShare,
+        bank: bank,
+        notes: notes,
+        status: status,
+        totalRevenue: (existing && existing.totalRevenue) || 0,
+        totalOwed: (existing && existing.totalOwed) || 0,
+        totalPaid: (existing && existing.totalPaid) || 0,
+        channelRevenue: (existing && existing.channelRevenue) || {},
+        createdAt: (existing && existing.createdAt) || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
-      var status = document.getElementById('affStatusInput').value;
-      var notes = document.getElementById('affNotesInput').value.trim();
+      await directoryStore.setJSON(affId, record);
+      return json({ ok: true, affiliate: record }, 200, cors);
+    }
 
-      if(!affId){
-        statusEl.textContent = 'Enter the affiliate\'s ID first.';
-        statusEl.classList.add('show');
-        return;
+    if (action === "setWhatsappRouting") {
+      // Separate from upsertAffiliate on purpose: upsertAffiliate rewrites
+      // the whole record from the Affiliates tab's form fields, which
+      // don't include these two — saving from the WhatsApp Messaging tab
+      // must only touch bookingEmailAlias/whatsappGroupId, never wipe out
+      // the affiliate's name, share, bank details, etc.
+      const affId = typeof body.affId === "string" ? body.affId.trim() : "";
+      if (!affId) return json({ ok: false, error: "missing affId" }, 400, cors);
+      const existing = await directoryStore.get(affId, { type: "json" });
+      if (!existing) return json({ ok: false, error: "Unknown affiliate." }, 404, cors);
+      existing.bookingEmailAlias = sanitizeAlias_(body.bookingEmailAlias || "");
+      existing.whatsappGroupId = typeof body.whatsappGroupId === "string" ? body.whatsappGroupId.trim() : "";
+      existing.updatedAt = new Date().toISOString();
+      await directoryStore.setJSON(affId, existing);
+      return json({ ok: true, affiliate: existing }, 200, cors);
+    }
+
+    if (action === "listWhatsappGroups") {
+      const instanceId = Deno.env.get("GREEN_API_INSTANCE_ID") || "";
+      const token = Deno.env.get("GREEN_API_TOKEN") || "";
+      if (!instanceId || !token) {
+        return json({ ok: false, error: "Green-API credentials are not configured on the server." }, 400, cors);
       }
-
-      btn.disabled = true;
-      btn.textContent = 'Saving…';
-      adminPost('upsertAffiliate', {
-        affId: affId, name: name, email: email, siteNr: siteNr,
-        revenueShare: revenueShare, bank: bank, status: status, notes: notes
-      }).then(function(res){
-        btn.disabled = false;
-        btn.textContent = 'Save Affiliate';
-        if(res.data && res.data.ok){
-          showToast('Affiliate saved');
-          closeAffiliateModal();
-          loadAffiliates();
-        }else{
-          statusEl.textContent = (res.data && res.data.error) || 'Could not save affiliate.';
-          statusEl.classList.add('show');
-        }
-      }).catch(function(){
-        btn.disabled = false;
-        btn.textContent = 'Save Affiliate';
-      });
-    });
-
-    // ---------- Affiliate Details modal (admin's full view of everything) ----------
-    var detailsOverlay = document.getElementById('detailsModalOverlay');
-    var currentDetailsText = '';
-
-    function detailRow(label, value){
-      return '<div class="detail-row"><div class="detail-label">' + escapeHtml(label) + '</div><div class="detail-value">' + escapeHtml(value) + '</div></div>';
+      try {
+        const url = "https://api.green-api.com/waInstance" + instanceId + "/getChats/" + token;
+        const res = await fetch(url);
+        const chats = await res.json();
+        const groups = (Array.isArray(chats) ? chats : []).filter((c) => c && c.id && c.id.endsWith("@g.us"));
+        return json({ ok: true, groups: groups }, 200, cors);
+      } catch (err) {
+        return json({ ok: false, error: String((err && err.message) || err) }, 502, cors);
+      }
     }
 
-    // Same as detailRow, but with a small "Copy" button next to the value —
-    // used for the link fields so the admin can grab just one link at a time.
-    function detailLinkRow(label, value){
-      return '<div class="detail-row">' +
-        '<div class="detail-label">' + escapeHtml(label) + '</div>' +
-        '<div class="detail-value-row">' +
-          '<div class="detail-value">' + escapeHtml(value) + '</div>' +
-          '<button type="button" class="btn-outline btn-small detail-copy-btn" data-copy="' + escapeHtml(value) + '">Copy</button>' +
-        '</div>' +
-      '</div>';
+    if (action === "testWhatsappGroup") {
+      const groupId = typeof body.groupId === "string" ? body.groupId.trim() : "";
+      if (!groupId) return json({ ok: false, error: "Enter a WhatsApp group chat ID first." }, 400, cors);
+      const send = await sendGreenApiMessage_(
+        groupId,
+        "✅ Test message from Avante Admin — WhatsApp Messaging is wired up correctly."
+      );
+      return json({ ok: send.ok, status: send.status, detail: send.body }, send.ok ? 200 : 502, cors);
     }
 
-    function openDetailsModal(a){
-      document.getElementById('detailsModalTitle').textContent = (a.name || a.affId) + ' — Details';
-      var body = document.getElementById('detailsModalBody');
-      body.innerHTML = '<p class="hint">Generating short links…</p>';
-      currentDetailsText = '';
-      detailsOverlay.classList.add('show');
-
-      var hubLink = window.location.origin + '/hub.html?aff=' + encodeURIComponent(a.affId);
-      var bookingLink = STOCKNETWORK_BASE + encodeURIComponent(a.affId);
-      var storefrontLink = window.location.origin + '/landing.html?aff=' + encodeURIComponent(a.affId);
-      var embedLink = window.location.origin + '/landing.html?aff=' + encodeURIComponent(a.affId) + '&embed=1';
-      var flightLink = FLIGHT_BASE_URL + (FLIGHT_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(a.affId);
-      var carLink = CAR_BASE_URL + (CAR_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(a.affId);
-      var esimLink = ESIM_BASE_URL + (ESIM_BASE_URL.indexOf('?') === -1 ? '?' : '&') + 'subId1=' + encodeURIComponent(a.affId);
-
-      Promise.all([
-        shortenLink(bookingLink, a.affId),
-        shortenLink(storefrontLink, a.affId),
-        shortenLink(flightLink, a.affId),
-        shortenLink(carLink, a.affId),
-        shortenLink(esimLink, a.affId)
-      ]).then(function(shortened){
-        var bookingShort = shortened[0];
-        var storefrontShort = shortened[1];
-        var flightShort = shortened[2];
-        var carShort = shortened[3];
-        var esimShort = shortened[4];
-        var bank = a.bank || {};
-        var hasBank = !!(bank.bankName || bank.accountHolder || bank.accountNumber);
-        var outstanding = (a.totalOwed || 0) - (a.totalPaid || 0);
-
-        var html = '';
-        html += '<div class="detail-section"><h3>Login credentials</h3>' +
-          detailRow('Username (affiliate number)', a.affId) +
-          detailRow('Password', '0000 (default — affiliate can change this once logged in)') +
-          '</div>';
-        html += '<hr class="detail-divider">';
-        html += '<div class="detail-section"><h3>Links</h3>' +
-          detailRow('StockNetwork Site Nr', a.siteNr || '—') +
-          detailLinkRow('Hub link', hubLink) +
-          detailLinkRow('Booking link', bookingLink) +
-          detailLinkRow('Booking link (short)', bookingShort) +
-          detailLinkRow('Storefront link', storefrontLink) +
-          detailLinkRow('Storefront link (short)', storefrontShort) +
-          detailLinkRow('Promotions embed link (no header, for embedding)', embedLink) +
-          detailLinkRow('Flight link', flightLink) +
-          detailLinkRow('Flight link (short)', flightShort) +
-          detailLinkRow('Car rental link', carLink) +
-          detailLinkRow('Car rental link (short)', carShort) +
-          detailLinkRow('Free E-Sim link', esimLink) +
-          detailLinkRow('Free E-Sim link (short)', esimShort) +
-          '</div>';
-        html += '<hr class="detail-divider">';
-        html += '<div class="detail-section"><h3>Revenue share by channel</h3>' +
-          detailRow('Rates', formatShareSummary(a.revenueShare)) +
-          '</div>';
-        html += '<hr class="detail-divider">';
-        html += '<div class="detail-section"><h3>Totals</h3>' +
-          detailRow('Total revenue logged', money(a.totalRevenue || 0)) +
-          detailRow('Total paid out', money(a.totalPaid || 0)) +
-          detailRow('Outstanding', money(outstanding)) +
-          '</div>';
-        html += '<hr class="detail-divider">';
-        html += '<div class="detail-section"><h3>Bank account</h3>' +
-          (hasBank
-            ? detailRow('Bank', bank.bankName || '—') + detailRow('Account holder', bank.accountHolder || '—') +
-              detailRow('Account number', bank.accountNumber || '—') + detailRow('Branch code', bank.branchCode || '—') +
-              detailRow('Account type', bank.accountType || '—')
-            : '<p class="hint">No bank details saved yet — add them under Edit.</p>') +
-          '</div>';
-
-        body.innerHTML = html;
-        body.querySelectorAll('.detail-copy-btn').forEach(function(btn){
-          btn.addEventListener('click', function(){
-            copyToClipboard(btn.dataset.copy, 'Link copied');
-          });
-        });
-
-        currentDetailsText = (a.name || a.affId) + ' — full details\n\n' +
-          'LOGIN\nUsername: ' + a.affId + '\nPassword: 0000 (default)\n\n' +
-          'LINKS\nStockNetwork Site Nr: ' + (a.siteNr || '—') + '\nHub: ' + hubLink + '\nBooking: ' + bookingLink + '\nBooking (short): ' + bookingShort +
-          '\nStorefront: ' + storefrontLink + '\nStorefront (short): ' + storefrontShort +
-          '\nPromotions embed link (no header): ' + embedLink +
-          '\nFlight: ' + flightLink + '\nFlight (short): ' + flightShort +
-          '\nCar rental: ' + carLink + '\nCar rental (short): ' + carShort +
-          '\nFree E-Sim: ' + esimLink + '\nFree E-Sim (short): ' + esimShort + '\n\n' +
-          'REVENUE SHARE\n' + formatShareSummary(a.revenueShare) + '\n\n' +
-          'TOTALS\nRevenue: ' + money(a.totalRevenue || 0) + '\nPaid: ' + money(a.totalPaid || 0) + '\nOutstanding: ' + money(outstanding) + '\n\n' +
-          'BANK\n' + (hasBank
-            ? ('Bank: ' + (bank.bankName || '—') + '\nAccount holder: ' + (bank.accountHolder || '—') +
-               '\nAccount number: ' + (bank.accountNumber || '—') + '\nBranch code: ' + (bank.branchCode || '—') +
-               '\nAccount type: ' + (bank.accountType || '—'))
-            : 'Not set');
-      }).catch(function(){
-        body.innerHTML = '<p class="hint">Something went wrong loading this affiliate\'s details. Please try again.</p>';
-      });
+    if (action === "setDefaultHook") {
+      const n = Number(body.hook);
+      if (!isFinite(n) || n < 1 || n > DEFAULT_HOOK_COUNT) {
+        return json({ ok: false, error: "invalid hook number" }, 400, cors);
+      }
+      const booking = typeof body.booking === "string" ? body.booking.trim() : "";
+      const landing = typeof body.landing === "string" ? body.landing.trim() : "";
+      const record = { booking: booking, landing: landing, updatedAt: new Date().toISOString() };
+      await hookStore.setJSON("__admin__:" + n, record);
+      return json({ ok: true, hook: n, record: record }, 200, cors);
     }
 
-    document.getElementById('detailsCloseBtn').addEventListener('click', function(){ detailsOverlay.classList.remove('show'); });
-    detailsOverlay.addEventListener('click', function(e){ if(e.target === detailsOverlay) detailsOverlay.classList.remove('show'); });
-    document.getElementById('detailsCopyBtn').addEventListener('click', function(){
-      if(!currentDetailsText){ showToast('Still preparing — try again in a moment.'); return; }
-      copyToClipboard(currentDetailsText, 'Details copied');
-    });
+    if (action === "deleteAffiliate") {
+      const affId = typeof body.affId === "string" ? body.affId.trim() : "";
+      if (!affId) return json({ ok: false, error: "missing affId" }, 400, cors);
+      await directoryStore.delete(affId);
+      await payoutStore.delete(affId);
+      return json({ ok: true }, 200, cors);
+    }
 
-    // ---------- Payouts ----------
-    var currentPayoutAffId = '';
+    if (action === "addPayoutEntry") {
+      const affId = typeof body.affId === "string" ? body.affId.trim() : "";
+      if (!affId) return json({ ok: false, error: "missing affId" }, 400, cors);
+      const period = typeof body.period === "string" ? body.period.trim() : "";
+      const revenue = Number(body.revenue);
+      const channel = typeof body.channel === "string" ? body.channel.trim() : "";
+      if (!CHANNEL_KEYS.includes(channel)) {
+        return json({ ok: false, error: "Please select a revenue channel." }, 400, cors);
+      }
+      if (!period) return json({ ok: false, error: "Please enter a period label (e.g. August 2026)." }, 400, cors);
+      if (!isFinite(revenue) || revenue < 0) {
+        return json({ ok: false, error: "Please enter a valid revenue amount." }, 400, cors);
+      }
+      const note = typeof body.note === "string" ? body.note.trim() : "";
 
-    function populatePayoutPicker(afterFn){
-      var picker = document.getElementById('payoutAffPicker');
-      var rebuild = function(){
-        var currentVal = picker.value;
-        picker.innerHTML = '<option value="">— Select an affiliate —</option>';
-        affiliatesCache.forEach(function(a){
-          var opt = document.createElement('option');
-          opt.value = a.affId;
-          opt.textContent = (a.name || a.affId) + (a.status === 'inactive' ? ' (inactive)' : '');
-          picker.appendChild(opt);
-        });
-        if(currentVal) picker.value = currentVal;
-        if(afterFn) afterFn();
+      let affiliate = await directoryStore.get(affId, { type: "json" });
+      if (!affiliate) return json({ ok: false, error: "Unknown affiliate — add them first." }, 404, cors);
+      affiliate = withChannelRevenue(withRevenueShare(affiliate));
+
+      const channelShare = (affiliate.revenueShare && affiliate.revenueShare[channel]) || { type: "percent", value: 0 };
+      const owed =
+        channelShare.type === "amount"
+          ? Math.round(channelShare.value * 100) / 100
+          : Math.round(revenue * (channelShare.value / 100) * 100) / 100;
+
+      const entries = (await payoutStore.get(affId, { type: "json" })) || [];
+      const entry = {
+        id: randomToken().slice(0, 12),
+        period: period,
+        channel: channel,
+        revenue: revenue,
+        shareType: channelShare.type,
+        shareValue: channelShare.value,
+        sharePct: channelShare.type === "percent" ? channelShare.value : null, // kept for older UI/reporting
+        owed: owed,
+        note: note,
+        paid: false,
+        paidAt: null,
+        createdAt: new Date().toISOString(),
       };
-      if(affiliatesCache.length){
-        rebuild();
-      }else{
-        loadAffiliates().then(rebuild);
-      }
+      entries.unshift(entry);
+      await payoutStore.setJSON(affId, entries);
+
+      affiliate.totalRevenue = (affiliate.totalRevenue || 0) + revenue;
+      affiliate.totalOwed = (affiliate.totalOwed || 0) + owed;
+      affiliate.channelRevenue[channel] = (affiliate.channelRevenue[channel] || 0) + revenue;
+      affiliate.updatedAt = new Date().toISOString();
+      await directoryStore.setJSON(affId, affiliate);
+
+      return json({ ok: true, entry: entry, affiliate: affiliate }, 200, cors);
     }
 
-    document.getElementById('payoutAffPicker').addEventListener('change', function(){
-      currentPayoutAffId = this.value;
-      var detail = document.getElementById('payoutsDetail');
-      if(!currentPayoutAffId){
-        detail.style.display = 'none';
-        return;
-      }
-      detail.style.display = 'block';
-      loadPayouts(currentPayoutAffId);
-    });
+    if (action === "markPayoutPaid") {
+      const affId = typeof body.affId === "string" ? body.affId.trim() : "";
+      const entryId = typeof body.entryId === "string" ? body.entryId.trim() : "";
+      const paid = !!body.paid;
+      if (!affId || !entryId) return json({ ok: false, error: "missing affId or entryId" }, 400, cors);
 
-    function currentAffiliateRecord(){
-      return affiliatesCache.filter(function(a){ return a.affId === currentPayoutAffId; })[0];
+      const entries = (await payoutStore.get(affId, { type: "json" })) || [];
+      const entry = entries.find(function (e) { return e.id === entryId; });
+      if (!entry) return json({ ok: false, error: "Entry not found." }, 404, cors);
+
+      const affiliate = await directoryStore.get(affId, { type: "json" });
+
+      if (paid && !entry.paid) {
+        entry.paid = true;
+        entry.paidAt = new Date().toISOString();
+        if (affiliate) affiliate.totalPaid = (affiliate.totalPaid || 0) + entry.owed;
+      } else if (!paid && entry.paid) {
+        entry.paid = false;
+        entry.paidAt = null;
+        if (affiliate) affiliate.totalPaid = Math.max(0, (affiliate.totalPaid || 0) - entry.owed);
+      }
+
+      await payoutStore.setJSON(affId, entries);
+      if (affiliate) {
+        affiliate.updatedAt = new Date().toISOString();
+        await directoryStore.setJSON(affId, affiliate);
+      }
+
+      return json({ ok: true, entry: entry }, 200, cors);
     }
 
-    function loadPayouts(affId){
-      var statusEl = document.getElementById('payoutsStatus');
-      statusEl.className = 'status';
-      adminGet('payouts', { affId: affId })
-        .then(function(data){
-          if(data && data.ok){
-            renderPayouts(data.entries || []);
-          }else{
-            statusEl.textContent = (data && data.error) || 'Could not load payout history.';
-            statusEl.className = 'status show';
-          }
-        })
-        .catch(function(){
-          statusEl.textContent = 'Could not reach the server.';
-          statusEl.className = 'status show';
-        });
+    if (action === "deletePayoutEntry") {
+      const affId = typeof body.affId === "string" ? body.affId.trim() : "";
+      const entryId = typeof body.entryId === "string" ? body.entryId.trim() : "";
+      if (!affId || !entryId) return json({ ok: false, error: "missing affId or entryId" }, 400, cors);
+
+      const entries = (await payoutStore.get(affId, { type: "json" })) || [];
+      const idx = entries.findIndex(function (e) { return e.id === entryId; });
+      if (idx === -1) return json({ ok: false, error: "Entry not found." }, 404, cors);
+      const removed = entries.splice(idx, 1)[0];
+      await payoutStore.setJSON(affId, entries);
+
+      let affiliate = await directoryStore.get(affId, { type: "json" });
+      if (affiliate) {
+        affiliate = withChannelRevenue(affiliate);
+        affiliate.totalRevenue = Math.max(0, (affiliate.totalRevenue || 0) - removed.revenue);
+        affiliate.totalOwed = Math.max(0, (affiliate.totalOwed || 0) - removed.owed);
+        if (removed.paid) affiliate.totalPaid = Math.max(0, (affiliate.totalPaid || 0) - removed.owed);
+        if (removed.channel && CHANNEL_KEYS.includes(removed.channel)) {
+          affiliate.channelRevenue[removed.channel] = Math.max(0, (affiliate.channelRevenue[removed.channel] || 0) - removed.revenue);
+        }
+        affiliate.updatedAt = new Date().toISOString();
+        await directoryStore.setJSON(affId, affiliate);
+      }
+
+      return json({ ok: true }, 200, cors);
     }
 
-    function renderSummary(){
-      var a = currentAffiliateRecord();
-      if(!a) return;
-      var outstanding = (a.totalOwed || 0) - (a.totalPaid || 0);
-      document.getElementById('statRevenue').textContent = money(a.totalRevenue || 0);
-      document.getElementById('statPaid').textContent = money(a.totalPaid || 0);
-      document.getElementById('statOutstanding').textContent = money(outstanding);
-
-      var breakdown = document.getElementById('channelShareBreakdown');
-      breakdown.textContent = 'Revenue share by channel — ' + formatShareSummary(a.revenueShare);
-
-      populateEntryChannelSelect();
-      updateSelectedChannelShare();
-    }
-
-    function populateEntryChannelSelect(){
-      var a = currentAffiliateRecord();
-      var select = document.getElementById('entryChannel');
-      var currentVal = select.value;
-      select.innerHTML = '<option value="">— Select a channel —</option>';
-      CHANNELS.forEach(function(c){
-        var opt = document.createElement('option');
-        opt.value = c.key;
-        var share = a ? normalizeRevenueShare(a.revenueShare)[c.key] : { type: 'percent', value: 0 };
-        opt.textContent = c.label + ' (' + formatChannelShare(share) + ')';
-        select.appendChild(opt);
-      });
-      if(currentVal) select.value = currentVal;
-    }
-
-    function updateSelectedChannelShare(){
-      var a = currentAffiliateRecord();
-      var select = document.getElementById('entryChannel');
-      var share = { type: 'percent', value: 0 };
-      if(a && select.value){
-        share = normalizeRevenueShare(a.revenueShare)[select.value] || share;
-      }
-      document.getElementById('statShare').textContent = formatChannelShare(share);
-      document.getElementById('statShareLbl').textContent = select.value
-        ? (channelLabel(select.value) + (share.type === 'amount' ? ' flat rate' : ' share'))
-        : 'Share for selected channel';
-    }
-
-    document.getElementById('entryChannel').addEventListener('change', updateSelectedChannelShare);
-
-    function renderPayouts(entries){
-      renderSummary();
-      var body = document.getElementById('entriesTableBody');
-      var empty = document.getElementById('entriesEmpty');
-      body.innerHTML = '';
-
-      if(!entries.length){
-        empty.style.display = 'block';
-        return;
-      }
-      empty.style.display = 'none';
-
-      entries.forEach(function(entry){
-        var tr = document.createElement('tr');
-
-        var tdChannel = document.createElement('td');
-        tdChannel.textContent = entry.channel ? channelLabel(entry.channel) : '—';
-        var tdPeriod = document.createElement('td');
-        tdPeriod.textContent = entry.period;
-        var tdRevenue = document.createElement('td');
-        tdRevenue.textContent = money(entry.revenue);
-        var tdShare = document.createElement('td');
-        tdShare.textContent = entry.shareType
-          ? formatChannelShare({ type: entry.shareType, value: entry.shareValue })
-          : (entry.sharePct || 0) + '%';
-        var tdOwed = document.createElement('td');
-        tdOwed.textContent = money(entry.owed);
-        tdOwed.style.fontWeight = '700';
-        var tdNote = document.createElement('td');
-        tdNote.textContent = entry.note || '—';
-        tdNote.style.fontSize = '12px';
-        tdNote.style.color = 'var(--muted)';
-        var tdStatus = document.createElement('td');
-        var badge = document.createElement('span');
-        badge.className = 'badge ' + (entry.paid ? 'paid' : 'unpaid');
-        badge.textContent = entry.paid ? 'Paid' : 'Unpaid';
-        tdStatus.appendChild(badge);
-
-        var tdActions = document.createElement('td');
-        var actionsWrap = document.createElement('div');
-        actionsWrap.className = 'row-actions';
-
-        var toggleBtn = document.createElement('button');
-        toggleBtn.className = entry.paid ? 'btn-outline btn-small' : 'btn-secondary btn-small';
-        toggleBtn.textContent = entry.paid ? 'Mark Unpaid' : 'Mark Paid';
-        toggleBtn.addEventListener('click', function(){
-          adminPost('markPayoutPaid', { affId: currentPayoutAffId, entryId: entry.id, paid: !entry.paid })
-            .then(function(res){
-              if(res.data && res.data.ok){
-                showToast(entry.paid ? 'Marked unpaid' : 'Marked paid');
-                loadAffiliates().then(function(){ loadPayouts(currentPayoutAffId); });
-              }else{
-                showToast((res.data && res.data.error) || 'Could not update entry.');
-              }
-            });
-        });
-
-        var deleteBtn = document.createElement('button');
-        deleteBtn.className = 'btn-danger btn-small';
-        deleteBtn.textContent = 'Delete';
-        deleteBtn.addEventListener('click', function(){
-          if(!window.confirm('Delete this revenue entry? This cannot be undone.')) return;
-          adminPost('deletePayoutEntry', { affId: currentPayoutAffId, entryId: entry.id })
-            .then(function(res){
-              if(res.data && res.data.ok){
-                showToast('Entry deleted');
-                loadAffiliates().then(function(){ loadPayouts(currentPayoutAffId); });
-              }else{
-                showToast((res.data && res.data.error) || 'Could not delete entry.');
-              }
-            });
-        });
-
-        actionsWrap.appendChild(toggleBtn);
-        actionsWrap.appendChild(deleteBtn);
-        tdActions.appendChild(actionsWrap);
-
-        tr.appendChild(tdChannel);
-        tr.appendChild(tdPeriod);
-        tr.appendChild(tdRevenue);
-        tr.appendChild(tdShare);
-        tr.appendChild(tdOwed);
-        tr.appendChild(tdNote);
-        tr.appendChild(tdStatus);
-        tr.appendChild(tdActions);
-        body.appendChild(tr);
-      });
-    }
-
-    document.getElementById('addEntryBtn').addEventListener('click', function(){
-      var btn = this;
-      var statusEl = document.getElementById('entryStatus');
-      statusEl.className = 'status';
-
-      if(!currentPayoutAffId){
-        statusEl.textContent = 'Select an affiliate first.';
-        statusEl.className = 'status show';
-        return;
-      }
-      var channel = document.getElementById('entryChannel').value;
-      var period = document.getElementById('entryPeriod').value.trim();
-      var revenue = document.getElementById('entryRevenue').value;
-      var note = document.getElementById('entryNote').value.trim();
-
-      if(!channel){
-        statusEl.textContent = 'Select which revenue channel this came from.';
-        statusEl.className = 'status show';
-        return;
-      }
-      if(!period){
-        statusEl.textContent = 'Enter a period label (e.g. "August 2026").';
-        statusEl.className = 'status show';
-        return;
-      }
-      if(revenue === '' || Number(revenue) < 0){
-        statusEl.textContent = 'Enter a valid revenue amount.';
-        statusEl.className = 'status show';
-        return;
-      }
-
-      btn.disabled = true;
-      btn.textContent = 'Adding…';
-      adminPost('addPayoutEntry', { affId: currentPayoutAffId, channel: channel, period: period, revenue: revenue, note: note })
-        .then(function(res){
-          btn.disabled = false;
-          btn.textContent = 'Add Revenue Entry';
-          if(res.data && res.data.ok){
-            showToast('Revenue entry added');
-            document.getElementById('entryPeriod').value = '';
-            document.getElementById('entryRevenue').value = '';
-            document.getElementById('entryNote').value = '';
-            loadAffiliates().then(function(){ loadPayouts(currentPayoutAffId); });
-          }else{
-            statusEl.textContent = (res.data && res.data.error) || 'Could not add revenue entry.';
-            statusEl.className = 'status show';
-          }
-        }).catch(function(){
-          btn.disabled = false;
-          btn.textContent = 'Add Revenue Entry';
-        });
-    });
-
-    // ---------- Default Hooks (admin fallback ad content) ----------
-    (function(){
-      var grid = document.getElementById('defaultHookGrid');
-      var HOOK_COUNT = 6;
-      var IMAGE_MAX_BYTES = 4 * 1024 * 1024; // 4MB
-      var ADMIN_AFF = '__admin__';
-      var loaded = false;
-
-      function isValidUrl(v){ return /^https?:\/\//i.test(v); }
-
-      function fmtDate(iso){
-        if(!iso) return 'Never updated';
-        try{
-          var d = new Date(iso);
-          return 'Last updated ' + d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) + ' at ' + d.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
-        }catch(e){ return 'Last updated'; }
-      }
-
-      var html = '';
-      for(var i = 1; i <= HOOK_COUNT; i++){
-        html +=
-          '<div class="hook-card">' +
-            '<div class="hook-badge">Hook ' + i + '</div>' +
-            '<div class="hook-image-wrap" id="dh' + i + '-imageWrap">' +
-              '<img class="hook-image" id="dh' + i + '-image" alt="Default hook ' + i + ' creative">' +
-              '<div class="hook-placeholder" id="dh' + i + '-placeholder">Ad creative placeholder</div>' +
-            '</div>' +
-            '<input type="file" accept="image/*" id="dh' + i + '-imageInput" style="display:none;">' +
-            '<div class="btn-row" style="margin-top:0;">' +
-              '<button type="button" class="btn-outline" data-upload-image="' + i + '">Upload image</button>' +
-            '</div>' +
-            '<div class="status" id="dh' + i + '-imageStatus"></div>' +
-            '<label for="dh' + i + '-booking">Booking link</label>' +
-            '<input id="dh' + i + '-booking" placeholder="Default booking link for this hook slot">' +
-            '<label for="dh' + i + '-landing">Landing page link</label>' +
-            '<input id="dh' + i + '-landing" placeholder="Default landing page link for this hook slot">' +
-            '<button class="primary" data-hook-save="' + i + '">Save default</button>' +
-            '<div class="status" id="dh' + i + '-errorStatus"></div>' +
-            '<div class="hook-updated" id="dh' + i + '-updated"></div>' +
-          '</div>';
-      }
-      grid.innerHTML = html;
-
-      function setImageSrc(n){
-        var img = document.getElementById('dh' + n + '-image');
-        var placeholder = document.getElementById('dh' + n + '-placeholder');
-        img.onload = function(){ img.classList.add('show'); placeholder.style.display = 'none'; };
-        img.onerror = function(){ img.classList.remove('show'); placeholder.style.display = 'flex'; };
-        img.src = '/api/hook-image?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(n) + '&t=' + Date.now();
-      }
-
-      // Netlify Blobs has occasionally shown eventual-consistency lag on
-      // this store — a POST can return 200 while the bytes that get read
-      // back moments later are still empty. Re-uploading a multi-MB image
-      // on every retry is slow and wasteful (especially on mobile data), so
-      // instead we upload once, then do several cheap read-only checks
-      // with increasing backoff to give the store time to catch up. Only
-      // if reads never come back with real bytes do we attempt one genuine
-      // re-upload, as a fallback for the (much rarer) case the write itself
-      // didn't take.
-      var VERIFY_DELAYS_MS = [500, 1000, 2000, 3000, 4000]; // ~10.5s total
-
-      function verifyImageSaved(apiUrl, step){
-        step = step || 0;
-        return fetch(apiUrl + '&verify=' + Date.now(), { cache: 'no-store' })
-          .then(function(res){ return res.arrayBuffer(); })
-          .then(function(buf){
-            if(buf.byteLength > 0) return true;
-            if(step < VERIFY_DELAYS_MS.length){
-              return new Promise(function(resolve){ setTimeout(resolve, VERIFY_DELAYS_MS[step]); })
-                .then(function(){ return verifyImageSaved(apiUrl, step + 1); });
-            }
-            return false;
-          });
-      }
-
-      function uploadImageWithVerify(apiUrl, file, isRetry, onStatus){
-        return fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'content-type': file.type },
-          body: file
-        }).then(function(res){
-          if(!res.ok) throw new Error('upload failed');
-          if(onStatus) onStatus('Saved — confirming it shows up everywhere…');
-          return verifyImageSaved(apiUrl);
-        }).then(function(verified){
-          if(verified) return 'confirmed';
-          if(!isRetry){
-            if(onStatus) onStatus('Still not showing up — trying once more…');
-            return uploadImageWithVerify(apiUrl, file, true, onStatus);
-          }
-          // The upload was accepted twice but we still can't read it back —
-          // most likely just server-side lag catching up a bit slower than
-          // usual, not a real failure, so don't make them keep re-uploading.
-          return 'unconfirmed';
-        });
-      }
-
-      function uploadImage(n, file){
-        var statusEl = document.getElementById('dh' + n + '-imageStatus');
-        statusEl.className = 'status';
-        statusEl.textContent = '';
-
-        if(!/^image\//.test(file.type)){
-          statusEl.textContent = 'Please choose an image file (JPG, PNG, GIF, or WebP).';
-          statusEl.className = 'status show';
-          return;
-        }
-        if(file.size > IMAGE_MAX_BYTES){
-          statusEl.textContent = 'That image is too large — please use one under 4MB.';
-          statusEl.className = 'status show';
-          return;
-        }
-
-        var img = document.getElementById('dh' + n + '-image');
-        var placeholder = document.getElementById('dh' + n + '-placeholder');
-        var previewUrl = URL.createObjectURL(file);
-        img.onerror = null;
-        img.onload = function(){ img.classList.add('show'); placeholder.style.display = 'none'; };
-        img.src = previewUrl;
-
-        statusEl.textContent = 'Saving image…';
-        statusEl.className = 'status show';
-
-        var apiUrl = '/api/hook-image?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(n);
-        uploadImageWithVerify(apiUrl, file, false, function(msg){
-          statusEl.textContent = msg;
-          statusEl.className = 'status show';
-        }).then(function(result){
-          statusEl.textContent = '';
-          statusEl.className = 'status';
-          if(result === 'confirmed'){
-            showToast('Default image uploaded');
-          }else{
-            showToast('Image saved — it may take a minute to appear everywhere');
-          }
-        }).catch(function(){
-          statusEl.textContent = 'We couldn\'t save this image to the server — please check your connection and try again.';
-          statusEl.className = 'status show';
-        });
-      }
-
-      function saveHook(n){
-        var p = 'dh' + n + '-';
-        var booking = document.getElementById(p + 'booking').value.trim();
-        var landing = document.getElementById(p + 'landing').value.trim();
-        var errorEl = document.getElementById(p + 'errorStatus');
-        errorEl.className = 'status';
-        errorEl.textContent = '';
-
-        if(booking && !isValidUrl(booking)){
-          errorEl.textContent = 'The booking link should start with https://';
-          errorEl.className = 'status show';
-          return;
-        }
-        if(landing && !isValidUrl(landing)){
-          errorEl.textContent = 'The landing page link should start with https://';
-          errorEl.className = 'status show';
-          return;
-        }
-
-        adminPost('setDefaultHook', { hook: n, booking: booking, landing: landing }).then(function(res){
-          if(res.data && res.data.ok){
-            showToast('Default hook ' + n + ' saved');
-            document.getElementById(p + 'updated').textContent = fmtDate(res.data.record && res.data.record.updatedAt);
-          }else{
-            errorEl.textContent = (res.data && res.data.error) || 'Could not save this default hook.';
-            errorEl.className = 'status show';
-          }
-        }).catch(function(){
-          errorEl.textContent = 'Could not reach the server — please try again.';
-          errorEl.className = 'status show';
-        });
-      }
-
-      function loadDefaultHooks(){
-        return adminGet('defaultHooks').then(function(data){
-          if(!data || !data.ok || !data.hooks) return;
-          data.hooks.forEach(function(h){
-            document.getElementById('dh' + h.hook + '-booking').value = h.booking || '';
-            document.getElementById('dh' + h.hook + '-landing').value = h.landing || '';
-            document.getElementById('dh' + h.hook + '-updated').textContent = fmtDate(h.updatedAt);
-            setImageSrc(h.hook);
-          });
-          loaded = true;
-        });
-      }
-
-      grid.addEventListener('click', function(e){
-        var saveN = e.target.getAttribute('data-hook-save');
-        if(saveN){
-          saveHook(saveN);
-          return;
-        }
-        var uploadN = e.target.getAttribute('data-upload-image');
-        if(uploadN){
-          document.getElementById('dh' + uploadN + '-imageInput').click();
-        }
-      });
-
-      grid.addEventListener('change', function(e){
-        var m = e.target.id && e.target.id.match(/^dh(\d+)-imageInput$/);
-        if(m && e.target.files && e.target.files[0]){
-          uploadImage(m[1], e.target.files[0]);
-          e.target.value = '';
-        }
-      });
-
-      // Load once, the first time the Default Hooks tab is opened.
-      document.querySelectorAll('.tab').forEach(function(btn){
-        if(btn.dataset.panel === 'defaultHooks'){
-          btn.addEventListener('click', function(){
-            if(!loaded) loadDefaultHooks();
-          });
-        }
-      });
-    })();
-
-    // ---------- Property Listings (admin review of submitted properties) ----------
-    (function(){
-      var tableBody = document.getElementById('propertyListingsTableBody');
-      var emptyEl = document.getElementById('propertyListingsEmpty');
-      var statusEl = document.getElementById('propertyListingsStatus');
-      var settingsStatusEl = document.getElementById('propertySettingsStatus');
-      var overlay = document.getElementById('propertyDetailsModalOverlay');
-      var bodyEl = document.getElementById('propertyDetailsModalBody');
-      var statusInput = document.getElementById('propertyStatusInput');
-      var siteNrInput = document.getElementById('propertySiteNrInput');
-      var modalStatusEl = document.getElementById('propertyDetailsModalStatus');
-      var currentListingId = '';
-      var loadedSettings = false;
-
-      function fmtPropDate(iso){
-        if(!iso) return '\u2014';
-        try{
-          var d = new Date(iso);
-          return d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
-        }catch(e){ return '\u2014'; }
-      }
-
-      function loadPropertySettings(){
-        return propAdminPost('getSettings').then(function(res){
-          if(res.data && res.data.ok){
-            document.getElementById('notificationEmailInput').value = (res.data.settings && res.data.settings.notificationEmail) || '';
-          }
-          loadedSettings = true;
-        });
-      }
-
-      document.getElementById('saveNotificationEmailBtn').addEventListener('click', function(){
-        var email = document.getElementById('notificationEmailInput').value.trim();
-        settingsStatusEl.textContent = 'Saving\u2026';
-        settingsStatusEl.className = 'status show';
-        propAdminPost('setSettings', { notificationEmail: email }).then(function(res){
-          if(res.data && res.data.ok){
-            settingsStatusEl.textContent = 'Saved.';
-          } else {
-            settingsStatusEl.textContent = (res.data && res.data.error) || 'Could not save.';
-          }
-          settingsStatusEl.className = 'status show';
-        }).catch(function(){
-          settingsStatusEl.textContent = 'Could not save.';
-          settingsStatusEl.className = 'status show';
-        });
-      });
-
-      function renderPropertyListingsTable(listings){
-        tableBody.innerHTML = '';
-        if(!listings.length){
-          emptyEl.style.display = 'block';
-          return;
-        }
-        emptyEl.style.display = 'none';
-        listings.forEach(function(l){
-          var tr = document.createElement('tr');
-
-          var tdProp = document.createElement('td');
-          tdProp.textContent = l.propertyName || '\u2014';
-          tr.appendChild(tdProp);
-
-          var tdOwner = document.createElement('td');
-          tdOwner.textContent = l.ownerFullName || '\u2014';
-          tr.appendChild(tdOwner);
-
-          var tdSubmitter = document.createElement('td');
-          tdSubmitter.textContent = l.submittedBy || '\u2014';
-          tr.appendChild(tdSubmitter);
-
-          var tdLoc = document.createElement('td');
-          tdLoc.textContent = [l.city, l.country].filter(Boolean).join(', ') || '\u2014';
-          tr.appendChild(tdLoc);
-
-          var tdStatus = document.createElement('td');
-          var badge = document.createElement('span');
-          var statusClass = l.status === 'Listed' ? 'listed' : (l.status === 'Rejected' ? 'rejected' : 'requested');
-          badge.className = 'badge ' + statusClass;
-          badge.textContent = l.status || 'Requested';
-          tdStatus.appendChild(badge);
-          tr.appendChild(tdStatus);
-          var tdAgreement = document.createElement('td');
-          var ag = l.agreementStatus || 'Not Sent';
-          var agColor = ag === 'Accepted' ? '#2a8f45' : (ag === 'Declined' ? '#b42318' : (ag === 'Sent' ? '#0e2f44' : '#808080'));
-          tdAgreement.textContent = ag;
-          tdAgreement.style.color = agColor;
-          tdAgreement.style.fontWeight = '600';
-          tr.appendChild(tdAgreement);
-
-          var tdSiteNr = document.createElement('td');
-          tdSiteNr.textContent = l.siteNr || '\u2014';
-          tr.appendChild(tdSiteNr);
-
-          var tdDate = document.createElement('td');
-          tdDate.textContent = fmtPropDate(l.dateSubmitted);
-          tr.appendChild(tdDate);
-
-          var tdActions = document.createElement('td');
-          var viewBtn = document.createElement('button');
-          viewBtn.type = 'button';
-          viewBtn.className = 'btn-outline btn-small';
-          viewBtn.textContent = 'View';
-          viewBtn.addEventListener('click', function(){ openPropertyDetailsModal(l.listingId); });
-          tdActions.appendChild(viewBtn);
-          tr.appendChild(tdActions);
-
-          tableBody.appendChild(tr);
-        });
-      }
-
-      function loadPropertyListings(){
-        statusEl.textContent = 'Loading\u2026';
-        statusEl.className = 'status show';
-        return propAdminPost('list').then(function(res){
-          statusEl.textContent = '';
-          statusEl.className = 'status';
-          if(res.data && res.data.ok){
-            renderPropertyListingsTable(res.data.listings || []);
-          } else {
-            statusEl.textContent = (res.data && res.data.error) || 'Could not load listings.';
-            statusEl.className = 'status show';
-          }
-        }).catch(function(){
-          statusEl.textContent = 'Could not load listings.';
-          statusEl.className = 'status show';
-        });
-      }
-
-      var EDIT_FIELDS = [
-        { key: 'propertyName', label: 'Property name', el: 'input' },
-        { key: 'propertyType', label: 'Property type', el: 'input' },
-        { key: 'suburb', label: 'Suburb', el: 'input' },
-        { key: 'city', label: 'City', el: 'input' },
-        { key: 'stateProvince', label: 'State / Province', el: 'input' },
-        { key: 'country', label: 'Country', el: 'input' },
-        { key: 'ownerFullName', label: 'Owner name', el: 'input' },
-        { key: 'ownerEmail', label: 'Owner email', el: 'input' },
-        { key: 'ownerPhone', label: 'Owner phone', el: 'input' },
-        { key: 'telephone', label: 'Property telephone', el: 'input' },
-        { key: 'email', label: 'Property email', el: 'input' },
-        { key: 'infoLink', label: 'Info link', el: 'input' },
-        { key: 'bookingLink', label: 'Booking link', el: 'input' },
-        { key: 'description', label: 'Description', el: 'textarea' },
-        { key: 'houseRules', label: 'House rules', el: 'textarea' }
-      ];
-
-      function defaultAgreementTerms(l){
-        return 'This agreement confirms that ' + (l.propertyName || 'the property') + ', represented by ' +
-          (l.ownerFullName || 'the owner/agent') + ', will be listed on Avante Travel\'s Private Property STR Database.\n\n' +
-          'By accepting this agreement, the property owner (or their authorised agent) confirms that all information submitted is accurate, and agrees to the commission and listing duration terms stated in this agreement. Avante Travel will process and forward qualifying bookings in line with these terms.\n\n' +
-          'Either party may cancel this listing agreement with 30 days\' written notice.\n\n' +
-          'This is a summary agreement for the purposes of listing approval and does not replace any separate signed supplier agreement already in place.';
-      }
-
-      function fmtAgreementStatus(l){
-        var s = l.agreementStatus || 'Not Sent';
-        var extra = '';
-        if(s === 'Sent' && l.agreementSentAt) extra = ' (sent ' + fmtPropDate(l.agreementSentAt) + ')';
-        if((s === 'Accepted' || s === 'Declined') && l.agreementRespondedAt) extra = ' (' + fmtPropDate(l.agreementRespondedAt) + ')';
-        return 'Agreement status: ' + s + extra;
-      }
-
-      function openPropertyDetailsModal(listingId){
-        currentListingId = listingId;
-        modalStatusEl.textContent = '';
-        modalStatusEl.className = 'modal-status';
-        bodyEl.innerHTML = 'Loading\u2026';
-        overlay.classList.add('show');
-        propAdminPost('get', { listingId: listingId }).then(function(res){
-          if(!res.data || !res.data.ok){
-            bodyEl.innerHTML = '';
-            modalStatusEl.textContent = (res.data && res.data.error) || 'Could not load listing.';
-            modalStatusEl.className = 'modal-status show';
-            return;
-          }
-          var l = res.data.listing;
-
-          var html =
-            detailRow('Listing ID', l.listingId) +
-            detailRow('Submitted by', l.submittedBy + (l.submittedBy === 'Affiliate' ? ' \u2014 ' + (l.affiliateAgentName || '') + ' (' + (l.affId || '') + ')' : '')) +
-            detailRow('Submitted', fmtPropDate(l.dateSubmitted)) +
-            detailRow('Last updated', fmtPropDate(l.dateUpdated));
-          EDIT_FIELDS.forEach(function(f){
-            var val = escapeHtml(l[f.key] || '');
-            if(f.el === 'textarea'){
-              html += '<label for="propField_' + f.key + '">' + escapeHtml(f.label) + '</label>' +
-                '<textarea id="propField_' + f.key + '">' + val + '</textarea>';
-            } else {
-              html += '<label for="propField_' + f.key + '">' + escapeHtml(f.label) + '</label>' +
-                '<input id="propField_' + f.key + '" value="' + val + '">';
-            }
-          });
-          bodyEl.innerHTML = html;
-
-          document.getElementById('propCommissionInput').value = l.commissionRate || '';
-          document.getElementById('propDurationInput').value = l.listingDuration || '';
-          document.getElementById('propAgreementTermsInput').value = l.agreementTerms || defaultAgreementTerms(l);
-          document.getElementById('propertyAgreementStatusRow').textContent = fmtAgreementStatus(l);
-
-          statusInput.value = l.status || 'Requested';
-          siteNrInput.value = l.siteNr || '';
-          var listedOption = statusInput.querySelector('option[value="Listed"]');
-          listedOption.disabled = l.agreementStatus !== 'Accepted';
-        }).catch(function(){
-          bodyEl.innerHTML = '';
-          modalStatusEl.textContent = 'Could not load listing.';
-          modalStatusEl.className = 'modal-status show';
-        });
-      }
-
-      document.getElementById('propertyDetailsCloseBtn').addEventListener('click', function(){
-        overlay.classList.remove('show');
-      });
-      overlay.addEventListener('click', function(e){ if(e.target === overlay) overlay.classList.remove('show'); });
-
-      document.getElementById('propertyDetailsSaveBtn').addEventListener('click', function(){
-        if(!currentListingId) return;
-        modalStatusEl.textContent = 'Saving\u2026';
-        modalStatusEl.className = 'modal-status show';
-
-        var listingPayload = { listingId: currentListingId,
-          commissionRate: document.getElementById('propCommissionInput').value,
-          listingDuration: document.getElementById('propDurationInput').value,
-          agreementTerms: document.getElementById('propAgreementTermsInput').value
-        };
-        EDIT_FIELDS.forEach(function(f){
-          listingPayload[f.key] = document.getElementById('propField_' + f.key).value;
-        });
-
-        propAdminPost('updateListing', listingPayload).then(function(updRes){
-          if(!updRes.data || !updRes.data.ok){
-            modalStatusEl.textContent = (updRes.data && updRes.data.error) || 'Could not save listing details.';
-            modalStatusEl.className = 'modal-status show';
-            return;
-          }
-          return propAdminPost('updateStatus', {
-            listingId: currentListingId,
-            status: statusInput.value,
-            siteNr: siteNrInput.value.trim()
-          }).then(function(res){
-            if(res.data && res.data.ok){
-              modalStatusEl.textContent = 'Saved.';
-              loadPropertyListings();
-            } else {
-              modalStatusEl.textContent = (res.data && res.data.error) || 'Could not save.';
-            }
-            modalStatusEl.className = 'modal-status show';
-          });
-        }).catch(function(){
-          modalStatusEl.textContent = 'Could not save.';
-          modalStatusEl.className = 'modal-status show';
-        });
-      });
-
-      document.getElementById('propertyDetailsDeleteBtn').addEventListener('click', function(){
-        if(!currentListingId) return;
-        if(!window.confirm('Delete this listing permanently? This cannot be undone.')) return;
-        modalStatusEl.textContent = 'Deleting...';
-        modalStatusEl.className = 'modal-status show';
-        propAdminPost('deleteListing', { listingId: currentListingId }).then(function(res){
-          if(res.data && res.data.ok){
-            overlay.classList.remove('show');
-            loadPropertyListings();
-          } else {
-            modalStatusEl.textContent = (res.data && res.data.error) || 'Could not delete listing.';
-            modalStatusEl.className = 'modal-status show';
-          }
-        }).catch(function(){
-          modalStatusEl.textContent = 'Could not delete listing.';
-          modalStatusEl.className = 'modal-status show';
-        });
-      });
-
-      document.getElementById('propertySendAgreementBtn').addEventListener('click', function(){
-        if(!currentListingId) return;
-        modalStatusEl.textContent = 'Sending agreement\u2026';
-        modalStatusEl.className = 'modal-status show';
-
-        var listingPayload = { listingId: currentListingId,
-          commissionRate: document.getElementById('propCommissionInput').value,
-          listingDuration: document.getElementById('propDurationInput').value,
-          agreementTerms: document.getElementById('propAgreementTermsInput').value
-        };
-
-        propAdminPost('updateListing', listingPayload).then(function(){
-          return propAdminPost('sendAgreement', { listingId: currentListingId });
-        }).then(function(res){
-          if(res.data && res.data.ok){
-            modalStatusEl.textContent = 'Agreement sent.';
-            document.getElementById('propertyAgreementStatusRow').textContent = fmtAgreementStatus(res.data.listing);
-            var listedOption = statusInput.querySelector('option[value="Listed"]');
-            listedOption.disabled = true;
-            loadPropertyListings();
-          } else {
-            modalStatusEl.textContent = (res.data && res.data.error) || 'Could not send agreement.';
-          }
-          modalStatusEl.className = 'modal-status show';
-        }).catch(function(){
-          modalStatusEl.textContent = 'Could not send agreement.';
-          modalStatusEl.className = 'modal-status show';
-        });
-      });
-
-      document.getElementById('refreshPropertyListingsBtn').addEventListener('click', function(){
-        loadPropertyListings();
-      });
-
-      document.querySelectorAll('.tab').forEach(function(btn){
-        if(btn.dataset.panel === 'propertyListings'){
-          btn.addEventListener('click', function(){
-            loadPropertyListings();
-            if(!loadedSettings) loadPropertySettings();
-          });
-        }
-      });
-    })();
-
-    // ---------- initial load ----------
-    loadAffiliates();
-  </script>
-
-</body>
-</html>
+    return json({ ok: false, error: "unknown action" }, 400, cors);
+  } catch (err) {
+    return json({ error: String((err && err.message) || err) }, 500, cors);
+  }
+};
+
+export const config = { path: "/api/admin" };
