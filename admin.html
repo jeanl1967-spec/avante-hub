@@ -422,6 +422,27 @@
     </div>
   </div>
 
+  <div class="modal-overlay" id="waModalOverlay">
+    <div class="modal-card">
+      <h2 id="waModalTitle">WhatsApp Routing</h2>
+      <p class="modal-sub" id="waModalSub">For this affiliate.</p>
+      <label for="waAliasInput">Booking email alias</label>
+      <input id="waAliasInput" placeholder="e.g. jeanl1967+sarah@gmail.com">
+      <p class="modal-sub" style="margin:-2px 0 8px;">Enter this exact address as the notification email on this affiliate's StockNetwork site. Every booking sent there gets routed to their WhatsApp group below.</p>
+      <label for="waGroupIdInput">WhatsApp group chat ID</label>
+      <input id="waGroupIdInput" placeholder="e.g. 120363422035129309@g.us">
+      <p class="modal-sub" style="margin:-2px 0 8px;">Add your Green-API-linked WhatsApp number to the affiliate's group, then click "Fetch My Groups" to pick it from a list — or paste an ID directly.</p>
+      <button type="button" class="btn-outline btn-small" id="waFetchGroupsBtn">Fetch My Groups</button>
+      <select id="waGroupPicker" style="display:none; margin-top:8px;"></select>
+      <div class="modal-status" id="waModalStatus"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-outline" id="waTestBtn" style="margin-right:auto;">Send Test Message</button>
+        <button type="button" class="modal-btn-secondary" id="waCancelBtn">Cancel</button>
+        <button type="button" class="modal-btn-primary" id="waSaveBtn">Save Routing</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="detailsModalOverlay">
     <div class="modal-card" style="max-width:520px;">
       <h2 id="detailsModalTitle">Affiliate Details</h2>
@@ -471,6 +492,7 @@
       <button class="tab" data-panel="defaultHooks">Default Hooks</button>
       <button class="tab" data-panel="payouts">Payouts</button>
       <button class="tab" data-panel="leaderboard">Leaderboard</button>
+      <button class="tab" data-panel="whatsapp">WhatsApp Messaging</button>
       <button class="tab" data-panel="propertyListings">Property Listings</button>
       <button class="tab" data-panel="tutorial">How Payouts Work</button>
     </nav>
@@ -630,6 +652,51 @@
           </div>
           <div class="empty-state" id="leaderboardEmpty" style="display:none;">No affiliates added yet — add some on the Affiliates tab first.</div>
         </div>
+      </div>
+    </section>
+
+    <!-- ===================== WHATSAPP MESSAGING ===================== -->
+    <section class="panel" id="panel-whatsapp">
+      <div class="hero">
+        <h1>WhatsApp Messaging</h1>
+        <p>When a StockNetwork booking email arrives, it's posted automatically to the right affiliate's WhatsApp group, and a confirmation is sent straight to the guest's own WhatsApp. Set each affiliate's routing below.</p>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Affiliate</th>
+                <th>Booking Email Alias</th>
+                <th>WhatsApp Group</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="waTableBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="waEmpty" style="display:none;">No affiliates added yet — add some on the Affiliates tab first.</div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h2 style="margin-top:0;">Recent Activity</h2>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Affiliate</th>
+                <th>Ref</th>
+                <th>Guest</th>
+                <th>Resort</th>
+                <th>Group Sent</th>
+                <th>Client Sent</th>
+              </tr>
+            </thead>
+            <tbody id="waLogTableBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="waLogEmpty" style="display:none;">No booking notifications sent yet.</div>
       </div>
     </section>
 
@@ -832,6 +899,11 @@
         if(btn.dataset.panel === 'leaderboard'){
           if(affiliatesCache.length) renderLeaderboard();
           else loadAffiliates().then(renderLeaderboard);
+        }
+        if(btn.dataset.panel === 'whatsapp'){
+          if(affiliatesCache.length) renderWhatsappTable();
+          else loadAffiliates().then(renderWhatsappTable);
+          loadWhatsappLog();
         }
       });
     });
@@ -1055,6 +1127,7 @@
             affiliatesCache = data.affiliates || [];
             renderAffiliatesTable();
             renderLeaderboard();
+            renderWhatsappTable();
           }else{
             statusEl.textContent = (data && data.error) || 'Could not load affiliates.';
             statusEl.className = 'status show';
@@ -1344,6 +1417,204 @@
       }).catch(function(){
         btn.disabled = false;
         btn.textContent = 'Save Affiliate';
+      });
+    });
+
+    // ---------- WhatsApp Messaging ----------
+    function renderWhatsappTable(){
+      var body = document.getElementById('waTableBody');
+      var empty = document.getElementById('waEmpty');
+      body.innerHTML = '';
+
+      if(!affiliatesCache.length){
+        empty.style.display = 'block';
+        return;
+      }
+      empty.style.display = 'none';
+
+      affiliatesCache.forEach(function(a){
+        var tr = document.createElement('tr');
+
+        var tdName = document.createElement('td');
+        tdName.textContent = a.name || a.affId;
+
+        var tdAlias = document.createElement('td');
+        tdAlias.textContent = a.bookingEmailAlias || '—';
+        tdAlias.style.fontSize = '12px';
+        tdAlias.style.color = a.bookingEmailAlias ? 'inherit' : 'var(--muted)';
+
+        var tdGroup = document.createElement('td');
+        tdGroup.textContent = a.whatsappGroupId || '—';
+        tdGroup.style.fontSize = '11px';
+        tdGroup.style.color = a.whatsappGroupId ? 'inherit' : 'var(--muted)';
+
+        var tdActions = document.createElement('td');
+        var editBtn = document.createElement('button');
+        editBtn.className = 'btn-outline btn-small';
+        editBtn.textContent = 'Edit Routing';
+        editBtn.addEventListener('click', function(){ openWhatsappModal(a); });
+        tdActions.appendChild(editBtn);
+
+        tr.appendChild(tdName);
+        tr.appendChild(tdAlias);
+        tr.appendChild(tdGroup);
+        tr.appendChild(tdActions);
+        body.appendChild(tr);
+      });
+    }
+
+    function loadWhatsappLog(){
+      adminGet('whatsappLog').then(function(data){
+        var body = document.getElementById('waLogTableBody');
+        var empty = document.getElementById('waLogEmpty');
+        body.innerHTML = '';
+        var entries = (data && data.ok && data.entries) || [];
+        if(!entries.length){
+          empty.style.display = 'block';
+          return;
+        }
+        empty.style.display = 'none';
+        entries.forEach(function(e){
+          var tr = document.createElement('tr');
+          [
+            e.at ? new Date(e.at).toLocaleString('en-ZA') : '—',
+            e.affName || (e.affId ? e.affId : 'Default group'),
+            e.refNo || '—',
+            e.guest || '—',
+            e.resort || '—'
+          ].forEach(function(text){
+            var td = document.createElement('td');
+            td.textContent = text;
+            td.style.fontSize = '12px';
+            tr.appendChild(td);
+          });
+          [e.groupOk, e.clientOk].forEach(function(ok){
+            var td = document.createElement('td');
+            var badge = document.createElement('span');
+            badge.className = 'badge ' + (ok ? 'active' : 'inactive');
+            badge.textContent = ok ? 'Sent' : 'Failed';
+            td.appendChild(badge);
+            tr.appendChild(td);
+          });
+          body.appendChild(tr);
+        });
+      }).catch(function(){});
+    }
+
+    var waOverlay = document.getElementById('waModalOverlay');
+    var editingWaAffId = null;
+
+    function openWhatsappModal(a){
+      editingWaAffId = a.affId;
+      document.getElementById('waModalSub').textContent = 'For ' + (a.name || a.affId) + '.';
+      document.getElementById('waAliasInput').value = a.bookingEmailAlias || '';
+      document.getElementById('waGroupIdInput').value = a.whatsappGroupId || '';
+      var picker = document.getElementById('waGroupPicker');
+      picker.innerHTML = '';
+      picker.style.display = 'none';
+      document.getElementById('waModalStatus').classList.remove('show');
+      waOverlay.classList.add('show');
+    }
+    function closeWhatsappModal(){ waOverlay.classList.remove('show'); }
+
+    document.getElementById('waCancelBtn').addEventListener('click', closeWhatsappModal);
+    waOverlay.addEventListener('click', function(e){ if(e.target === waOverlay) closeWhatsappModal(); });
+
+    document.getElementById('waSaveBtn').addEventListener('click', function(){
+      var btn = this;
+      var statusEl = document.getElementById('waModalStatus');
+      statusEl.classList.remove('show');
+      if(!editingWaAffId) return;
+
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      adminPost('setWhatsappRouting', {
+        affId: editingWaAffId,
+        bookingEmailAlias: document.getElementById('waAliasInput').value.trim(),
+        whatsappGroupId: document.getElementById('waGroupIdInput').value.trim()
+      }).then(function(res){
+        btn.disabled = false;
+        btn.textContent = 'Save Routing';
+        if(res.data && res.data.ok){
+          showToast('WhatsApp routing saved');
+          closeWhatsappModal();
+          loadAffiliates();
+        }else{
+          statusEl.textContent = (res.data && res.data.error) || 'Could not save routing.';
+          statusEl.classList.add('show');
+        }
+      }).catch(function(){
+        btn.disabled = false;
+        btn.textContent = 'Save Routing';
+      });
+    });
+
+    document.getElementById('waFetchGroupsBtn').addEventListener('click', function(){
+      var btn = this;
+      var statusEl = document.getElementById('waModalStatus');
+      statusEl.classList.remove('show');
+      btn.disabled = true;
+      btn.textContent = 'Fetching…';
+      adminPost('listWhatsappGroups', {}).then(function(res){
+        btn.disabled = false;
+        btn.textContent = 'Fetch My Groups';
+        if(res.data && res.data.ok){
+          var picker = document.getElementById('waGroupPicker');
+          picker.innerHTML = '';
+          var groups = res.data.groups || [];
+          if(!groups.length){
+            statusEl.textContent = 'No WhatsApp groups found for the linked number yet.';
+            statusEl.classList.add('show');
+            return;
+          }
+          var placeholder = document.createElement('option');
+          placeholder.value = '';
+          placeholder.textContent = '— Select a group —';
+          picker.appendChild(placeholder);
+          groups.forEach(function(g){
+            var opt = document.createElement('option');
+            opt.value = g.id;
+            opt.textContent = (g.name || g.id) + '  (' + g.id + ')';
+            picker.appendChild(opt);
+          });
+          picker.style.display = '';
+          picker.onchange = function(){
+            if(picker.value) document.getElementById('waGroupIdInput').value = picker.value;
+          };
+        }else{
+          statusEl.textContent = (res.data && res.data.error) || 'Could not fetch groups.';
+          statusEl.classList.add('show');
+        }
+      }).catch(function(){
+        btn.disabled = false;
+        btn.textContent = 'Fetch My Groups';
+      });
+    });
+
+    document.getElementById('waTestBtn').addEventListener('click', function(){
+      var btn = this;
+      var statusEl = document.getElementById('waModalStatus');
+      statusEl.classList.remove('show');
+      var groupId = document.getElementById('waGroupIdInput').value.trim();
+      if(!groupId){
+        statusEl.textContent = 'Enter a WhatsApp group chat ID first.';
+        statusEl.classList.add('show');
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+      adminPost('testWhatsappGroup', { groupId: groupId }).then(function(res){
+        btn.disabled = false;
+        btn.textContent = 'Send Test Message';
+        if(res.data && res.data.ok){
+          showToast('Test message sent — check the group');
+        }else{
+          statusEl.textContent = (res.data && res.data.detail) || (res.data && res.data.error) || 'Could not send test message.';
+          statusEl.classList.add('show');
+        }
+      }).catch(function(){
+        btn.disabled = false;
+        btn.textContent = 'Send Test Message';
       });
     });
 
