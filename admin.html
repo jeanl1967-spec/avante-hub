@@ -100,6 +100,13 @@
   }
   .modal-card textarea{ resize:vertical; min-height:60px; }
   .modal-card input:focus, .modal-card select:focus, .modal-card textarea:focus{ outline:none; border-color:var(--teal); }
+  .modal-card label.wa-status-row{
+    display:flex; align-items:center; gap:8px; font-size:13px; color:var(--navy);
+    margin:0 0 8px; font-weight:400; text-transform:none; letter-spacing:normal;
+  }
+  .wa-status-row input[type="checkbox"]{
+    width:16px; height:16px; padding:0; accent-color:var(--teal); flex:none;
+  }
   .modal-status{
     margin-top:12px; padding:9px 12px; border-radius:8px; font-size:12px;
     display:none; background:#fbeae8; color:#c0453a; border:1px solid #f0c8c2;
@@ -434,6 +441,14 @@
       <p class="modal-sub" style="margin:-2px 0 8px;">Add your Green-API-linked WhatsApp number to the affiliate's group, then click "Fetch My Groups" to pick it from a list — or paste an ID directly.</p>
       <button type="button" class="btn-outline btn-small" id="waFetchGroupsBtn">Fetch My Groups</button>
       <select id="waGroupPicker" style="display:none; margin-top:8px;"></select>
+      <label>Notify on booking status</label>
+      <p class="modal-sub" style="margin:-2px 0 8px;">Choose which booking-status emails should trigger a WhatsApp notification for this affiliate. Leave both checked to be notified on every booking.</p>
+      <label class="wa-status-row" for="waNotifyRequestInput">
+        <input type="checkbox" id="waNotifyRequestInput"> Request &mdash; pending, not yet confirmed
+      </label>
+      <label class="wa-status-row" for="waNotifyBookedInput">
+        <input type="checkbox" id="waNotifyBookedInput"> Booked &mdash; confirmed, awaiting payment
+      </label>
       <div class="modal-status" id="waModalStatus"></div>
       <div class="modal-actions">
         <button type="button" class="btn-outline" id="waTestBtn" style="margin-right:auto;">Send Test Message</button>
@@ -669,6 +684,7 @@
                 <th>Affiliate</th>
                 <th>Booking Email Alias</th>
                 <th>WhatsApp Group</th>
+                <th>Notify On</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -689,6 +705,7 @@
                 <th>Ref</th>
                 <th>Guest</th>
                 <th>Resort</th>
+                <th>Status</th>
                 <th>Group Sent</th>
                 <th>Client Sent</th>
               </tr>
@@ -1421,6 +1438,15 @@
     });
 
     // ---------- WhatsApp Messaging ----------
+    function whatsappNotifyOnOf_(a){
+      // Affiliates set up before this control existed have no
+      // whatsappNotifyOn field — treat that as "notify on everything",
+      // matching the behavior before this control was added.
+      if(a && Array.isArray(a.whatsappNotifyOn) && a.whatsappNotifyOn.length){
+        return a.whatsappNotifyOn;
+      }
+      return ['request', 'booked'];
+    }
     function renderWhatsappTable(){
       var body = document.getElementById('waTableBody');
       var empty = document.getElementById('waEmpty');
@@ -1448,6 +1474,14 @@
         tdGroup.style.fontSize = '11px';
         tdGroup.style.color = a.whatsappGroupId ? 'inherit' : 'var(--muted)';
 
+        var tdNotify = document.createElement('td');
+        var notifyOn = whatsappNotifyOnOf_(a);
+        var notifyLabel = (notifyOn.indexOf('request') > -1 && notifyOn.indexOf('booked') > -1)
+          ? 'Request + Booked'
+          : (notifyOn.indexOf('request') > -1 ? 'Request only' : (notifyOn.indexOf('booked') > -1 ? 'Booked only' : 'None'));
+        tdNotify.textContent = notifyLabel;
+        tdNotify.style.fontSize = '12px';
+
         var tdActions = document.createElement('td');
         var editBtn = document.createElement('button');
         editBtn.className = 'btn-outline btn-small';
@@ -1458,6 +1492,7 @@
         tr.appendChild(tdName);
         tr.appendChild(tdAlias);
         tr.appendChild(tdGroup);
+        tr.appendChild(tdNotify);
         tr.appendChild(tdActions);
         body.appendChild(tr);
       });
@@ -1474,6 +1509,7 @@
           return;
         }
         empty.style.display = 'none';
+        var statusLabels = { request: 'Request', booked: 'Booked' };
         entries.forEach(function(e){
           var tr = document.createElement('tr');
           [
@@ -1481,21 +1517,31 @@
             e.affName || (e.affId ? e.affId : 'Default group'),
             e.refNo || '—',
             e.guest || '—',
-            e.resort || '—'
+            e.resort || '—',
+            statusLabels[e.status] || (e.status || '—')
           ].forEach(function(text){
             var td = document.createElement('td');
             td.textContent = text;
             td.style.fontSize = '12px';
             tr.appendChild(td);
           });
-          [e.groupOk, e.clientOk].forEach(function(ok){
-            var td = document.createElement('td');
-            var badge = document.createElement('span');
-            badge.className = 'badge ' + (ok ? 'active' : 'inactive');
-            badge.textContent = ok ? 'Sent' : 'Failed';
-            td.appendChild(badge);
-            tr.appendChild(td);
-          });
+          if(e.skipped){
+            var tdSkip = document.createElement('td');
+            tdSkip.colSpan = 2;
+            tdSkip.style.fontSize = '12px';
+            tdSkip.style.color = 'var(--muted)';
+            tdSkip.textContent = 'Skipped — affiliate not subscribed to this status';
+            tr.appendChild(tdSkip);
+          }else{
+            [e.groupOk, e.clientOk].forEach(function(ok){
+              var td = document.createElement('td');
+              var badge = document.createElement('span');
+              badge.className = 'badge ' + (ok ? 'active' : 'inactive');
+              badge.textContent = ok ? 'Sent' : 'Failed';
+              td.appendChild(badge);
+              tr.appendChild(td);
+            });
+          }
           body.appendChild(tr);
         });
       }).catch(function(){});
@@ -1509,6 +1555,9 @@
       document.getElementById('waModalSub').textContent = 'For ' + (a.name || a.affId) + '.';
       document.getElementById('waAliasInput').value = a.bookingEmailAlias || '';
       document.getElementById('waGroupIdInput').value = a.whatsappGroupId || '';
+      var notifyOn = whatsappNotifyOnOf_(a);
+      document.getElementById('waNotifyRequestInput').checked = notifyOn.indexOf('request') > -1;
+      document.getElementById('waNotifyBookedInput').checked = notifyOn.indexOf('booked') > -1;
       var picker = document.getElementById('waGroupPicker');
       picker.innerHTML = '';
       picker.style.display = 'none';
@@ -1526,12 +1575,22 @@
       statusEl.classList.remove('show');
       if(!editingWaAffId) return;
 
+      var notifyOn = [];
+      if(document.getElementById('waNotifyRequestInput').checked) notifyOn.push('request');
+      if(document.getElementById('waNotifyBookedInput').checked) notifyOn.push('booked');
+      if(!notifyOn.length){
+        statusEl.textContent = 'Check at least one booking status to notify on.';
+        statusEl.classList.add('show');
+        return;
+      }
+
       btn.disabled = true;
       btn.textContent = 'Saving…';
       adminPost('setWhatsappRouting', {
         affId: editingWaAffId,
         bookingEmailAlias: document.getElementById('waAliasInput').value.trim(),
-        whatsappGroupId: document.getElementById('waGroupIdInput').value.trim()
+        whatsappGroupId: document.getElementById('waGroupIdInput').value.trim(),
+        notifyOn: notifyOn
       }).then(function(res){
         btn.disabled = false;
         btn.textContent = 'Save Routing';
