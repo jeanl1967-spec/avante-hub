@@ -361,6 +361,7 @@ export default async (request, context) => {
 
       const alias = sanitizeAlias_(body.alias || "");
       const booking = body.booking && typeof body.booking === "object" ? body.booking : {};
+      const bookingStatus = typeof booking.status === "string" ? booking.status : "unknown";
 
       // Find the affiliate whose bookingEmailAlias matches the address this
       // booking email was addressed to (e.g. jeanl1967+aff123@gmail.com).
@@ -374,6 +375,44 @@ export default async (request, context) => {
             break;
           }
         }
+      }
+
+      // Affiliates can choose (in the WhatsApp Messaging tab) to only be
+      // notified for "request" bookings, only "booked" ones, or both.
+      // Affiliates set up before this control existed have no
+      // whatsappNotifyOn field, which is treated as "notify on everything"
+      // so nothing that already worked silently stops working.
+      const notifyOn =
+        matched && Array.isArray(matched.whatsappNotifyOn) && matched.whatsappNotifyOn.length
+          ? matched.whatsappNotifyOn
+          : ["request", "booked"];
+
+      if (matched && bookingStatus !== "unknown" && !notifyOn.includes(bookingStatus)) {
+        context.waitUntil(
+          appendWhatsappLog_(whatsappLogStore, {
+            at: new Date().toISOString(),
+            alias: alias,
+            affId: matched.affId,
+            affName: matched.name,
+            refNo: booking.paymentRef || booking.refNo || "",
+            guest: booking.name || "",
+            resort: booking.resort || "",
+            status: bookingStatus,
+            skipped: true,
+            groupOk: false,
+            clientOk: false,
+          })
+        );
+        return json(
+          {
+            ok: true,
+            matchedAffId: matched.affId,
+            skipped: true,
+            reason: `Affiliate is not subscribed to "${bookingStatus}" status bookings.`,
+          },
+          200,
+          cors
+        );
       }
 
       // No match (e.g. the original un-aliased address, or a new affiliate
@@ -408,6 +447,7 @@ export default async (request, context) => {
           refNo: booking.paymentRef || booking.refNo || "",
           guest: booking.name || "",
           resort: booking.resort || "",
+          status: bookingStatus,
           groupOk: !!(result.group && result.group.ok),
           clientOk: !!(result.client && result.client.ok),
         })
@@ -500,6 +540,12 @@ export default async (request, context) => {
       if (!existing) return json({ ok: false, error: "Unknown affiliate." }, 404, cors);
       existing.bookingEmailAlias = sanitizeAlias_(body.bookingEmailAlias || "");
       existing.whatsappGroupId = typeof body.whatsappGroupId === "string" ? body.whatsappGroupId.trim() : "";
+      if (Array.isArray(body.notifyOn)) {
+        const cleaned = body.notifyOn.filter((s) => s === "request" || s === "booked");
+        existing.whatsappNotifyOn = cleaned.length ? cleaned : ["request", "booked"];
+      } else if (!Array.isArray(existing.whatsappNotifyOn) || !existing.whatsappNotifyOn.length) {
+        existing.whatsappNotifyOn = ["request", "booked"];
+      }
       existing.updatedAt = new Date().toISOString();
       await directoryStore.setJSON(affId, existing);
       return json({ ok: true, affiliate: existing }, 200, cors);
