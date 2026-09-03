@@ -506,11 +506,36 @@
   .hook-image-wrap.has-image .hook-placeholder{ display:none; }
   .hook-card label{ font-size:11px; margin:12px 0 5px; }
   .hook-card input{ padding:8px 10px; font-size:13px; }
+  .hook-card textarea{ padding:8px 10px; font-size:13px; min-height:64px; }
   .hook-card button.primary{ margin-top:16px; padding:10px; font-size:13px; }
   .hook-card .link-box{ margin-top:14px; padding:13px; }
   .hook-card .link-box .label{ font-size:10.5px; }
   .hook-card .link-box .url{ font-size:11.5px; }
   .hook-row + .hook-row{ margin-top:14px; }
+  .hook-card .caption-preview{ font-size:12.5px; color:var(--ink); line-height:1.5; white-space:pre-line; }
+
+  /* ---- Share Kit (per-platform sized image + caption, ready to paste) ---- */
+  .sharekit-btn{ width:100%; margin-top:14px; }
+  .modal-card.sharekit-card{ max-width:660px; }
+  .sharekit-header{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .sharekit-close{
+    flex:none; width:30px; height:30px; border-radius:50%; border:1.5px solid var(--line);
+    background:#fff; color:var(--muted); font-size:16px; line-height:1; cursor:pointer;
+  }
+  .sharekit-close:hover{ background:var(--mint); }
+  .sharekit-tabs{ display:flex; gap:20px; border-bottom:1.5px solid var(--line); margin:14px 0 18px; overflow-x:auto; }
+  .sharekit-tab{
+    border:none; background:none; cursor:pointer; padding:9px 1px; font-size:13px; font-weight:700;
+    font-family:'Montserrat',sans-serif; color:var(--muted); border-bottom:2.5px solid transparent; white-space:nowrap;
+  }
+  .sharekit-tab.active{ color:var(--teal-dark); border-bottom-color:var(--teal); }
+  .sharekit-body{ display:flex; gap:20px; flex-wrap:wrap; }
+  .sharekit-canvas-wrap canvas{ border-radius:8px; border:1.5px solid var(--line); background:var(--mint); display:block; }
+  .sharekit-dims{ font-size:11px; color:var(--muted); margin-top:8px; }
+  .sharekit-text-col{ flex:1; min-width:230px; display:flex; flex-direction:column; }
+  .sharekit-caption{ width:100%; min-height:150px; font-size:13px; font-family:'Noto Sans',sans-serif; }
+  .sharekit-actions{ display:flex; gap:10px; margin-top:12px; }
+  .sharekit-actions button{ flex:1; }
 
   /* ---- home / hook mode toggle (self-manage vs admin-manage) ---- */
   .hook-mode-label{ font-size:11px; margin:14px 0 6px; color:var(--muted); text-transform:uppercase; letter-spacing:0.04em; font-weight:700; }
@@ -838,6 +863,31 @@
       <div class="modal-actions">
         <button type="button" class="modal-btn-secondary" id="pwCancelBtn">Cancel</button>
         <button type="button" class="modal-btn-primary" id="pwSaveBtn">Save Password</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="shareKitModalOverlay">
+    <div class="modal-card sharekit-card">
+      <div class="sharekit-header">
+        <div>
+          <h2 id="shareKitTitle">Shareable Content</h2>
+          <p class="modal-sub" style="margin:0;">Sized image + ready-to-paste caption for each platform.</p>
+        </div>
+        <button type="button" class="sharekit-close" id="shareKitCloseBtn">&times;</button>
+      </div>
+      <div class="sharekit-tabs" id="shareKitTabs"></div>
+      <div class="sharekit-body">
+        <div class="sharekit-canvas-wrap" id="shareKitCanvasWrap"></div>
+        <div class="sharekit-text-col">
+          <div class="sharekit-dims" id="shareKitDims"></div>
+          <label for="shareKitCaption" style="margin-top:10px;">Caption</label>
+          <textarea class="sharekit-caption" id="shareKitCaption" readonly></textarea>
+          <div class="sharekit-actions">
+            <button type="button" class="btn-outline" id="shareKitCopyBtn">Copy Caption</button>
+            <button type="button" class="btn-secondary" id="shareKitDownloadBtn">Download Image</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -2675,6 +2725,8 @@
             '<label for="h' + i + '-landing">Landing page link</label>' +
             '<input id="h' + i + '-landing" placeholder="Link to the promo\'s landing page">' +
             '<div class="hint">We\'ll automatically tag this with your affiliate ID (taken from the end of your booking link) so you can tell who sent the traffic.</div>' +
+            '<label for="h' + i + '-caption">Caption</label>' +
+            '<textarea id="h' + i + '-caption" placeholder="Ready-to-paste caption for this promo"></textarea>' +
             '<div class="hook-mode-label">Who manages this hook?</div>' +
             '<div class="hook-mode-toggle" data-mode-toggle="' + i + '">' +
               '<button type="button" class="hook-mode-btn" data-mode-btn="' + i + '" data-mode-value="self">Manage my own</button>' +
@@ -2699,6 +2751,10 @@
                 '<button class="btn-secondary" data-copy="h' + i + '-previewLandingUrl">Copy</button>' +
                 '<button class="btn-outline" data-open="h' + i + '-previewLandingUrl">Open</button>' +
               '</div>' +
+            '</div>' +
+            '<div class="hook-row" id="h' + i + '-previewCaptionRow" style="display:none;">' +
+              '<div class="label">Caption</div>' +
+              '<div class="caption-preview" id="h' + i + '-previewCaption"></div>' +
             '</div>' +
           '</div>' +
             '<button class="primary" data-hook-save="' + i + '">Save hook</button>' +
@@ -2728,6 +2784,7 @@
                 '</div>' +
               '</div>' +
             '</div>' +
+            '<button type="button" class="btn-outline sharekit-btn" data-sharekit="' + i + '">Get Shareable Content</button>' +
           '</div>';
       }
       grid.innerHTML = html;
@@ -2810,7 +2867,7 @@
       // affiliate ID yet or the request fails, since that's the server's
       // own default for a hook with no saved mode.
       function loadHookMode(n, affId){
-        if(!affId){ setModeUI(n, 'admin', false); setHookPreview(n, null); return; }
+        if(!affId){ setModeUI(n, 'admin', false); setHookPreview(n, null); hookLiveData[n] = null; return; }
         fetch('/api/hook?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n))
           .then(function(r){ return r.json(); })
           .then(function(data){
@@ -2818,8 +2875,9 @@
             var expired = !!(data && data.expired);
             setModeUI(n, mode, expired);
             setHookPreview(n, data);
+            hookLiveData[n] = data;
           })
-          .catch(function(){ setModeUI(n, 'admin', false); setHookPreview(n, null); });
+          .catch(function(){ setModeUI(n, 'admin', false); setHookPreview(n, null); hookLiveData[n] = null; });
       }
 
       // When a hook is admin-managed, show a read-only preview of exactly
@@ -2858,7 +2916,22 @@
         }else{
           landingRow.style.display = 'none';
         }
+
+        var captionRow = document.getElementById('h' + n + '-previewCaptionRow');
+        var captionPreview = document.getElementById('h' + n + '-previewCaption');
+        if(data.caption){
+          captionPreview.textContent = data.caption;
+          captionRow.style.display = 'block';
+        }else{
+          captionRow.style.display = 'none';
+        }
       }
+
+      // Resolved hook data (booking/landing/caption/mode/source), keyed by
+      // hook number — refreshed every time loadHookMode runs. The Share Kit
+      // button reads from here instead of re-fetching, so it always reflects
+      // exactly what's live on this affiliate's storefront right now.
+      var hookLiveData = {};
 
       function saveMode(n, mode){
         var bookingVal = document.getElementById('h' + n + '-booking').value.trim();
@@ -2982,6 +3055,7 @@
         var p = 'h' + n + '-';
         var booking = document.getElementById(p + 'booking').value.trim();
         var landing = document.getElementById(p + 'landing').value.trim();
+        var caption = document.getElementById(p + 'caption').value.trim();
         var errorEl = document.getElementById(p + 'errorStatus');
         errorEl.className = 'status';
         errorEl.textContent = '';
@@ -3023,6 +3097,7 @@
         document.getElementById(p + 'linkBox').classList.add('show');
         affSave('hook' + n + 'booking', booking);
         affSave('hook' + n + 'landing', landing);
+        affSave('hook' + n + 'caption', caption);
 
         // Give this affiliate a single client-facing URL for this hook — a
         // read-only page their customers can open on any device. Requires an
@@ -3038,7 +3113,7 @@
           fetch('/api/hook?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ booking: booking, landing: landing })
+            body: JSON.stringify({ booking: booking, landing: landing, caption: caption })
           }).catch(function(){ /* saved to this browser regardless; backend sync is best-effort */ });
         }else{
           clientRow.style.display = 'none';
@@ -3053,15 +3128,18 @@
       for(var hi = 1; hi <= HOOK_COUNT; hi++){
         var bEl = document.getElementById('h' + hi + '-booking');
         var lEl = document.getElementById('h' + hi + '-landing');
+        var cEl = document.getElementById('h' + hi + '-caption');
         var savedB = affLoad('hook' + hi + 'booking');
         var savedL = affLoad('hook' + hi + 'landing');
+        var savedC = affLoad('hook' + hi + 'caption');
         if(savedB){
           bEl.value = savedB;
         }else if(AFF_ID){
           bEl.value = STOCKNETWORK_BASE + AFF_ID;
         }
         if(savedL) lEl.value = savedL;
-        if(savedB || savedL){
+        if(savedC) cEl.value = savedC;
+        if(savedB || savedL || savedC){
           saveHook(hi);
         }else{
           var affIdForImage = (bEl.value.trim() ? extractAffiliateId(bEl.value.trim()) : '') || AFF_ID;
@@ -3101,6 +3179,32 @@
         if(openId){
           var url = document.getElementById(openId).textContent;
           if(url) window.open(url, '_blank', 'noopener');
+          return;
+        }
+
+        var shareN = e.target.getAttribute('data-sharekit');
+        if(shareN && window.openShareKit){
+          var bookingVal = document.getElementById('h' + shareN + '-booking').value.trim();
+          var affIdForShare = (bookingVal ? extractAffiliateId(bookingVal) : '') || AFF_ID;
+          var resolved = hookLiveData[shareN] || null;
+          var isAdminSourced = !!(resolved && resolved.source === 'admin');
+          var imageAff = isAdminSourced ? '__admin__' : affIdForShare;
+
+          var clientLink = '';
+          if(affIdForShare){
+            var clientUrlObj = new URL('promo.html', window.location.href);
+            clientUrlObj.searchParams.set('aff', affIdForShare);
+            clientUrlObj.searchParams.set('hook', shareN);
+            clientLink = clientUrlObj.toString();
+          }
+
+          window.openShareKit({
+            title: 'Hook ' + shareN + ' — Shareable Content',
+            imageUrl: imageAff ? ('/api/hook-image?aff=' + encodeURIComponent(imageAff) + '&hook=' + encodeURIComponent(shareN) + '&t=' + Date.now()) : '',
+            caption: resolved ? resolved.caption : document.getElementById('h' + shareN + '-caption').value.trim(),
+            link: clientLink,
+            linkLabel: 'Your link'
+          });
         }
       });
 
@@ -3111,6 +3215,157 @@
           e.target.value = '';
         }
       });
+    })();
+
+    // ---------- Share Kit modal (per-platform sized image + caption) ----------
+    // Crops the hook's flyer to each platform's ideal aspect ratio
+    // client-side (a plain <canvas> centre-crop, same idea as CSS
+    // object-fit:cover) so nothing new needs to be uploaded or stored — the
+    // crop and the caption are just a presentation of the one image +
+    // caption already live on the hook (admin's default, or this
+    // affiliate's own, whichever is actually showing on their storefront).
+    (function(){
+      var PLATFORMS = [
+        { id: 'facebook', label: 'Facebook', w: 1200, h: 630 },
+        { id: 'instagram', label: 'Instagram', w: 1080, h: 1080 },
+        { id: 'whatsapp', label: 'WhatsApp', w: 1080, h: 1920 },
+        { id: 'linkedin', label: 'LinkedIn', w: 1200, h: 627 }
+      ];
+      var DISPLAY_W = 220; // px shown in the modal — canvases stay full-res for download
+
+      var overlay = document.getElementById('shareKitModalOverlay');
+      if(!overlay) return;
+      var tabsEl = document.getElementById('shareKitTabs');
+      var canvasWrap = document.getElementById('shareKitCanvasWrap');
+      var dimsEl = document.getElementById('shareKitDims');
+      var captionEl = document.getElementById('shareKitCaption');
+      var copyBtn = document.getElementById('shareKitCopyBtn');
+      var downloadBtn = document.getElementById('shareKitDownloadBtn');
+      var closeBtn = document.getElementById('shareKitCloseBtn');
+      var titleEl = document.getElementById('shareKitTitle');
+
+      var currentImg = null;
+      var currentPlatform = PLATFORMS[0];
+      var currentCanvas = null;
+
+      function cropToCanvas(img, w, h){
+        var canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        if(img){
+          var sw = img.naturalWidth, sh = img.naturalHeight;
+          var srcRatio = sw / sh, targetRatio = w / h;
+          var sx, sy, cw, ch;
+          if(srcRatio > targetRatio){ ch = sh; cw = sh * targetRatio; sx = (sw - cw) / 2; sy = 0; }
+          else{ cw = sw; ch = sw / targetRatio; sx = 0; sy = (sh - ch) / 2; }
+          ctx.drawImage(img, sx, sy, cw, ch, 0, 0, w, h);
+        }else{
+          ctx.fillStyle = '#f4fbfa';
+          ctx.fillRect(0, 0, w, h);
+          ctx.fillStyle = '#808080';
+          ctx.font = '600 ' + Math.round(w * 0.045) + 'px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('No image uploaded yet', w / 2, h / 2);
+        }
+        return canvas;
+      }
+
+      function renderPlatform(platform){
+        currentPlatform = platform;
+        var canvas = cropToCanvas(currentImg, platform.w, platform.h);
+        currentCanvas = canvas;
+        var displayW = platform.w >= platform.h ? DISPLAY_W : Math.round(DISPLAY_W * platform.w / platform.h);
+        canvas.style.width = displayW + 'px';
+        canvas.style.height = 'auto';
+        canvasWrap.innerHTML = '';
+        canvasWrap.appendChild(canvas);
+        dimsEl.textContent = platform.w + ' × ' + platform.h + 'px — ' + platform.label;
+
+        var btns = tabsEl.querySelectorAll('.sharekit-tab');
+        for(var i = 0; i < btns.length; i++){
+          btns[i].classList.toggle('active', btns[i].getAttribute('data-platform') === platform.id);
+        }
+      }
+
+      function buildCaptionText(caption, link, linkLabel){
+        var lines = [];
+        lines.push(caption || '(No caption written yet — add one above and reopen this.)');
+        if(link){
+          lines.push('');
+          lines.push((linkLabel || 'Link') + ': ' + link);
+        }
+        return lines.join('\n');
+      }
+
+      tabsEl.addEventListener('click', function(e){
+        var id = e.target.getAttribute('data-platform');
+        if(!id) return;
+        for(var i = 0; i < PLATFORMS.length; i++){
+          if(PLATFORMS[i].id === id){ renderPlatform(PLATFORMS[i]); break; }
+        }
+      });
+
+      copyBtn.addEventListener('click', function(){
+        var text = captionEl.value;
+        function fallback(){
+          captionEl.focus();
+          captionEl.select();
+          var ok = false;
+          try{ ok = document.execCommand('copy'); }catch(e){ ok = false; }
+          showToast(ok ? 'Caption copied to your clipboard' : 'Caption selected — press Ctrl/Cmd+C to copy');
+        }
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          navigator.clipboard.writeText(text).then(function(){
+            showToast('Caption copied to your clipboard');
+          }).catch(fallback);
+        }else{
+          fallback();
+        }
+      });
+
+      downloadBtn.addEventListener('click', function(){
+        if(!currentCanvas) return;
+        currentCanvas.toBlob(function(blob){
+          if(!blob) return;
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = 'avante-' + currentPlatform.id + '.png';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+        }, 'image/png');
+      });
+
+      closeBtn.addEventListener('click', function(){ overlay.classList.remove('show'); });
+      overlay.addEventListener('click', function(e){ if(e.target === overlay) overlay.classList.remove('show'); });
+
+      // opts: { title, imageUrl, caption, link, linkLabel }
+      window.openShareKit = function(opts){
+        opts = opts || {};
+        titleEl.textContent = opts.title || 'Shareable Content';
+        captionEl.value = buildCaptionText(opts.caption, opts.link, opts.linkLabel);
+        currentImg = null;
+        currentPlatform = PLATFORMS[0];
+        overlay.classList.add('show');
+
+        var tabsHtml = '';
+        PLATFORMS.forEach(function(p){
+          tabsHtml += '<button type="button" class="sharekit-tab" data-platform="' + p.id + '">' + p.label + '</button>';
+        });
+        tabsEl.innerHTML = tabsHtml;
+        renderPlatform(currentPlatform);
+
+        if(opts.imageUrl){
+          var img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = function(){ currentImg = img; renderPlatform(currentPlatform); };
+          img.onerror = function(){ currentImg = null; renderPlatform(currentPlatform); };
+          img.src = opts.imageUrl;
+        }
+      };
     })();
 
     // ---------- Link shortener (shared across every link the Hub builds) ----------
