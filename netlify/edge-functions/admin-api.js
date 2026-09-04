@@ -1,5 +1,5 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
-import { generateHashtags } from "./hashtag-helper.js";
+import { generateHashtags } from "./lib/hashtag-helper.js";
 
 // No hardcoded default password on purpose — this repo is public, so a
 // baked-in default would be visible to anyone who reads the source. Instead

@@ -3,6 +3,14 @@
 // affiliate saves) and admin-api.js (admin default-hook saves) so hashtags
 // stay consistent no matter who saved the hook.
 //
+// IMPORTANT: this file must stay inside a subdirectory of
+// netlify/edge-functions/ (not directly in it). Netlify auto-registers
+// every top-level file in that directory as its own edge function, which
+// requires a `export default` handler + `export const config` — this file
+// only exports a plain helper, so a top-level location breaks the build.
+// Subdirectories are exempt from that auto-discovery, which is exactly
+// what we want for shared/imported code like this.
+//
 // Design notes:
 // - Generation happens once, at save time, and the result is cached on the
 //   hook record (see hook-api.js / admin-api.js). Affiliates viewing the
