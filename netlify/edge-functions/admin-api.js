@@ -235,6 +235,7 @@ export default async (request, context) => {
             hook: n,
             booking: (rec && rec.booking) || "",
             landing: (rec && rec.landing) || "",
+            caption: (rec && rec.caption) || "",
             updatedAt: (rec && rec.updatedAt) || null,
           });
         }
@@ -585,7 +586,8 @@ export default async (request, context) => {
       }
       const booking = typeof body.booking === "string" ? body.booking.trim() : "";
       const landing = typeof body.landing === "string" ? body.landing.trim() : "";
-      const record = { booking: booking, landing: landing, updatedAt: new Date().toISOString() };
+      const caption = typeof body.caption === "string" ? body.caption.trim() : "";
+      const record = { booking: booking, landing: landing, caption: caption, updatedAt: new Date().toISOString() };
       await hookStore.setJSON("__admin__:" + n, record);
       return json({ ok: true, hook: n, record: record }, 200, cors);
     }

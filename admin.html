@@ -335,8 +335,32 @@
   .hook-image-wrap.has-image .hook-placeholder{ display:none; }
   .hook-card label{ font-size:11px; margin:12px 0 5px; display:block; }
   .hook-card input{ padding:8px 10px; font-size:13px; }
+  .hook-card textarea{ padding:8px 10px; font-size:13px; min-height:64px; }
   .hook-card button.primary{ margin-top:16px; padding:10px; font-size:13px; }
   .hook-updated{ font-size:11px; color:var(--muted); margin-top:8px; }
+
+  /* ---- Share Kit (per-platform sized image + caption, ready to paste) ---- */
+  .sharekit-btn{ width:100%; margin-top:10px; }
+  .modal-card.sharekit-card{ max-width:660px; text-align:left; }
+  .sharekit-header{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .sharekit-close{
+    flex:none; width:30px; height:30px; border-radius:50%; border:1.5px solid var(--line);
+    background:#fff; color:var(--muted); font-size:16px; line-height:1; cursor:pointer;
+  }
+  .sharekit-close:hover{ background:var(--mint); }
+  .sharekit-tabs{ display:flex; gap:20px; border-bottom:1.5px solid var(--line); margin:14px 0 18px; overflow-x:auto; }
+  .sharekit-tab{
+    border:none; background:none; cursor:pointer; padding:9px 1px; font-size:13px; font-weight:700;
+    font-family:'Montserrat',sans-serif; color:var(--muted); border-bottom:2.5px solid transparent; white-space:nowrap;
+  }
+  .sharekit-tab.active{ color:var(--teal-dark); border-bottom-color:var(--teal); }
+  .sharekit-body{ display:flex; gap:20px; flex-wrap:wrap; }
+  .sharekit-canvas-wrap canvas{ border-radius:8px; border:1.5px solid var(--line); background:var(--mint); display:block; }
+  .sharekit-dims{ font-size:11px; color:var(--muted); margin-top:8px; text-align:center; }
+  .sharekit-text-col{ flex:1; min-width:230px; display:flex; flex-direction:column; }
+  .sharekit-caption{ width:100%; min-height:150px; font-size:13px; font-family:'Noto Sans',sans-serif; }
+  .sharekit-actions{ display:flex; gap:10px; margin-top:12px; }
+  .sharekit-actions button{ flex:1; }
 </style>
 </head>
 <body>
@@ -466,6 +490,31 @@
       <div class="modal-actions">
         <button type="button" class="modal-btn-secondary" id="detailsCloseBtn">Close</button>
         <button type="button" class="modal-btn-primary" id="detailsCopyBtn">Copy All</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="shareKitModalOverlay">
+    <div class="modal-card sharekit-card">
+      <div class="sharekit-header">
+        <div>
+          <h2 id="shareKitTitle">Shareable Content</h2>
+          <p class="modal-sub" style="margin:0;">Sized image + ready-to-paste caption for each platform.</p>
+        </div>
+        <button type="button" class="sharekit-close" id="shareKitCloseBtn">&times;</button>
+      </div>
+      <div class="sharekit-tabs" id="shareKitTabs"></div>
+      <div class="sharekit-body">
+        <div class="sharekit-canvas-wrap" id="shareKitCanvasWrap"></div>
+        <div class="sharekit-text-col">
+          <div class="sharekit-dims" id="shareKitDims" style="text-align:left; margin-top:0;"></div>
+          <label for="shareKitCaption" style="margin-top:10px;">Caption</label>
+          <textarea class="sharekit-caption" id="shareKitCaption" readonly></textarea>
+          <div class="sharekit-actions">
+            <button type="button" class="btn-outline" id="shareKitCopyBtn">Copy Caption</button>
+            <button type="button" class="btn-secondary" id="shareKitDownloadBtn">Download Image</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -2082,9 +2131,12 @@
             '<input id="dh' + i + '-booking" placeholder="Default booking link for this hook slot">' +
             '<label for="dh' + i + '-landing">Landing page link</label>' +
             '<input id="dh' + i + '-landing" placeholder="Default landing page link for this hook slot">' +
+            '<label for="dh' + i + '-caption">Caption</label>' +
+            '<textarea id="dh' + i + '-caption" placeholder="Ready-to-paste caption affiliates will get with this ad"></textarea>' +
             '<button class="primary" data-hook-save="' + i + '">Save default</button>' +
             '<div class="status" id="dh' + i + '-errorStatus"></div>' +
             '<div class="hook-updated" id="dh' + i + '-updated"></div>' +
+            '<button type="button" class="btn-outline sharekit-btn" data-sharekit="' + i + '">Get Shareable Content</button>' +
           '</div>';
       }
       grid.innerHTML = html;
@@ -2192,6 +2244,7 @@
         var p = 'dh' + n + '-';
         var booking = document.getElementById(p + 'booking').value.trim();
         var landing = document.getElementById(p + 'landing').value.trim();
+        var caption = document.getElementById(p + 'caption').value.trim();
         var errorEl = document.getElementById(p + 'errorStatus');
         errorEl.className = 'status';
         errorEl.textContent = '';
@@ -2207,7 +2260,7 @@
           return;
         }
 
-        adminPost('setDefaultHook', { hook: n, booking: booking, landing: landing }).then(function(res){
+        adminPost('setDefaultHook', { hook: n, booking: booking, landing: landing, caption: caption }).then(function(res){
           if(res.data && res.data.ok){
             showToast('Default hook ' + n + ' saved');
             document.getElementById(p + 'updated').textContent = fmtDate(res.data.record && res.data.record.updatedAt);
@@ -2227,6 +2280,7 @@
           data.hooks.forEach(function(h){
             document.getElementById('dh' + h.hook + '-booking').value = h.booking || '';
             document.getElementById('dh' + h.hook + '-landing').value = h.landing || '';
+            document.getElementById('dh' + h.hook + '-caption').value = h.caption || '';
             document.getElementById('dh' + h.hook + '-updated').textContent = fmtDate(h.updatedAt);
             setImageSrc(h.hook);
           });
@@ -2243,6 +2297,20 @@
         var uploadN = e.target.getAttribute('data-upload-image');
         if(uploadN){
           document.getElementById('dh' + uploadN + '-imageInput').click();
+          return;
+        }
+        var shareN = e.target.getAttribute('data-sharekit');
+        if(shareN && window.openShareKit){
+          var booking = document.getElementById('dh' + shareN + '-booking').value.trim();
+          var landing = document.getElementById('dh' + shareN + '-landing').value.trim();
+          var caption = document.getElementById('dh' + shareN + '-caption').value.trim();
+          window.openShareKit({
+            title: 'Hook ' + shareN + ' — Shareable Content (admin preview)',
+            imageUrl: '/api/hook-image?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(shareN) + '&t=' + Date.now(),
+            caption: caption,
+            link: booking || landing,
+            linkLabel: booking ? 'Booking link' : 'Landing page link'
+          });
         }
       });
 
@@ -2262,6 +2330,156 @@
           });
         }
       });
+    })();
+
+    // ---------- Share Kit modal (per-platform sized image + caption) ----------
+    // Shared by every "Get Shareable Content" button on this page. Crops the
+    // hook's flyer to each platform's ideal aspect ratio client-side (a plain
+    // <canvas> centre-crop, same idea as CSS object-fit:cover) so nothing new
+    // needs to be uploaded or stored — the crop and the caption are just a
+    // presentation of the one image + caption already saved on the hook.
+    (function(){
+      var PLATFORMS = [
+        { id: 'facebook', label: 'Facebook', w: 1200, h: 630 },
+        { id: 'instagram', label: 'Instagram', w: 1080, h: 1080 },
+        { id: 'whatsapp', label: 'WhatsApp', w: 1080, h: 1920 },
+        { id: 'linkedin', label: 'LinkedIn', w: 1200, h: 627 }
+      ];
+      var DISPLAY_W = 220; // px shown in the modal — canvases stay full-res for download
+
+      var overlay = document.getElementById('shareKitModalOverlay');
+      if(!overlay) return;
+      var tabsEl = document.getElementById('shareKitTabs');
+      var canvasWrap = document.getElementById('shareKitCanvasWrap');
+      var dimsEl = document.getElementById('shareKitDims');
+      var captionEl = document.getElementById('shareKitCaption');
+      var copyBtn = document.getElementById('shareKitCopyBtn');
+      var downloadBtn = document.getElementById('shareKitDownloadBtn');
+      var closeBtn = document.getElementById('shareKitCloseBtn');
+      var titleEl = document.getElementById('shareKitTitle');
+
+      var currentImg = null;
+      var currentPlatform = PLATFORMS[0];
+      var currentCanvas = null;
+
+      function cropToCanvas(img, w, h){
+        var canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        if(img){
+          var sw = img.naturalWidth, sh = img.naturalHeight;
+          var srcRatio = sw / sh, targetRatio = w / h;
+          var sx, sy, cw, ch;
+          if(srcRatio > targetRatio){ ch = sh; cw = sh * targetRatio; sx = (sw - cw) / 2; sy = 0; }
+          else{ cw = sw; ch = sw / targetRatio; sx = 0; sy = (sh - ch) / 2; }
+          ctx.drawImage(img, sx, sy, cw, ch, 0, 0, w, h);
+        }else{
+          ctx.fillStyle = '#f4fbfa';
+          ctx.fillRect(0, 0, w, h);
+          ctx.fillStyle = '#808080';
+          ctx.font = '600 ' + Math.round(w * 0.045) + 'px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('No image uploaded yet', w / 2, h / 2);
+        }
+        return canvas;
+      }
+
+      function renderPlatform(platform){
+        currentPlatform = platform;
+        var canvas = cropToCanvas(currentImg, platform.w, platform.h);
+        currentCanvas = canvas;
+        var displayW = platform.w >= platform.h ? DISPLAY_W : Math.round(DISPLAY_W * platform.w / platform.h);
+        canvas.style.width = displayW + 'px';
+        canvas.style.height = 'auto';
+        canvasWrap.innerHTML = '';
+        canvasWrap.appendChild(canvas);
+        dimsEl.textContent = platform.w + ' × ' + platform.h + 'px — ' + platform.label;
+
+        var btns = tabsEl.querySelectorAll('.sharekit-tab');
+        for(var i = 0; i < btns.length; i++){
+          btns[i].classList.toggle('active', btns[i].getAttribute('data-platform') === platform.id);
+        }
+      }
+
+      function buildCaptionText(caption, link, linkLabel){
+        var lines = [];
+        lines.push(caption || '(No caption written yet — add one above and reopen this.)');
+        if(link){
+          lines.push('');
+          lines.push((linkLabel || 'Link') + ': ' + link);
+        }
+        return lines.join('\n');
+      }
+
+      tabsEl.addEventListener('click', function(e){
+        var id = e.target.getAttribute('data-platform');
+        if(!id) return;
+        for(var i = 0; i < PLATFORMS.length; i++){
+          if(PLATFORMS[i].id === id){ renderPlatform(PLATFORMS[i]); break; }
+        }
+      });
+
+      copyBtn.addEventListener('click', function(){
+        var text = captionEl.value;
+        function fallback(){
+          captionEl.focus();
+          captionEl.select();
+          var ok = false;
+          try{ ok = document.execCommand('copy'); }catch(e){ ok = false; }
+          showToast(ok ? 'Caption copied to your clipboard' : 'Caption selected — press Ctrl/Cmd+C to copy');
+        }
+        if(navigator.clipboard && navigator.clipboard.writeText){
+          navigator.clipboard.writeText(text).then(function(){
+            showToast('Caption copied to your clipboard');
+          }).catch(fallback);
+        }else{
+          fallback();
+        }
+      });
+
+      downloadBtn.addEventListener('click', function(){
+        if(!currentCanvas) return;
+        currentCanvas.toBlob(function(blob){
+          if(!blob) return;
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = 'avante-' + currentPlatform.id + '.png';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+        }, 'image/png');
+      });
+
+      closeBtn.addEventListener('click', function(){ overlay.classList.remove('show'); });
+      overlay.addEventListener('click', function(e){ if(e.target === overlay) overlay.classList.remove('show'); });
+
+      // opts: { title, imageUrl, caption, link, linkLabel }
+      window.openShareKit = function(opts){
+        opts = opts || {};
+        titleEl.textContent = opts.title || 'Shareable Content';
+        captionEl.value = buildCaptionText(opts.caption, opts.link, opts.linkLabel);
+        currentImg = null;
+        currentPlatform = PLATFORMS[0];
+        overlay.classList.add('show');
+
+        var tabsHtml = '';
+        PLATFORMS.forEach(function(p){
+          tabsHtml += '<button type="button" class="sharekit-tab" data-platform="' + p.id + '">' + p.label + '</button>';
+        });
+        tabsEl.innerHTML = tabsHtml;
+        renderPlatform(currentPlatform);
+
+        if(opts.imageUrl){
+          var img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = function(){ currentImg = img; renderPlatform(currentPlatform); };
+          img.onerror = function(){ currentImg = null; renderPlatform(currentPlatform); };
+          img.src = opts.imageUrl;
+        }
+      };
     })();
 
     // ---------- Property Listings (admin review of submitted properties) ----------
