@@ -2102,6 +2102,11 @@
       var IMAGE_MAX_BYTES = 4 * 1024 * 1024; // 4MB
       var ADMIN_AFF = '__admin__';
       var loaded = false;
+      // AI-generated per-platform hashtags for each default hook, cached
+      // here from the last load/save (the fields themselves aren't
+      // editable — they're regenerated server-side whenever the caption
+      // is saved), keyed by hook number: { facebook: [...], instagram: [...], whatsapp: [], linkedin: [...] } | null
+      var defaultHookHashtags = {};
 
       function isValidUrl(v){ return /^https?:\/\//i.test(v); }
 
@@ -2264,6 +2269,7 @@
           if(res.data && res.data.ok){
             showToast('Default hook ' + n + ' saved');
             document.getElementById(p + 'updated').textContent = fmtDate(res.data.record && res.data.record.updatedAt);
+            defaultHookHashtags[n] = (res.data.record && res.data.record.hashtags) || null;
           }else{
             errorEl.textContent = (res.data && res.data.error) || 'Could not save this default hook.';
             errorEl.className = 'status show';
@@ -2282,6 +2288,7 @@
             document.getElementById('dh' + h.hook + '-landing').value = h.landing || '';
             document.getElementById('dh' + h.hook + '-caption').value = h.caption || '';
             document.getElementById('dh' + h.hook + '-updated').textContent = fmtDate(h.updatedAt);
+            defaultHookHashtags[h.hook] = h.hashtags || null;
             setImageSrc(h.hook);
           });
           loaded = true;
@@ -2308,6 +2315,7 @@
             title: 'Hook ' + shareN + ' — Shareable Content (admin preview)',
             imageUrl: '/api/hook-image?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(shareN) + '&t=' + Date.now(),
             caption: caption,
+            hashtags: defaultHookHashtags[shareN] || null,
             link: booking || landing,
             linkLabel: booking ? 'Booking link' : 'Landing page link'
           });
@@ -2361,6 +2369,10 @@
       var currentImg = null;
       var currentPlatform = PLATFORMS[0];
       var currentCanvas = null;
+      var currentCaption = '';
+      var currentLink = '';
+      var currentLinkLabel = '';
+      var currentHashtags = null; // { facebook: [...], instagram: [...], whatsapp: [], linkedin: [...] } | null
 
       function cropToCanvas(img, w, h){
         var canvas = document.createElement('canvas');
@@ -2400,11 +2412,21 @@
         for(var i = 0; i < btns.length; i++){
           btns[i].classList.toggle('active', btns[i].getAttribute('data-platform') === platform.id);
         }
+
+        // Caption is rebuilt per platform: same base caption + link, but
+        // each platform gets its own AI-suggested hashtag set (WhatsApp
+        // intentionally gets none — hashtags aren't a WhatsApp convention).
+        var tags = (currentHashtags && currentHashtags[platform.id]) || [];
+        captionEl.value = buildCaptionText(currentCaption, tags, currentLink, currentLinkLabel);
       }
 
-      function buildCaptionText(caption, link, linkLabel){
+      function buildCaptionText(caption, hashtags, link, linkLabel){
         var lines = [];
         lines.push(caption || '(No caption written yet — add one above and reopen this.)');
+        if(hashtags && hashtags.length){
+          lines.push('');
+          lines.push(hashtags.map(function(t){ return '#' + t; }).join(' '));
+        }
         if(link){
           lines.push('');
           lines.push((linkLabel || 'Link') + ': ' + link);
@@ -2456,11 +2478,14 @@
       closeBtn.addEventListener('click', function(){ overlay.classList.remove('show'); });
       overlay.addEventListener('click', function(e){ if(e.target === overlay) overlay.classList.remove('show'); });
 
-      // opts: { title, imageUrl, caption, link, linkLabel }
+      // opts: { title, imageUrl, caption, hashtags, link, linkLabel }
       window.openShareKit = function(opts){
         opts = opts || {};
         titleEl.textContent = opts.title || 'Shareable Content';
-        captionEl.value = buildCaptionText(opts.caption, opts.link, opts.linkLabel);
+        currentCaption = opts.caption || '';
+        currentLink = opts.link || '';
+        currentLinkLabel = opts.linkLabel || '';
+        currentHashtags = opts.hashtags || null;
         currentImg = null;
         currentPlatform = PLATFORMS[0];
         overlay.classList.add('show');

@@ -1,4 +1,5 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
+import { generateHashtags } from "./hashtag-helper.js";
 
 // No hardcoded default password on purpose — this repo is public, so a
 // baked-in default would be visible to anyone who reads the source. Instead
@@ -236,6 +237,7 @@ export default async (request, context) => {
             booking: (rec && rec.booking) || "",
             landing: (rec && rec.landing) || "",
             caption: (rec && rec.caption) || "",
+            hashtags: (rec && rec.hashtags) || null,
             updatedAt: (rec && rec.updatedAt) || null,
           });
         }
@@ -587,7 +589,11 @@ export default async (request, context) => {
       const booking = typeof body.booking === "string" ? body.booking.trim() : "";
       const landing = typeof body.landing === "string" ? body.landing.trim() : "";
       const caption = typeof body.caption === "string" ? body.caption.trim() : "";
-      const record = { booking: booking, landing: landing, caption: caption, updatedAt: new Date().toISOString() };
+      // Regenerate platform hashtags whenever the default hook is saved.
+      // Best-effort: a failed/unavailable AI call just clears the cached
+      // set rather than blocking the save.
+      const hashtags = await generateHashtags(caption);
+      const record = { booking: booking, landing: landing, caption: caption, hashtags: hashtags, updatedAt: new Date().toISOString() };
       await hookStore.setJSON("__admin__:" + n, record);
       return json({ ok: true, hook: n, record: record }, 200, cors);
     }
