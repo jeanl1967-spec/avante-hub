@@ -1,4 +1,5 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
+import { generateHashtags } from "./hashtag-helper.js";
 
 // Special affiliate key reserved for admin-managed default hook content.
 // Chosen so it can never collide with a real affiliate ID (StockNetwork
@@ -125,7 +126,15 @@ export default async (request, context) => {
 
       if (typeof body.booking === "string") record.booking = body.booking;
       if (typeof body.landing === "string") record.landing = body.landing;
-      if (typeof body.caption === "string") record.caption = body.caption;
+      if (typeof body.caption === "string") {
+        record.caption = body.caption;
+        // Regenerate platform hashtags whenever the caption is (re)saved.
+        // Best-effort: a failed/unavailable AI call just clears the cached
+        // set rather than blocking the save.
+        const newHashtags = await generateHashtags(record.caption);
+        if (newHashtags) record.hashtags = newHashtags;
+        else delete record.hashtags;
+      }
       if (body.mode === "self" || body.mode === "admin") record.mode = body.mode;
       if (!record.mode) record.mode = "admin";
       record.savedAt = new Date().toISOString();
@@ -178,7 +187,7 @@ export default async (request, context) => {
       }
 
       const data = adminRecord
-        ? { booking: personalizedBooking, landing: adminRecord.landing || "", caption: adminRecord.caption || "", mode: mode, source: "admin", expired: expired }
+        ? { booking: personalizedBooking, landing: adminRecord.landing || "", caption: adminRecord.caption || "", hashtags: adminRecord.hashtags || null, mode: mode, source: "admin", expired: expired }
         : { mode: mode, source: "admin", expired: expired };
       // If there's genuinely nothing to show (no admin default set either),
       // return null so callers treat this hook slot as inactive — same as
@@ -191,7 +200,7 @@ export default async (request, context) => {
 
     // source === "self"
     const data = affRecord
-      ? { booking: affRecord.booking || "", landing: affRecord.landing || "", caption: affRecord.caption || "", mode: mode, source: "self", expired: expired }
+      ? { booking: affRecord.booking || "", landing: affRecord.landing || "", caption: affRecord.caption || "", hashtags: affRecord.hashtags || null, mode: mode, source: "self", expired: expired }
       : null;
     return new Response(JSON.stringify(data), {
       headers: { "content-type": "application/json", ...cors },
