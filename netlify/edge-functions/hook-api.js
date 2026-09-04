@@ -1,5 +1,5 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
-import { generateHashtags } from "./hashtag-helper.js";
+import { generateHashtags } from "./lib/hashtag-helper.js";
 
 // Special affiliate key reserved for admin-managed default hook content.
 // Chosen so it can never collide with a real affiliate ID (StockNetwork
