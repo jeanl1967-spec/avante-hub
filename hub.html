@@ -2711,6 +2711,7 @@
         html +=
           '<div class="hook-card">' +
             '<div class="hook-badge">Hook ' + i + '</div>' +
+            '<div class="hook-self-block" data-self-n="' + i + '">' +
             '<div class="hook-image-wrap" id="h' + i + '-imageWrap">' +
               '<img class="hook-image" id="h' + i + '-image" alt="Hook ' + i + ' creative">' +
               '<div class="hook-placeholder" id="h' + i + '-placeholder">Ad creative placeholder</div>' +
@@ -2727,6 +2728,7 @@
             '<div class="hint">We\'ll automatically tag this with your affiliate ID (taken from the end of your booking link) so you can tell who sent the traffic.</div>' +
             '<label for="h' + i + '-caption">Caption</label>' +
             '<textarea id="h' + i + '-caption" placeholder="Ready-to-paste caption for this promo"></textarea>' +
+            '</div>' +
             '<div class="hook-mode-label">Who manages this hook?</div>' +
             '<div class="hook-mode-toggle" data-mode-toggle="' + i + '">' +
               '<button type="button" class="hook-mode-btn" data-mode-btn="' + i + '" data-mode-value="self">Manage my own</button>' +
@@ -2757,6 +2759,7 @@
               '<div class="caption-preview" id="h' + i + '-previewCaption"></div>' +
             '</div>' +
           '</div>' +
+            '<div class="hook-self-block" data-self-n="' + i + '">' +
             '<button class="primary" data-hook-save="' + i + '">Save hook</button>' +
             '<div class="status" id="h' + i + '-errorStatus"></div>' +
             '<div class="link-box" id="h' + i + '-linkBox">' +
@@ -2783,6 +2786,7 @@
                   '<button class="btn-outline" data-open="h' + i + '-clientUrl">Open</button>' +
                 '</div>' +
               '</div>' +
+            '</div>' +
             '</div>' +
             '<button type="button" class="btn-outline sharekit-btn" data-sharekit="' + i + '">Get Shareable Content</button>' +
           '</div>';
@@ -2859,6 +2863,13 @@
         if(note){
           note.textContent = modeNoteText(mode, expired);
           note.className = 'hook-mode-note show' + (expired ? ' expired' : '');
+        }
+        // Only show the editing UI for whichever mode is actually selected —
+        // otherwise the "manage my own" fields and the "let admin manage"
+        // preview both show at once, which is confusing.
+        var selfBlocks = document.querySelectorAll('[data-self-n="' + n + '"]');
+        for(var s = 0; s < selfBlocks.length; s++){
+          selfBlocks[s].style.display = (mode === 'self') ? '' : 'none';
         }
       }
 
