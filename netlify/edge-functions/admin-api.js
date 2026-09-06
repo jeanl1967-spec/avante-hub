@@ -814,8 +814,19 @@ export default async (request, context) => {
         const queryLower = query.toLowerCase();
 
         let propertyMatch = allResorts.find((r) => r.name && r.name.toLowerCase() === queryLower);
+        // Only fall back to a loose "name contains this text" match if there
+        // isn't an exact area match available. Without this check, typing an
+        // area name like "Knysna" could wrongly match a property whose name
+        // happens to contain that word (e.g. "63 Milkwood Knysna") instead
+        // of correctly building an area-wide draft — confirmed live before
+        // this fix shipped.
         if (!propertyMatch) {
-          propertyMatch = allResorts.find((r) => r.name && r.name.toLowerCase().includes(queryLower));
+          const hasExactDistrictMatch = allResorts.some(
+            (r) => r.district && r.district.toLowerCase() === queryLower
+          );
+          if (!hasExactDistrictMatch) {
+            propertyMatch = allResorts.find((r) => r.name && r.name.toLowerCase().includes(queryLower));
+          }
         }
 
         if (propertyMatch) {
