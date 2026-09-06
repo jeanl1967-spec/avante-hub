@@ -1,4 +1,11 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
+import {
+  periodBounds,
+  aggregateTransactions,
+  buildLeaderboard,
+  CHANNEL_KEYS as STATS_CHANNEL_KEYS,
+  LEADERBOARD_EXCLUDED_SITE_NRS,
+} from "./lib/booking-stats.js";
 
 const DEFAULT_PASSWORD = "0000";
 
@@ -91,6 +98,8 @@ export default async (request, context) => {
   // profile an affiliate edits here shows up in the Admin dashboard too,
   // and vice versa.
   const directoryStore = getStore({ name: "affiliates-directory", consistency: "strong" });
+  // Same store name admin-api.js's importStockNetworkReport writes to.
+  const transactionsStore = getStore({ name: "stocknetwork-transactions", consistency: "strong" });
 
   try {
     const record = await store.get(aff, { type: "json" });
@@ -221,6 +230,65 @@ export default async (request, context) => {
             bank: dirRecord.bank,
             revenueShare: dirRecord.revenueShare,
           },
+        }),
+        { headers: { "content-type": "application/json", ...cors } }
+      );
+    }
+
+    if (action === "getMyBookingStats") {
+      // Self-service — an affiliate viewing their own "My Dashboard" tab.
+      // Only ever returns this one affiliate's own numbers plus their rank
+      // (a position and a total, never another affiliate's name or data),
+      // even though the underlying stats/leaderboard are computed the same
+      // way admin-api.js's bookingStats resource computes them.
+      const { blobs: affBlobs } = await directoryStore.list();
+      const affiliatesById = {};
+      for (const b of affBlobs) {
+        const rec = await directoryStore.get(b.key, { type: "json" });
+        if (rec) affiliatesById[rec.affId] = rec;
+      }
+
+      const { blobs: txBlobs } = await transactionsStore.list();
+      const records = [];
+      for (const b of txBlobs) {
+        const rec = await transactionsStore.get(b.key, { type: "json" });
+        if (rec) records.push(rec);
+      }
+
+      const periods = periodBounds();
+      const stats = aggregateTransactions(records, periods);
+      const emptyBucket = { count: 0, value: 0 };
+      const emptyStatus = { request: emptyBucket, booked: emptyBucket, cancelled: emptyBucket, confirmed: emptyBucket };
+
+      const myStats = {};
+      const myRank = {};
+      for (const p of Object.keys(stats)) {
+        myStats[p] = {};
+        myRank[p] = {};
+        for (const ch of Object.keys(stats[p])) {
+          myStats[p][ch] = stats[p][ch][aff] || emptyStatus;
+          const lb = buildLeaderboard(stats[p][ch], affiliatesById);
+          const byCountRow = lb.byCount.find((r) => r.affId === aff);
+          const byValueRow = lb.byValue.find((r) => r.affId === aff);
+          myRank[p][ch] = {
+            byCount: byCountRow ? { rank: byCountRow.rankByCount, of: lb.totalRanked } : null,
+            byValue: byValueRow ? { rank: byValueRow.rankByValue, of: lb.totalRanked } : null,
+          };
+        }
+      }
+
+      const excludedFromLeaderboard = LEADERBOARD_EXCLUDED_SITE_NRS.includes(
+        String((affiliatesById[aff] && affiliatesById[aff].siteNr) || "").trim()
+      );
+
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          periods: periods,
+          channels: STATS_CHANNEL_KEYS,
+          myStats: myStats,
+          myRank: myRank,
+          excludedFromLeaderboard: excludedFromLeaderboard,
         }),
         { headers: { "content-type": "application/json", ...cors } }
       );

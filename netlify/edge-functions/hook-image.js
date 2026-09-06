@@ -16,6 +16,11 @@ export default async (request, context) => {
   const url = new URL(request.url);
   const aff = (url.searchParams.get("aff") || "").trim();
   const hook = (url.searchParams.get("hook") || "").trim();
+  // Optional — only ever used to GET one of the extra gallery photos a
+  // hook's Auto-build "Use this" step may have saved (see admin-api.js's
+  // saveHookPhotos). Left out entirely, this behaves exactly as before:
+  // the hook's one normal cover image, same key, same POST/GET behavior.
+  const slot = (url.searchParams.get("slot") || "").trim();
 
   if (!aff || !hook) {
     return new Response(JSON.stringify({ error: "missing aff or hook" }), {
@@ -25,7 +30,7 @@ export default async (request, context) => {
 }
 
   const store = getStore({ name: "promo-hook-images", consistency: "strong" });
-  const key = aff + ":" + hook;
+  const key = slot ? aff + ":" + hook + ":" + slot : aff + ":" + hook;
 
   try {
     if (request.method === "POST") {

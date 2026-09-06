@@ -1,4 +1,16 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
+import { generateHashtags } from "./lib/hashtag-helper.js";
+import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
+import {
+  parseStockNetworkCsv,
+  normalizeStockNetworkStatus,
+  parseMoney,
+  parseUsDateToYmd,
+  periodBounds,
+  aggregateTransactions,
+  buildLeaderboard,
+  CHANNEL_KEYS as STATS_CHANNEL_KEYS,
+} from "./lib/booking-stats.js";
 
 // No hardcoded default password on purpose — this repo is public, so a
 // baked-in default would be visible to anyone who reads the source. Instead
@@ -179,7 +191,16 @@ export default async (request, context) => {
   const directoryStore = getStore({ name: "affiliates-directory", consistency: "strong" });
   const payoutStore = getStore({ name: "affiliate-payouts", consistency: "strong" });
   const hookStore = getStore({ name: "promo-hooks", consistency: "strong" });
+  // Same store resorts-api.js writes the uploaded resort master CSV to —
+  // read here (never written) so generateHookDraft's "area" mode can find
+  // which real properties sit in a given district without a second fetch.
+  const resortStore = getStore({ name: "resort-list", consistency: "strong" });
   const whatsappLogStore = getStore({ name: "whatsapp-log", consistency: "strong" });
+  // One blob per imported booking, keyed by StockNetwork's RefNo, so
+  // re-importing an overlapping date range (or a report with repeated rows,
+  // which StockNetwork's export sometimes has) updates the same record
+  // instead of creating a duplicate.
+  const transactionsStore = getStore({ name: "stocknetwork-transactions", consistency: "strong" });
   const DEFAULT_HOOK_COUNT = 6;
 
   async function verifyToken(token) {
@@ -235,6 +256,9 @@ export default async (request, context) => {
             hook: n,
             booking: (rec && rec.booking) || "",
             landing: (rec && rec.landing) || "",
+            caption: (rec && rec.caption) || "",
+            hashtags: (rec && rec.hashtags) || null,
+            galleryCount: (rec && rec.galleryCount) || 0,
             updatedAt: (rec && rec.updatedAt) || null,
           });
         }
@@ -244,6 +268,55 @@ export default async (request, context) => {
       if (resource === "whatsappLog") {
         const list = (await whatsappLogStore.get("recent", { type: "json" })) || [];
         return json({ ok: true, entries: list }, 200, cors);
+      }
+
+      if (resource === "bookingStats") {
+        const { blobs: affBlobs } = await directoryStore.list();
+        const affiliatesById = {};
+        for (const b of affBlobs) {
+          const rec = await directoryStore.get(b.key, { type: "json" });
+          if (rec) affiliatesById[rec.affId] = rec;
+        }
+
+        const { blobs: txBlobs } = await transactionsStore.list();
+        const records = [];
+        for (const b of txBlobs) {
+          const rec = await transactionsStore.get(b.key, { type: "json" });
+          if (rec) records.push(rec);
+        }
+
+        const periods = periodBounds();
+        const stats = aggregateTransactions(records, periods);
+
+        const leaderboard = {};
+        for (const p of Object.keys(stats)) {
+          leaderboard[p] = {};
+          for (const ch of Object.keys(stats[p])) {
+            leaderboard[p][ch] = buildLeaderboard(stats[p][ch], affiliatesById);
+          }
+        }
+
+        const affiliateNames = {};
+        for (const affId of Object.keys(affiliatesById)) {
+          affiliateNames[affId] = affiliatesById[affId].name || affId;
+        }
+
+        return json(
+          {
+            ok: true,
+            periods: periods,
+            channels: STATS_CHANNEL_KEYS,
+            stats: stats,
+            leaderboard: leaderboard,
+            affiliateNames: affiliateNames,
+            affiliateSiteNr: Object.fromEntries(
+              Object.keys(affiliatesById).map((id) => [id, affiliatesById[id].siteNr || ""])
+            ),
+            transactionCount: records.length,
+          },
+          200,
+          cors
+        );
       }
 
       return json({ ok: false, error: "unknown resource" }, 400, cors);
@@ -378,14 +451,14 @@ export default async (request, context) => {
       }
 
       // Affiliates can choose (in the WhatsApp Messaging tab) to only be
-      // notified for "request" bookings, only "booked" ones, or both.
-      // Affiliates set up before this control existed have no
-      // whatsappNotifyOn field, which is treated as "notify on everything"
-      // so nothing that already worked silently stops working.
+      // notified for "request" bookings, "booked" ones, "confirmed" ones,
+      // or any combination. Affiliates set up before this control existed
+      // have no whatsappNotifyOn field, which is treated as "notify on
+      // everything" so nothing that already worked silently stops working.
       const notifyOn =
         matched && Array.isArray(matched.whatsappNotifyOn) && matched.whatsappNotifyOn.length
           ? matched.whatsappNotifyOn
-          : ["request", "booked"];
+          : ["request", "booked", "confirmed"];
 
       if (matched && bookingStatus !== "unknown" && !notifyOn.includes(bookingStatus)) {
         context.waitUntil(
@@ -454,6 +527,127 @@ export default async (request, context) => {
       );
 
       return json(result, 200, cors);
+    }
+
+    if (action === "importStockNetworkReport") {
+      // Called either from a logged-in admin browser session (the Bookings
+      // tab's "Upload Report" button) or from the daily Gmail-report import
+      // pipeline, which has no live browser session — so, like
+      // sendBookingWhatsapp above, it may authenticate with a shared secret
+      // instead of a session token. STOCKNETWORK_IMPORT_KEY was provisioned
+      // 2026-09-06 — this comment exists mainly to force a fresh deploy, so
+      // Edge Functions actually pick up that new env var (they don't reload
+      // one on an existing deploy without a redeploy).
+      const importKey = typeof body.importKey === "string" ? body.importKey : "";
+      const expectedImportKey = Deno.env.get("STOCKNETWORK_IMPORT_KEY") || "";
+      const viaSharedKey = !!expectedImportKey && importKey === expectedImportKey;
+      const viaSession = !viaSharedKey && (await verifyToken(body.token));
+      if (!viaSharedKey && !viaSession) {
+        return json({ ok: false, error: "Not authorized." }, 401, cors);
+      }
+
+      const csvText = typeof body.csvText === "string" ? body.csvText : "";
+      if (!csvText.trim()) return json({ ok: false, error: "No CSV content received." }, 400, cors);
+      const sourceLabel = typeof body.sourceLabel === "string" ? body.sourceLabel.trim().slice(0, 200) : "";
+      // Only the accommodation report exists so far — see CHANNEL_KEYS /
+      // STATS_CHANNEL_KEYS for the other channels this same pipeline will
+      // handle once their own StockNetwork exports are available.
+      const channel = STATS_CHANNEL_KEYS.includes(body.channel) ? body.channel : "accommodation";
+
+      const rows = parseStockNetworkCsv(csvText);
+      if (!rows.length) {
+        return json({ ok: false, error: "Couldn't find any booking rows in that file." }, 400, cors);
+      }
+
+      // Site Nr -> affiliate lookup, built once per import.
+      const { blobs: affBlobs } = await directoryStore.list();
+      const siteToAff = {};
+      for (const b of affBlobs) {
+        const rec = await directoryStore.get(b.key, { type: "json" });
+        if (rec && rec.siteNr) siteToAff[String(rec.siteNr).trim()] = rec;
+      }
+
+      let created = 0;
+      let updated = 0;
+      let unchanged = 0;
+      let unmatchedSite = 0;
+      let skippedNoRef = 0;
+      const seenInFile = new Set();
+
+      for (const row of rows) {
+        const refNo = (row.RefNo || "").trim();
+        if (!refNo) {
+          skippedNoRef++;
+          continue;
+        }
+        // StockNetwork's export sometimes repeats the exact same row more
+        // than once within a single file — collapse those here rather than
+        // writing the same transaction three times in a row.
+        if (seenInFile.has(refNo)) continue;
+        seenInFile.add(refNo);
+
+        const site = (row.Site || "").trim();
+        const aff = siteToAff[site];
+        if (!aff) {
+          unmatchedSite++;
+          continue;
+        }
+
+        const status = normalizeStockNetworkStatus(row.Name, row["Confirmed On"]);
+        const record = {
+          refNo: refNo,
+          channel: channel,
+          site: site,
+          affId: aff.affId,
+          status: status,
+          amountIncl: parseMoney(row["Total Amount Incl."]),
+          currency: row.Currency || "ZAR",
+          transactionDate: parseUsDateToYmd(row["Transaction Date"]),
+          confirmedOn: parseUsDateToYmd(row["Confirmed On"]),
+          guestName: row.Fullname || "",
+          guestEmail: row.EmailAddress || "",
+          resortName: row["Resort Name"] || "",
+          unitType: row["Unit Type"] || "",
+          checkIn: parseUsDateToYmd(row["Check In Date"]),
+          checkOut: parseUsDateToYmd(row["Check Out Date"]),
+          nights: Number(row.Nights) || 0,
+          companyName: row.CompanyName || "",
+          customerReference: row.CustomerReference || "",
+          sourceLabel: sourceLabel,
+          importedAt: new Date().toISOString(),
+        };
+
+        const existing = await transactionsStore.get(refNo, { type: "json" });
+        if (existing) {
+          record.firstImportedAt = existing.firstImportedAt || existing.importedAt;
+          const changed =
+            existing.status !== record.status ||
+            existing.amountIncl !== record.amountIncl ||
+            existing.confirmedOn !== record.confirmedOn;
+          if (changed) updated++;
+          else unchanged++;
+        } else {
+          record.firstImportedAt = record.importedAt;
+          created++;
+        }
+        await transactionsStore.setJSON(refNo, record);
+      }
+
+      return json(
+        {
+          ok: true,
+          summary: {
+            totalRows: rows.length,
+            created: created,
+            updated: updated,
+            unchanged: unchanged,
+            unmatchedSite: unmatchedSite,
+            skippedNoRef: skippedNoRef,
+          },
+        },
+        200,
+        cors
+      );
     }
 
     // Every other action requires a valid session token.
@@ -541,8 +735,8 @@ export default async (request, context) => {
       existing.bookingEmailAlias = sanitizeAlias_(body.bookingEmailAlias || "");
       existing.whatsappGroupId = typeof body.whatsappGroupId === "string" ? body.whatsappGroupId.trim() : "";
       if (Array.isArray(body.notifyOn)) {
-        const cleaned = body.notifyOn.filter((s) => s === "request" || s === "booked");
-        existing.whatsappNotifyOn = cleaned.length ? cleaned : ["request", "booked"];
+        const cleaned = body.notifyOn.filter((s) => s === "request" || s === "booked" || s === "confirmed");
+        existing.whatsappNotifyOn = cleaned.length ? cleaned : ["request", "booked", "confirmed"];
       } else if (!Array.isArray(existing.whatsappNotifyOn) || !existing.whatsappNotifyOn.length) {
         existing.whatsappNotifyOn = ["request", "booked"];
       }
@@ -578,6 +772,165 @@ export default async (request, context) => {
       return json({ ok: send.ok, status: send.status, detail: send.body }, send.ok ? 200 : 502, cors);
     }
 
+    if (action === "generateHookDraft") {
+      // Builds a hook's caption + hashtags + candidate photos + booking
+      // link from just a property or an area — nothing is saved here, this
+      // only returns a draft for the admin to review and (optionally) hand
+      // to setDefaultHook below. The existing manual fields/flow are
+      // completely untouched by this action; it's purely an added option
+      // that pre-fills the same fields a manual save already uses.
+      // A single free-text field drives this — the admin never has to say
+      // "this is a property" vs "this is an area" up front. If the client
+      // already resolved an exact resortId (e.g. the admin picked one from
+      // the datalist), that's used directly; otherwise the query is
+      // resolved server-side against the resort list: an exact or partial
+      // property-name match wins first, and only falls back to a
+      // district/area match if nothing named that was found.
+      const bodyResortId = typeof body.resortId === "string" ? body.resortId.trim() : "";
+      const bodySiteId = typeof body.siteId === "string" ? body.siteId.trim() : "";
+      const query = typeof body.query === "string" ? body.query.trim() : "";
+      if (!bodyResortId && !query) {
+        return json({ ok: false, error: "Type or pick a property or area first." }, 400, cors);
+      }
+
+      let mode = "property";
+      let label = query;
+      let sources = [];
+
+      if (bodyResortId) {
+        const info = await fetchResortInfo(bodyResortId, bodySiteId);
+        if (!info) {
+          return json(
+            { ok: false, error: "Couldn't load that property's info page. Try again, or pick a different one." },
+            502,
+            cors
+          );
+        }
+        sources = [info];
+        label = info.name || label;
+      } else {
+        const listRecord = await resortStore.get("current", { type: "json" });
+        const allResorts = listRecord && Array.isArray(listRecord.resorts) ? listRecord.resorts : [];
+        const queryLower = query.toLowerCase();
+
+        let propertyMatch = allResorts.find((r) => r.name && r.name.toLowerCase() === queryLower);
+        // Only fall back to a loose "name contains this text" match if there
+        // isn't an exact area match available. Without this check, typing an
+        // area name like "Knysna" could wrongly match a property whose name
+        // happens to contain that word (e.g. "63 Milkwood Knysna") instead
+        // of correctly building an area-wide draft — confirmed live before
+        // this fix shipped.
+        if (!propertyMatch) {
+          const hasExactDistrictMatch = allResorts.some(
+            (r) => r.district && r.district.toLowerCase() === queryLower
+          );
+          if (!hasExactDistrictMatch) {
+            propertyMatch = allResorts.find((r) => r.name && r.name.toLowerCase().includes(queryLower));
+          }
+        }
+
+        if (propertyMatch) {
+          label = propertyMatch.name;
+          const info = await fetchResortInfo(propertyMatch.resortId, propertyMatch.siteId);
+          if (!info) {
+            return json(
+              { ok: false, error: "Couldn't load that property's info page. Try again, or pick a different one." },
+              502,
+              cors
+            );
+          }
+          sources = [info];
+        } else {
+          mode = "area";
+          let matches = allResorts.filter((r) => r.district && r.district.toLowerCase() === queryLower);
+          if (!matches.length) {
+            matches = allResorts.filter((r) => r.district && r.district.toLowerCase().includes(queryLower));
+          }
+          if (!matches.length) {
+            return json(
+              { ok: false, error: 'Couldn\'t find a property or area matching "' + query + '" in the resort list.' },
+              404,
+              cors
+            );
+          }
+
+          // StockNetwork lists the same physical resort under multiple
+          // SiteIDs — dedupe by ResortID so an area draft draws on distinct
+          // properties, not the same one three times.
+          const seenResortIds = new Set();
+          const distinct = [];
+          for (const r of matches) {
+            if (!r.resortId || seenResortIds.has(r.resortId)) continue;
+            seenResortIds.add(r.resortId);
+            distinct.push(r);
+            if (distinct.length >= 5) break;
+          }
+
+          const fetched = await Promise.all(distinct.map((r) => fetchResortInfo(r.resortId, r.siteId)));
+          sources = fetched.filter(Boolean);
+          if (!sources.length) {
+            return json(
+              { ok: false, error: "Couldn't load property info for that area right now. Try again shortly." },
+              502,
+              cors
+            );
+          }
+        }
+      }
+
+      const caption = await draftHookCaption({ mode: mode, label: label, sources: sources });
+      // Reuses the exact same hashtag generator setDefaultHook already
+      // calls — hashtags stay consistent no matter how the caption got
+      // written.
+      const hashtags = caption ? await generateHashtags(caption) : null;
+
+      // Pool candidate photos across every source, deduped, capped at 12 —
+      // real StockNetwork listing photography, not stock images.
+      const photos = [];
+      outer: for (const s of sources) {
+        for (const url of s.images) {
+          if (!photos.includes(url)) photos.push(url);
+          if (photos.length >= 12) break outer;
+        }
+      }
+
+      // Matches the admin's own existing default-hook booking-link
+      // convention (see hooks #4/#5 already saved this way): a link built
+      // off the "Affiliate 36" placeholder — 36 being Jean's own master
+      // StockNetwork site number — which hook-api.js's
+      // personalizeStockNetworkUrl already swaps for whichever affiliate
+      // is actually viewing the hook. Dates default the same way the
+      // Accommodation Link Builder does: check-in tomorrow, 3 nights.
+      const today = new Date();
+      const checkIn = new Date(today.getTime() + 86400000);
+      const checkOut = new Date(today.getTime() + 4 * 86400000);
+      const fmtDate = (d) => d.toISOString().slice(0, 10);
+      const bookingParams = new URLSearchParams({
+        CheckInDT: fmtDate(checkIn),
+        CheckOutDT: fmtDate(checkOut),
+        Filter: label,
+      });
+      const booking =
+        "https://stock.stocknetwork.co.za/ui/" + encodeURIComponent("Affiliate 36") + "?" + bookingParams.toString();
+
+      return json(
+        {
+          ok: true,
+          mode: mode,
+          label: label,
+          caption: caption || "",
+          captionGenerated: !!caption,
+          hashtags: hashtags,
+          booking: booking,
+          photos: photos,
+          sourceCount: sources.length,
+          sourceNames: sources.map((s) => s.name).filter(Boolean),
+        },
+        200,
+        cors
+      );
+    }
+
     if (action === "setDefaultHook") {
       const n = Number(body.hook);
       if (!isFinite(n) || n < 1 || n > DEFAULT_HOOK_COUNT) {
@@ -585,9 +938,88 @@ export default async (request, context) => {
       }
       const booking = typeof body.booking === "string" ? body.booking.trim() : "";
       const landing = typeof body.landing === "string" ? body.landing.trim() : "";
-      const record = { booking: booking, landing: landing, updatedAt: new Date().toISOString() };
+      const caption = typeof body.caption === "string" ? body.caption.trim() : "";
+      // Regenerate platform hashtags whenever the default hook is saved.
+      // Best-effort: a failed/unavailable AI call just clears the cached
+      // set rather than blocking the save.
+      const hashtags = await generateHashtags(caption);
+      // Preserve galleryCount across a manual save — it's set by
+      // saveHookPhotos below (Auto-build's photo picker), not by this form,
+      // so a normal caption/link edit here must not silently wipe out an
+      // already-saved gallery.
+      const existingForSave = await hookStore.get("__admin__:" + n, { type: "json" });
+      const record = {
+        booking: booking,
+        landing: landing,
+        caption: caption,
+        hashtags: hashtags,
+        galleryCount: (existingForSave && existingForSave.galleryCount) || 0,
+        updatedAt: new Date().toISOString(),
+      };
       await hookStore.setJSON("__admin__:" + n, record);
       return json({ ok: true, hook: n, record: record }, 200, cors);
+    }
+
+    if (action === "saveHookPhotos") {
+      // Transfers admin-picked candidate photos (real StockNetwork listing
+      // URLs returned by generateHookDraft) into our own image store, so a
+      // hook's photos keep working even if StockNetwork later reshuffles or
+      // removes that listing. The first picked photo becomes the hook's
+      // normal single "cover" image — the exact same bare aff:hook key
+      // hook-image.js and every existing display path already use, so a
+      // hook saved this way looks no different to old code than one whose
+      // cover photo was uploaded manually. Any additional photos go into
+      // new, purely additive numbered slots that only the gallery-aware UI
+      // reads — nothing about the existing single-image flow changes.
+      const n = Number(body.hook);
+      if (!isFinite(n) || n < 1 || n > DEFAULT_HOOK_COUNT) {
+        return json({ ok: false, error: "invalid hook number" }, 400, cors);
+      }
+      const urls = Array.isArray(body.urls)
+        ? body.urls.filter((u) => typeof u === "string" && u.trim()).slice(0, 6)
+        : [];
+      if (!urls.length) return json({ ok: false, error: "No photos selected." }, 400, cors);
+
+      const imageStore = getStore({ name: "promo-hook-images", consistency: "strong" });
+      let saved = 0;
+      const failed = [];
+      for (let i = 0; i < urls.length; i++) {
+        const url = urls[i].trim();
+        try {
+          const res = await fetch(url);
+          if (!res.ok) {
+            failed.push(url);
+            continue;
+          }
+          const contentType = res.headers.get("content-type") || "image/jpeg";
+          if (!contentType.startsWith("image/")) {
+            failed.push(url);
+            continue;
+          }
+          const buf = await res.arrayBuffer();
+          if (buf.byteLength > 5 * 1024 * 1024 || buf.byteLength < 1) {
+            failed.push(url);
+            continue;
+          }
+          const key = i === 0 ? "__admin__:" + n : "__admin__:" + n + ":" + i;
+          await imageStore.set(key, buf, { metadata: { contentType: contentType, sourceUrl: url } });
+          saved++;
+        } catch (e) {
+          failed.push(url);
+        }
+      }
+
+      const galleryCount = Math.max(0, saved - 1);
+      const existing = (await hookStore.get("__admin__:" + n, { type: "json" })) || {};
+      existing.galleryCount = galleryCount;
+      existing.updatedAt = new Date().toISOString();
+      await hookStore.setJSON("__admin__:" + n, existing);
+
+      return json(
+        { ok: saved > 0, saved: saved, failed: failed.length, galleryCount: galleryCount },
+        saved > 0 ? 200 : 502,
+        cors
+      );
     }
 
     if (action === "deleteAffiliate") {
