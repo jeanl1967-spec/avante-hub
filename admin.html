@@ -559,6 +559,7 @@
       <button class="tab" data-panel="defaultHooks">Default Hooks</button>
       <button class="tab" data-panel="payouts">Payouts</button>
       <button class="tab" data-panel="leaderboard">Leaderboard</button>
+      <button class="tab" data-panel="bookings">Bookings</button>
       <button class="tab" data-panel="whatsapp">WhatsApp Messaging</button>
       <button class="tab" data-panel="propertyListings">Property Listings</button>
       <button class="tab" data-panel="tutorial">How Payouts Work</button>
@@ -718,6 +719,74 @@
             </table>
           </div>
           <div class="empty-state" id="leaderboardEmpty" style="display:none;">No affiliates added yet — add some on the Affiliates tab first.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== BOOKINGS ===================== -->
+    <section class="panel" id="panel-bookings">
+      <div class="hero">
+        <h1>Bookings</h1>
+        <p>Import StockNetwork's booking report, then see each affiliate's transaction counts and values — by category, and across all categories combined — plus who's leading the leaderboard on confirmed (paid) bookings.</p>
+      </div>
+
+      <div class="card">
+        <h2 style="margin-top:0;">Import Report</h2>
+        <p style="color:var(--muted); margin-top:-8px;">Upload the "Reservation Detail Listing" CSV exported from StockNetwork's Reports page. Re-uploading a date range that overlaps an earlier import is safe — matching bookings (by StockNetwork's own reference number) are updated in place, never duplicated.</p>
+        <input type="file" id="bookingsCsvInput" accept=".csv" />
+        <button class="btn-primary" id="bookingsUploadBtn" style="margin-left:10px;">Upload Report</button>
+        <div id="bookingsUploadStatus" style="margin-top:12px; font-size:14px;"></div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div style="display:flex; gap:20px; flex-wrap:wrap; align-items:flex-end;">
+          <div>
+            <label for="bookingsChannel">Category</label>
+            <select id="bookingsChannel">
+              <option value="all">All Categories</option>
+              <option value="accommodation">Accommodation</option>
+              <option value="flights">Flights</option>
+              <option value="activities">Activities</option>
+              <option value="car">Car Hire</option>
+              <option value="package">Packages</option>
+            </select>
+          </div>
+          <div>
+            <label for="bookingsPeriod">Period</label>
+            <select id="bookingsPeriod">
+              <option value="mtd">Month to Date</option>
+              <option value="prevMonth">Previous Month</option>
+              <option value="ytd">Year to Date</option>
+            </select>
+          </div>
+          <div id="bookingsPeriodRange" style="color:var(--muted); font-size:13px; padding-bottom:8px;"></div>
+        </div>
+
+        <div style="margin-top:20px;">
+          <h3 style="margin-bottom:8px;">Leaderboard — Confirmed Bookings</h3>
+          <p style="color:var(--muted); margin-top:-4px; font-size:13px;">Ranked on confirmed (paid) bookings only. Affiliate 36 (the master/admin account) is tracked but never ranked here.</p>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Rank</th><th>Affiliate</th><th># Confirmed</th><th>Value</th></tr>
+              </thead>
+              <tbody id="bookingsLeaderboardBody"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="bookingsLeaderboardEmpty" style="display:none;">No confirmed bookings in this category/period yet.</div>
+        </div>
+
+        <div style="margin-top:28px;">
+          <h3 style="margin-bottom:8px;">All Affiliates — Full Breakdown</h3>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Affiliate</th><th>Request</th><th>Booked</th><th>Cancelled</th><th>Confirmed</th></tr>
+              </thead>
+              <tbody id="bookingsBreakdownBody"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="bookingsBreakdownEmpty" style="display:none;">No affiliates added yet — add some on the Affiliates tab first.</div>
         </div>
       </div>
     </section>
@@ -973,6 +1042,10 @@
           if(affiliatesCache.length) renderWhatsappTable();
           else loadAffiliates().then(renderWhatsappTable);
           loadWhatsappLog();
+        }
+        if(btn.dataset.panel === 'bookings'){
+          var ensureAff = affiliatesCache.length ? Promise.resolve() : loadAffiliates();
+          ensureAff.then(loadBookingStats).then(renderBookingsPanel);
         }
       });
     });
@@ -1410,6 +1483,114 @@
         body.appendChild(tr);
       });
     }
+
+    // ---------- Bookings (StockNetwork import + leaderboard/breakdown) ----------
+    var bookingStatsCache = null;
+
+    function loadBookingStats(){
+      return adminGet('bookingStats').then(function(data){
+        bookingStatsCache = (data && data.ok) ? data : null;
+      });
+    }
+
+    var STATUS_COLS = ['request', 'booked', 'cancelled', 'confirmed'];
+
+    function statCell(bucket){
+      if(!bucket || !bucket.count) return '—';
+      return bucket.count + ' · ' + money(bucket.value);
+    }
+
+    function renderBookingsPanel(){
+      var lbBody = document.getElementById('bookingsLeaderboardBody');
+      var lbEmpty = document.getElementById('bookingsLeaderboardEmpty');
+      var bdBody = document.getElementById('bookingsBreakdownBody');
+      var bdEmpty = document.getElementById('bookingsBreakdownEmpty');
+      var rangeEl = document.getElementById('bookingsPeriodRange');
+      lbBody.innerHTML = '';
+      bdBody.innerHTML = '';
+
+      if(!bookingStatsCache){
+        lbEmpty.style.display = 'block';
+        bdEmpty.style.display = affiliatesCache.length ? 'none' : 'block';
+        rangeEl.textContent = '';
+        return;
+      }
+
+      var channel = document.getElementById('bookingsChannel').value || 'all';
+      var period = document.getElementById('bookingsPeriod').value || 'mtd';
+      var bounds = bookingStatsCache.periods[period];
+      rangeEl.textContent = bounds ? (bounds.start + ' to ' + bounds.end) : '';
+
+      var channelStats = (bookingStatsCache.stats[period] && bookingStatsCache.stats[period][channel]) || {};
+      var lb = (bookingStatsCache.leaderboard[period] && bookingStatsCache.leaderboard[period][channel]) || { byValue: [] };
+
+      if(!lb.byValue.length){
+        lbEmpty.style.display = 'block';
+      } else {
+        lbEmpty.style.display = 'none';
+        lb.byValue.forEach(function(r){
+          var tr = document.createElement('tr');
+          var tdRank = document.createElement('td');
+          tdRank.textContent = '#' + r.rankByValue;
+          tdRank.style.fontWeight = '800';
+          tdRank.style.color = r.rankByValue === 1 ? 'var(--teal-dark)' : 'var(--navy)';
+          var tdName = document.createElement('td'); tdName.textContent = r.name;
+          var tdCount = document.createElement('td'); tdCount.textContent = r.count;
+          var tdValue = document.createElement('td'); tdValue.textContent = money(r.value); tdValue.style.fontWeight = '700';
+          tr.appendChild(tdRank); tr.appendChild(tdName); tr.appendChild(tdCount); tr.appendChild(tdValue);
+          lbBody.appendChild(tr);
+        });
+      }
+
+      if(!affiliatesCache.length){
+        bdEmpty.style.display = 'block';
+      } else {
+        bdEmpty.style.display = 'none';
+        affiliatesCache.forEach(function(a){
+          var byStatus = channelStats[a.affId];
+          var tr = document.createElement('tr');
+          var tdName = document.createElement('td');
+          tdName.textContent = a.name || a.affId;
+          if(String(a.siteNr) === '36'){ tdName.textContent += ' (master — not ranked)'; }
+          tr.appendChild(tdName);
+          STATUS_COLS.forEach(function(s){
+            var td = document.createElement('td');
+            td.textContent = statCell(byStatus && byStatus[s]);
+            tr.appendChild(td);
+          });
+          bdBody.appendChild(tr);
+        });
+      }
+    }
+
+    document.getElementById('bookingsChannel').addEventListener('change', renderBookingsPanel);
+    document.getElementById('bookingsPeriod').addEventListener('change', renderBookingsPanel);
+
+    document.getElementById('bookingsUploadBtn').addEventListener('click', function(){
+      var input = document.getElementById('bookingsCsvInput');
+      var statusEl = document.getElementById('bookingsUploadStatus');
+      var file = input.files && input.files[0];
+      if(!file){ statusEl.textContent = 'Choose a CSV file first.'; return; }
+      statusEl.textContent = 'Uploading…';
+      var reader = new FileReader();
+      reader.onload = function(){
+        adminPost('importStockNetworkReport', { csvText: reader.result, sourceLabel: file.name, channel: 'accommodation' })
+          .then(function(res){
+            if(!res.data || !res.data.ok){
+              statusEl.textContent = 'Import failed: ' + ((res.data && res.data.error) || 'unknown error');
+              return;
+            }
+            var s = res.data.summary;
+            statusEl.textContent = 'Imported ' + file.name + ': ' + s.created + ' new, ' + s.updated + ' updated, ' +
+              s.unchanged + ' unchanged, ' + s.unmatchedSite + ' skipped (no matching affiliate site).';
+            input.value = '';
+            loadBookingStats().then(renderBookingsPanel);
+          })
+          .catch(function(){ statusEl.textContent = 'Import failed — please try again.'; });
+      };
+      reader.onerror = function(){ statusEl.textContent = 'Could not read that file.'; };
+      reader.readAsText(file);
+    });
 
     // ---------- Add / Edit affiliate modal ----------
     var editingAffId = null;
