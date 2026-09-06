@@ -528,7 +528,10 @@ export default async (request, context) => {
       // tab's "Upload Report" button) or from the daily Gmail-report import
       // pipeline, which has no live browser session — so, like
       // sendBookingWhatsapp above, it may authenticate with a shared secret
-      // instead of a session token.
+      // instead of a session token. STOCKNETWORK_IMPORT_KEY was provisioned
+      // 2026-09-06 — this comment exists mainly to force a fresh deploy, so
+      // Edge Functions actually pick up that new env var (they don't reload
+      // one on an existing deploy without a redeploy).
       const importKey = typeof body.importKey === "string" ? body.importKey : "";
       const expectedImportKey = Deno.env.get("STOCKNETWORK_IMPORT_KEY") || "";
       const viaSharedKey = !!expectedImportKey && importKey === expectedImportKey;
