@@ -896,6 +896,7 @@
     <div class="brand">AVANTE<span>TRAVEL &middot; AFFILIATE HUB</span></div>
     <nav class="tabs" id="tabs">
       <button class="tab active" data-panel="home">Home</button>
+      <button class="tab" data-panel="dashboard">My Dashboard</button>
       <button class="tab" data-panel="marketing">Affiliate Marketing</button>
       <button class="tab" data-panel="accom">Accommodation Link Builder</button>
       <button class="tab" data-panel="package">Build Your Package</button>
@@ -1024,6 +1025,40 @@
     </section>
 
     <!-- ===================== AFFILIATE MARKETING (promo hooks + storefront) ===================== -->
+    <!-- ===================== MY DASHBOARD ===================== -->
+    <section class="panel" id="panel-dashboard">
+      <div class="hero">
+        <h1>My Dashboard</h1>
+        <p>Your booking activity and where you currently stand on the leaderboard</p>
+      </div>
+      <div class="card">
+        <div style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end; margin-bottom:18px;">
+          <div>
+            <label for="dash-channel">Category</label>
+            <select id="dash-channel">
+              <option value="all">All Categories</option>
+              <option value="accommodation">Accommodation</option>
+              <option value="flights">Flights</option>
+              <option value="activities">Activities</option>
+              <option value="car">Car Hire</option>
+              <option value="package">Packages</option>
+            </select>
+          </div>
+          <div>
+            <label for="dash-period">Period</label>
+            <select id="dash-period">
+              <option value="mtd">Month to Date</option>
+              <option value="prevMonth">Previous Month</option>
+              <option value="ytd">Year to Date</option>
+            </select>
+          </div>
+        </div>
+        <div class="status" id="dash-status"></div>
+        <div id="dash-rank"></div>
+        <div id="dash-breakdown" style="margin-top:10px;"></div>
+      </div>
+    </section>
+
     <section class="panel" id="panel-marketing">
       <div class="hero">
         <h1>Affiliate Marketing</h1>
@@ -1933,6 +1968,109 @@
         document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
       });
     });
+
+    // ---------- My Dashboard ----------
+    (function(){
+      var channelSel = document.getElementById('dash-channel');
+      var periodSel = document.getElementById('dash-period');
+      var statusEl = document.getElementById('dash-status');
+      var rankEl = document.getElementById('dash-rank');
+      var breakdownEl = document.getElementById('dash-breakdown');
+      if(!channelSel) return;
+
+      var STATUS_LABELS = { request: 'Request', booked: 'Booked', cancelled: 'Cancelled', confirmed: 'Confirmed' };
+      var STATUS_ORDER = ['request', 'booked', 'cancelled', 'confirmed'];
+
+      function dashMoney(n){
+        n = Number(n) || 0;
+        return 'R' + n.toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+      }
+
+      var dashCache = null;
+      var loaded = false;
+
+      function render(){
+        if(!dashCache) return;
+        var channel = channelSel.value || 'all';
+        var period = periodSel.value || 'mtd';
+        var bounds = dashCache.periods[period];
+
+        var emptyStatus = { request:{count:0,value:0}, booked:{count:0,value:0}, cancelled:{count:0,value:0}, confirmed:{count:0,value:0} };
+        var byStatus = (dashCache.myStats[period] && dashCache.myStats[period][channel]) || emptyStatus;
+        var rank = (dashCache.myRank[period] && dashCache.myRank[period][channel]) || { byCount: null, byValue: null };
+
+        var rangeText = bounds ? (bounds.start + ' to ' + bounds.end) : '';
+
+        var rankHtml;
+        if(dashCache.excludedFromLeaderboard){
+          rankHtml = '<div style="color:var(--muted); font-size:13.5px;">This is your master/admin account, so it isn\'t ranked on the leaderboard.</div>';
+        } else if(!rank.byValue){
+          rankHtml = '<div style="color:var(--muted); font-size:13.5px;">No confirmed bookings in this category/period yet — your leaderboard position shows up here as soon as you have one.</div>';
+        } else {
+          rankHtml =
+            '<div style="display:flex; gap:28px; flex-wrap:wrap; margin-bottom:8px;">' +
+              '<div><div style="font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em;">Rank by value</div>' +
+                '<div style="font-size:22px; font-weight:800; color:var(--teal-dark);">#' + rank.byValue.rank +
+                  ' <span style="font-size:14px; font-weight:600; color:var(--muted);">of ' + rank.byValue.of + '</span></div></div>' +
+              '<div><div style="font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em;">Rank by bookings</div>' +
+                '<div style="font-size:22px; font-weight:800; color:var(--navy);">#' + (rank.byCount ? rank.byCount.rank : '—') +
+                  ' <span style="font-size:14px; font-weight:600; color:var(--muted);">of ' + (rank.byCount ? rank.byCount.of : '—') + '</span></div></div>' +
+            '</div>';
+        }
+        rankEl.innerHTML = rankHtml;
+
+        breakdownEl.innerHTML = STATUS_ORDER.map(function(s){
+          var b = byStatus[s] || { count: 0, value: 0 };
+          return '<div style="display:flex; justify-content:space-between; align-items:center; gap:14px; padding:10px 0; border-bottom:1px solid var(--line); font-size:13.5px;">' +
+            '<span style="color:var(--navy); font-weight:600;">' + STATUS_LABELS[s] + '</span>' +
+            '<span style="color:var(--muted);">' + b.count + ' booking' + (b.count === 1 ? '' : 's') + '</span>' +
+            '<span style="color:var(--teal-dark); font-weight:700;">' + dashMoney(b.value) + '</span>' +
+            '</div>';
+        }).join('') + (rangeText ? '<div class="hint" style="margin-top:8px;">Showing ' + rangeText + '</div>' : '');
+      }
+
+      function load(){
+        if(!AFF_ID){
+          statusEl.textContent = 'Open the Hub using your personal affiliate link to see your dashboard.';
+          statusEl.className = 'status show';
+          return;
+        }
+        statusEl.textContent = 'Loading…';
+        statusEl.className = 'status show';
+        fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'getMyBookingStats', aff: AFF_ID })
+        })
+          .then(function(r){ return r.json(); })
+          .then(function(data){
+            if(!data || !data.ok){
+              statusEl.textContent = (data && data.error) || 'Could not load your dashboard right now.';
+              statusEl.className = 'status show';
+              return;
+            }
+            statusEl.textContent = '';
+            statusEl.className = 'status';
+            dashCache = data;
+            loaded = true;
+            render();
+          })
+          .catch(function(){
+            statusEl.textContent = 'Could not load your dashboard right now — try refreshing.';
+            statusEl.className = 'status show';
+          });
+      }
+
+      channelSel.addEventListener('change', render);
+      periodSel.addEventListener('change', render);
+
+      var dashTab = document.querySelector('.tab[data-panel="dashboard"]');
+      if(dashTab){
+        dashTab.addEventListener('click', function(){
+          if(!loaded) load(); else render();
+        });
+      }
+    })();
 
     var goToMarketingBtn = document.getElementById('goToMarketingBtn');
     if(goToMarketingBtn){

@@ -1,5 +1,15 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
+import {
+  parseStockNetworkCsv,
+  normalizeStockNetworkStatus,
+  parseMoney,
+  parseUsDateToYmd,
+  periodBounds,
+  aggregateTransactions,
+  buildLeaderboard,
+  CHANNEL_KEYS as STATS_CHANNEL_KEYS,
+} from "./lib/booking-stats.js";
 
 // No hardcoded default password on purpose — this repo is public, so a
 // baked-in default would be visible to anyone who reads the source. Instead
@@ -181,6 +191,11 @@ export default async (request, context) => {
   const payoutStore = getStore({ name: "affiliate-payouts", consistency: "strong" });
   const hookStore = getStore({ name: "promo-hooks", consistency: "strong" });
   const whatsappLogStore = getStore({ name: "whatsapp-log", consistency: "strong" });
+  // One blob per imported booking, keyed by StockNetwork's RefNo, so
+  // re-importing an overlapping date range (or a report with repeated rows,
+  // which StockNetwork's export sometimes has) updates the same record
+  // instead of creating a duplicate.
+  const transactionsStore = getStore({ name: "stocknetwork-transactions", consistency: "strong" });
   const DEFAULT_HOOK_COUNT = 6;
 
   async function verifyToken(token) {
@@ -247,6 +262,55 @@ export default async (request, context) => {
       if (resource === "whatsappLog") {
         const list = (await whatsappLogStore.get("recent", { type: "json" })) || [];
         return json({ ok: true, entries: list }, 200, cors);
+      }
+
+      if (resource === "bookingStats") {
+        const { blobs: affBlobs } = await directoryStore.list();
+        const affiliatesById = {};
+        for (const b of affBlobs) {
+          const rec = await directoryStore.get(b.key, { type: "json" });
+          if (rec) affiliatesById[rec.affId] = rec;
+        }
+
+        const { blobs: txBlobs } = await transactionsStore.list();
+        const records = [];
+        for (const b of txBlobs) {
+          const rec = await transactionsStore.get(b.key, { type: "json" });
+          if (rec) records.push(rec);
+        }
+
+        const periods = periodBounds();
+        const stats = aggregateTransactions(records, periods);
+
+        const leaderboard = {};
+        for (const p of Object.keys(stats)) {
+          leaderboard[p] = {};
+          for (const ch of Object.keys(stats[p])) {
+            leaderboard[p][ch] = buildLeaderboard(stats[p][ch], affiliatesById);
+          }
+        }
+
+        const affiliateNames = {};
+        for (const affId of Object.keys(affiliatesById)) {
+          affiliateNames[affId] = affiliatesById[affId].name || affId;
+        }
+
+        return json(
+          {
+            ok: true,
+            periods: periods,
+            channels: STATS_CHANNEL_KEYS,
+            stats: stats,
+            leaderboard: leaderboard,
+            affiliateNames: affiliateNames,
+            affiliateSiteNr: Object.fromEntries(
+              Object.keys(affiliatesById).map((id) => [id, affiliatesById[id].siteNr || ""])
+            ),
+            transactionCount: records.length,
+          },
+          200,
+          cors
+        );
       }
 
       return json({ ok: false, error: "unknown resource" }, 400, cors);
@@ -457,6 +521,124 @@ export default async (request, context) => {
       );
 
       return json(result, 200, cors);
+    }
+
+    if (action === "importStockNetworkReport") {
+      // Called either from a logged-in admin browser session (the Bookings
+      // tab's "Upload Report" button) or from the daily Gmail-report import
+      // pipeline, which has no live browser session — so, like
+      // sendBookingWhatsapp above, it may authenticate with a shared secret
+      // instead of a session token.
+      const importKey = typeof body.importKey === "string" ? body.importKey : "";
+      const expectedImportKey = Deno.env.get("STOCKNETWORK_IMPORT_KEY") || "";
+      const viaSharedKey = !!expectedImportKey && importKey === expectedImportKey;
+      const viaSession = !viaSharedKey && (await verifyToken(body.token));
+      if (!viaSharedKey && !viaSession) {
+        return json({ ok: false, error: "Not authorized." }, 401, cors);
+      }
+
+      const csvText = typeof body.csvText === "string" ? body.csvText : "";
+      if (!csvText.trim()) return json({ ok: false, error: "No CSV content received." }, 400, cors);
+      const sourceLabel = typeof body.sourceLabel === "string" ? body.sourceLabel.trim().slice(0, 200) : "";
+      // Only the accommodation report exists so far — see CHANNEL_KEYS /
+      // STATS_CHANNEL_KEYS for the other channels this same pipeline will
+      // handle once their own StockNetwork exports are available.
+      const channel = STATS_CHANNEL_KEYS.includes(body.channel) ? body.channel : "accommodation";
+
+      const rows = parseStockNetworkCsv(csvText);
+      if (!rows.length) {
+        return json({ ok: false, error: "Couldn't find any booking rows in that file." }, 400, cors);
+      }
+
+      // Site Nr -> affiliate lookup, built once per import.
+      const { blobs: affBlobs } = await directoryStore.list();
+      const siteToAff = {};
+      for (const b of affBlobs) {
+        const rec = await directoryStore.get(b.key, { type: "json" });
+        if (rec && rec.siteNr) siteToAff[String(rec.siteNr).trim()] = rec;
+      }
+
+      let created = 0;
+      let updated = 0;
+      let unchanged = 0;
+      let unmatchedSite = 0;
+      let skippedNoRef = 0;
+      const seenInFile = new Set();
+
+      for (const row of rows) {
+        const refNo = (row.RefNo || "").trim();
+        if (!refNo) {
+          skippedNoRef++;
+          continue;
+        }
+        // StockNetwork's export sometimes repeats the exact same row more
+        // than once within a single file — collapse those here rather than
+        // writing the same transaction three times in a row.
+        if (seenInFile.has(refNo)) continue;
+        seenInFile.add(refNo);
+
+        const site = (row.Site || "").trim();
+        const aff = siteToAff[site];
+        if (!aff) {
+          unmatchedSite++;
+          continue;
+        }
+
+        const status = normalizeStockNetworkStatus(row.Name, row["Confirmed On"]);
+        const record = {
+          refNo: refNo,
+          channel: channel,
+          site: site,
+          affId: aff.affId,
+          status: status,
+          amountIncl: parseMoney(row["Total Amount Incl."]),
+          currency: row.Currency || "ZAR",
+          transactionDate: parseUsDateToYmd(row["Transaction Date"]),
+          confirmedOn: parseUsDateToYmd(row["Confirmed On"]),
+          guestName: row.Fullname || "",
+          guestEmail: row.EmailAddress || "",
+          resortName: row["Resort Name"] || "",
+          unitType: row["Unit Type"] || "",
+          checkIn: parseUsDateToYmd(row["Check In Date"]),
+          checkOut: parseUsDateToYmd(row["Check Out Date"]),
+          nights: Number(row.Nights) || 0,
+          companyName: row.CompanyName || "",
+          customerReference: row.CustomerReference || "",
+          sourceLabel: sourceLabel,
+          importedAt: new Date().toISOString(),
+        };
+
+        const existing = await transactionsStore.get(refNo, { type: "json" });
+        if (existing) {
+          record.firstImportedAt = existing.firstImportedAt || existing.importedAt;
+          const changed =
+            existing.status !== record.status ||
+            existing.amountIncl !== record.amountIncl ||
+            existing.confirmedOn !== record.confirmedOn;
+          if (changed) updated++;
+          else unchanged++;
+        } else {
+          record.firstImportedAt = record.importedAt;
+          created++;
+        }
+        await transactionsStore.setJSON(refNo, record);
+      }
+
+      return json(
+        {
+          ok: true,
+          summary: {
+            totalRows: rows.length,
+            created: created,
+            updated: updated,
+            unchanged: unchanged,
+            unmatchedSite: unmatchedSite,
+            skippedNoRef: skippedNoRef,
+          },
+        },
+        200,
+        cors
+      );
     }
 
     // Every other action requires a valid session token.
