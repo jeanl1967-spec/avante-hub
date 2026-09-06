@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avante Travel — Full Details</title>
+<link rel="preconnect" href="https://fonts.gstatic.com">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --teal:#0DCDC2;
+    --teal-dark:#0aa89f;
+    --navy:#0e2f44;
+    --ink:#333333;
+    --muted:#808080;
+    --mint:#f4fbfa;
+    --line:#e3e9e8;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Noto Sans', sans-serif;
+    color:var(--ink);
+    background:#ffffff;
+  }
+  h1,h2,h3,.brand{ font-family:'Montserrat', sans-serif; }
+
+  .topbar{
+    background:var(--teal);
+    color:#fff;
+    font-size:12.5px;
+    padding:6px 24px;
+    text-align:right;
+  }
+
+  header.hub-header{
+    display:flex;
+    align-items:center;
+    padding:18px 32px;
+    border-bottom:1px solid var(--line);
+  }
+  .brand{
+    font-weight:800;
+    font-size:22px;
+    color:var(--teal);
+    letter-spacing:0.01em;
+    line-height:1.1;
+  }
+  .brand span{ display:block; color:var(--navy); font-size:14px; font-weight:600; letter-spacing:0.08em;}
+
+  main{
+    max-width:720px;
+    margin:0 auto;
+    padding:40px 20px 80px;
+  }
+
+  .placeholder{
+    text-align:center;
+    padding:56px 24px;
+    background:var(--mint);
+    border-radius:14px;
+    border:1.5px dashed #bfe6e2;
+  }
+  .placeholder .badge{
+    display:inline-block;
+    background:var(--teal);
+    color:#fff;
+    font-size:11px;
+    font-weight:700;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    padding:5px 12px;
+    border-radius:100px;
+    margin-bottom:14px;
+  }
+  .placeholder h3{ color:var(--navy); margin:0 0 8px; font-size:19px; }
+  .placeholder p{ color:var(--muted); margin:0; font-size:13.5px; max-width:420px; margin:0 auto; }
+
+  /* ---- gallery ---- */
+  .gallery{ position:relative; border-radius:14px; overflow:hidden; background:var(--mint); margin-bottom:22px; }
+  .gallery-frame{ width:100%; aspect-ratio:4 / 3; position:relative; }
+  .gallery-frame img{
+    position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+    opacity:0; transition:opacity 0.35s ease;
+  }
+  .gallery-frame img.show{ opacity:1; }
+  .gallery-nav{
+    position:absolute; top:50%; transform:translateY(-50%);
+    width:34px; height:34px; border-radius:100px; border:none;
+    background:rgba(14,47,68,0.55); color:#fff; font-size:16px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .gallery-nav.prev{ left:10px; } .gallery-nav.next{ right:10px; }
+  .gallery-dots{ position:absolute; bottom:10px; left:0; right:0; display:flex; justify-content:center; gap:6px; }
+  .gallery-dot{ width:7px; height:7px; border-radius:100px; background:rgba(255,255,255,0.55); }
+  .gallery-dot.active{ background:#fff; }
+
+  /* ---- content ---- */
+  .eyebrow{
+    display:inline-block; background:var(--mint); color:var(--teal-dark);
+    font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase;
+    padding:4px 10px; border-radius:100px; margin-bottom:10px;
+  }
+  h1.title{ color:var(--navy); font-size:26px; margin:0 0 6px; }
+  .subtitle{ color:var(--muted); font-size:14px; margin:0 0 20px; }
+  .lede{ font-size:15px; line-height:1.6; margin:0 0 18px; }
+  .section-label{ font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--teal-dark); margin:22px 0 6px; }
+  .body-text{ font-size:14px; line-height:1.65; color:var(--ink); margin:0; }
+  .chips{ display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  .chip{ background:var(--mint); border:1px solid var(--line); border-radius:100px; padding:5px 12px; font-size:12.5px; color:var(--navy); }
+
+  /* ---- booking card ---- */
+  .book-card{
+    margin-top:28px; background:#fff; border:1.5px solid var(--line); border-radius:14px;
+    padding:22px; box-shadow:0 10px 30px rgba(14,47,68,0.06);
+  }
+  .book-card h3{ margin:0 0 4px; color:var(--navy); font-size:16px; }
+  .book-card .hint{ margin:0 0 16px; color:var(--muted); font-size:12.5px; }
+  .date-row{ display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+  .date-field{ flex:1; min-width:140px; }
+  .date-field label{ display:block; font-size:11.5px; color:var(--muted); margin-bottom:5px; }
+  .date-field input{
+    width:100%; padding:10px 11px; font-size:14px; border:1.5px solid var(--line);
+    border-radius:8px; font-family:inherit; color:var(--ink);
+  }
+  .cta{
+    display:block; width:100%; padding:15px; background:var(--teal); color:#fff;
+    border:none; border-radius:8px; font-size:15.5px; font-weight:700;
+    font-family:'Montserrat', sans-serif; cursor:pointer; text-decoration:none;
+    text-align:center; box-sizing:border-box;
+  }
+  .cta:hover{ background:var(--teal-dark); }
+
+  @media (max-width: 480px){
+    header.hub-header{ padding:14px 16px; }
+    .brand{ font-size:19px; }
+    main{ padding:28px 16px 56px; }
+    h1.title{ font-size:21px; }
+    .book-card{ padding:18px; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="topbar">Avante Travel</div>
+
+  <header class="hub-header">
+    <div class="brand">AVANTE<span>TRAVEL</span></div>
+  </header>
+
+  <main>
+    <div id="content">
+      <div class="placeholder">
+        <div class="badge">Loading</div>
+        <h3>Loading the full details</h3>
+        <p>One moment please&hellip;</p>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    var params = new URLSearchParams(window.location.search);
+    var aff = (params.get('aff') || '').trim();
+    var hook = (params.get('hook') || '').trim();
+    var content = document.getElementById('content');
+    var galleryUrls = [];
+    var galleryIdx = 0;
+    var galleryTimer = null;
+
+    function escapeHtml(s){
+      var d = document.createElement('div');
+      d.textContent = (s === undefined || s === null) ? '' : String(s);
+      return d.innerHTML;
+    }
+
+    function isSafeUrl(u){
+      return typeof u === 'string' && /^https?:\/\//i.test(u);
+    }
+
+    function renderError(title, body){
+      content.innerHTML =
+        '<div class="placeholder">' +
+          '<div class="badge">Unavailable</div>' +
+          '<h3>' + escapeHtml(title) + '</h3>' +
+          '<p>' + escapeHtml(body) + '</p>' +
+        '</div>';
+    }
+
+    function fmtDateInput(d){ return d.toISOString().slice(0, 10); }
+
+    // Defaults: one month out, one night — a viewer can change either
+    // before booking; this is only what shows first.
+    function defaultCheckIn(){
+      var d = new Date();
+      return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate()));
+    }
+
+    function buildGalleryHtml(imgAff, count){
+      // count is the number of EXTRA photos beyond the cover (galleryCount)
+      // — total frames is count + 1. Falls back to a single cover image
+      // when count is 0, same as every hook that wasn't built with
+      // Auto-build's multi-photo picker.
+      galleryUrls = [];
+      for(var i = 0; i <= count; i++){
+        var src = '/api/hook-image?aff=' + encodeURIComponent(imgAff) + '&hook=' + encodeURIComponent(hook) + (i > 0 ? '&slot=' + i : '');
+        galleryUrls.push(src);
+      }
+      var frames = galleryUrls.map(function(url, i){
+        return '<img data-gallery-frame="' + i + '" src="' + url + '" alt="" loading="' + (i === 0 ? 'eager' : 'lazy') + '">';
+      }).join('');
+      var nav = galleryUrls.length > 1
+        ? '<button type="button" class="gallery-nav prev" data-gallery-nav="-1" aria-label="Previous photo">&#8249;</button>' +
+          '<button type="button" class="gallery-nav next" data-gallery-nav="1" aria-label="Next photo">&#8250;</button>' +
+          '<div class="gallery-dots">' + galleryUrls.map(function(_, i){ return '<div class="gallery-dot" data-gallery-dot="' + i + '"></div>'; }).join('') + '</div>'
+        : '';
+      return '<div class="gallery"><div class="gallery-frame">' + frames + nav + '</div></div>';
+    }
+
+    function showGalleryFrame(i){
+      if(!galleryUrls.length) return;
+      galleryIdx = (i + galleryUrls.length) % galleryUrls.length;
+      document.querySelectorAll('[data-gallery-frame]').forEach(function(img){
+        img.classList.toggle('show', Number(img.getAttribute('data-gallery-frame')) === galleryIdx);
+      });
+      document.querySelectorAll('[data-gallery-dot]').forEach(function(dot){
+        dot.classList.toggle('active', Number(dot.getAttribute('data-gallery-dot')) === galleryIdx);
+      });
+    }
+
+    function wireGallery(){
+      if(!galleryUrls.length) return;
+      showGalleryFrame(0);
+      document.querySelectorAll('[data-gallery-nav]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          showGalleryFrame(galleryIdx + Number(btn.getAttribute('data-gallery-nav')));
+          resetGalleryTimer();
+        });
+      });
+      document.querySelectorAll('[data-gallery-dot]').forEach(function(dot){
+        dot.addEventListener('click', function(){
+          showGalleryFrame(Number(dot.getAttribute('data-gallery-dot')));
+          resetGalleryTimer();
+        });
+      });
+      resetGalleryTimer();
+    }
+
+    function resetGalleryTimer(){
+      if(galleryTimer) clearInterval(galleryTimer);
+      if(galleryUrls.length > 1){
+        galleryTimer = setInterval(function(){ showGalleryFrame(galleryIdx + 1); }, 4500);
+      }
+    }
+
+    // Rewrites CheckInDT/CheckOutDT on the (already affiliate-personalized)
+    // booking link with whatever dates the viewer picked. Any booking link
+    // shape that isn't a plain URL, or has no such params to begin with, is
+    // handled gracefully — the params are simply added.
+    function bookingUrlForDates(baseBooking, checkIn, nights){
+      try{
+        var u = new URL(baseBooking);
+        var checkOut = new Date(new Date(checkIn + 'T00:00:00Z').getTime() + nights * 86400000);
+        u.searchParams.set('CheckInDT', checkIn);
+        u.searchParams.set('CheckOutDT', fmtDateInput(checkOut));
+        return u.toString();
+      }catch(e){
+        return baseBooking;
+      }
+    }
+
+    function renderDetails(data){
+      var hasBooking = isSafeUrl(data.booking);
+      if(!hasBooking){
+        renderError('This offer isn’t available right now', 'Please check back later or contact the person who shared this link with you.');
+        return;
+      }
+
+      var d = data.details || null;
+      var imgAff = (data.source === 'admin') ? '__admin__' : aff;
+      var galleryCount = data.galleryCount || 0;
+
+      var html = '';
+      html += buildGalleryHtml(imgAff, galleryCount);
+      html += '<div class="eyebrow">' + (d && d.mode === 'area' ? 'Area guide' : 'Featured stay') + '</div>';
+      html += '<h1 class="title">' + escapeHtml((d && d.label) || 'Special Offer') + '</h1>';
+      if(d && d.roomType){
+        html += '<p class="subtitle">' + escapeHtml(d.roomType) + '</p>';
+      }
+      if(data.caption){
+        html += '<p class="lede">' + escapeHtml(data.caption) + '</p>';
+      }
+      if(d && d.description){
+        html += '<div class="section-label">About this ' + (d.mode === 'area' ? 'area' : 'stay') + '</div>';
+        html += '<p class="body-text">' + escapeHtml(d.description) + '</p>';
+      }
+      if(d && d.attractions){
+        html += '<div class="section-label">Nearby</div>';
+        html += '<p class="body-text">' + escapeHtml(d.attractions) + '</p>';
+      }
+      if(d && Array.isArray(d.names) && d.names.length > 1){
+        html += '<div class="section-label">Properties in this area</div>';
+        html += '<div class="chips">' + d.names.map(function(n){ return '<span class="chip">' + escapeHtml(n) + '</span>'; }).join('') + '</div>';
+      }
+
+      var defaultCheckInStr = fmtDateInput(defaultCheckIn());
+      html += '<div class="book-card">';
+      html += '<h3>Ready to book?</h3>';
+      html += '<p class="hint">Pick your dates, or keep the suggested ones below.</p>';
+      html += '<div class="date-row">';
+      html += '<div class="date-field"><label for="checkInInput">Check-in</label><input type="date" id="checkInInput" value="' + defaultCheckInStr + '" min="' + fmtDateInput(new Date()) + '"></div>';
+      html += '<div class="date-field"><label for="nightsInput">Nights</label><input type="number" id="nightsInput" value="1" min="1" max="30"></div>';
+      html += '</div>';
+      html += '<a class="cta" id="bookBtn" href="' + escapeHtml(bookingUrlForDates(data.booking, defaultCheckInStr, 1)) + '" target="_blank" rel="noopener">Book Now</a>';
+      html += '</div>';
+
+      content.innerHTML = html;
+      wireGallery();
+
+      var checkInEl = document.getElementById('checkInInput');
+      var nightsEl = document.getElementById('nightsInput');
+      var bookBtn = document.getElementById('bookBtn');
+      function updateBookingLink(){
+        var checkIn = checkInEl.value || defaultCheckInStr;
+        var nights = Math.max(1, Number(nightsEl.value) || 1);
+        bookBtn.href = bookingUrlForDates(data.booking, checkIn, nights);
+      }
+      checkInEl.addEventListener('change', updateBookingLink);
+      nightsEl.addEventListener('change', updateBookingLink);
+    }
+
+    if(!aff || !hook){
+      renderError('This link is incomplete', 'Please check the link you were given, or contact the person who shared it with you.');
+    } else {
+      fetch('/api/hook?aff=' + encodeURIComponent(aff) + '&hook=' + encodeURIComponent(hook))
+        .then(function(r){ return r.json(); })
+        .then(function(data){
+          if(!data){
+            renderError('This offer isn’t available yet', 'The person who shared this link may still be setting it up. Please check back soon.');
+            return;
+          }
+          renderDetails(data);
+        })
+        .catch(function(){
+          renderError('We couldn’t load these details', 'Please try again in a moment.');
+        });
+    }
+  </script>
+
+</body>
+</html>
