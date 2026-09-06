@@ -259,6 +259,7 @@ export default async (request, context) => {
             caption: (rec && rec.caption) || "",
             hashtags: (rec && rec.hashtags) || null,
             galleryCount: (rec && rec.galleryCount) || 0,
+            source: (rec && rec.source) || null,
             updatedAt: (rec && rec.updatedAt) || null,
           });
         }
@@ -899,11 +900,12 @@ export default async (request, context) => {
       // off the "Affiliate 36" placeholder — 36 being Jean's own master
       // StockNetwork site number — which hook-api.js's
       // personalizeStockNetworkUrl already swaps for whichever affiliate
-      // is actually viewing the hook. Dates default the same way the
-      // Accommodation Link Builder does: check-in tomorrow, 3 nights.
+      // is actually viewing the hook. Dates default to one month out for a
+      // one-night stay — a viewer picks their own dates on the landing
+      // page before booking; this is only the fallback if they don't.
       const today = new Date();
-      const checkIn = new Date(today.getTime() + 86400000);
-      const checkOut = new Date(today.getTime() + 4 * 86400000);
+      const checkIn = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, today.getUTCDate()));
+      const checkOut = new Date(checkIn.getTime() + 86400000);
       const fmtDate = (d) => d.toISOString().slice(0, 10);
       const bookingParams = new URLSearchParams({
         CheckInDT: fmtDate(checkIn),
@@ -912,6 +914,22 @@ export default async (request, context) => {
       });
       const booking =
         "https://stock.stocknetwork.co.za/ui/" + encodeURIComponent("Affiliate 36") + "?" + bookingParams.toString();
+
+      // Merged real content from every source — carried back to the client
+      // so a later saveHookPhotos call can persist it onto the hook record
+      // without re-scraping. This is what powers the landing page's "full
+      // details" (description/attractions/room type) and the "Built from"
+      // label on the hook card.
+      const description = sources
+        .map((s) => s.description)
+        .filter(Boolean)
+        .join(" ");
+      const attractions = sources
+        .map((s) => s.attractions)
+        .filter(Boolean)
+        .join(" ");
+      const roomType = sources.length === 1 ? sources[0].roomType || "" : "";
+      const sourceNames = sources.map((s) => s.name).filter(Boolean);
 
       return json(
         {
@@ -924,7 +942,10 @@ export default async (request, context) => {
           booking: booking,
           photos: photos,
           sourceCount: sources.length,
-          sourceNames: sources.map((s) => s.name).filter(Boolean),
+          sourceNames: sourceNames,
+          description: description,
+          attractions: attractions,
+          roomType: roomType,
         },
         200,
         cors
@@ -943,10 +964,10 @@ export default async (request, context) => {
       // Best-effort: a failed/unavailable AI call just clears the cached
       // set rather than blocking the save.
       const hashtags = await generateHashtags(caption);
-      // Preserve galleryCount across a manual save — it's set by
-      // saveHookPhotos below (Auto-build's photo picker), not by this form,
-      // so a normal caption/link edit here must not silently wipe out an
-      // already-saved gallery.
+      // Preserve galleryCount and source (Auto-build's saved gallery/rich
+      // details) across a manual save — both are set by saveHookPhotos
+      // below, not by this form, so a normal caption/link edit here must
+      // not silently wipe either out.
       const existingForSave = await hookStore.get("__admin__:" + n, { type: "json" });
       const record = {
         booking: booking,
@@ -954,6 +975,7 @@ export default async (request, context) => {
         caption: caption,
         hashtags: hashtags,
         galleryCount: (existingForSave && existingForSave.galleryCount) || 0,
+        source: (existingForSave && existingForSave.source) || null,
         updatedAt: new Date().toISOString(),
       };
       await hookStore.setJSON("__admin__:" + n, record);
@@ -1012,6 +1034,24 @@ export default async (request, context) => {
       const galleryCount = Math.max(0, saved - 1);
       const existing = (await hookStore.get("__admin__:" + n, { type: "json" })) || {};
       existing.galleryCount = galleryCount;
+      // Optional — carried straight through from generateHookDraft's
+      // response rather than re-scraped here, so a hook remembers what
+      // property/area it was built from (shown on the hook card and on the
+      // new landing page's "full details"). Left untouched if this save
+      // didn't come from an Auto-build draft (e.g. a future manual photo
+      // save with no source context).
+      if (body.source && typeof body.source === "object") {
+        existing.source = {
+          mode: body.source.mode === "area" ? "area" : "property",
+          label: typeof body.source.label === "string" ? body.source.label.trim().slice(0, 200) : "",
+          description: typeof body.source.description === "string" ? body.source.description.trim().slice(0, 2000) : "",
+          attractions: typeof body.source.attractions === "string" ? body.source.attractions.trim().slice(0, 2000) : "",
+          roomType: typeof body.source.roomType === "string" ? body.source.roomType.trim().slice(0, 100) : "",
+          names: Array.isArray(body.source.names)
+            ? body.source.names.filter((x) => typeof x === "string").slice(0, 10)
+            : [],
+        };
+      }
       existing.updatedAt = new Date().toISOString();
       await hookStore.setJSON("__admin__:" + n, existing);
 

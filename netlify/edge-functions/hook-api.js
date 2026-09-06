@@ -161,8 +161,14 @@ export default async (request, context) => {
     }
 
     if (aff === ADMIN_KEY) {
-      // The admin's own default record — no resolution needed, just return it.
-      const data = affRecord ? { ...affRecord } : null;
+      // The admin's own default record — no resolution needed, just return
+      // it as-is, plus a `details` alias for the stored `source` metadata
+      // (Auto-build's property/area info) so hook-landing.html can read it
+      // the same way it does for every other caller below — without
+      // renaming or removing the existing `source` field, which already
+      // means something else (rich metadata, not admin/self routing) only
+      // on this raw admin record.
+      const data = affRecord ? { ...affRecord, details: affRecord.source || null } : null;
       return new Response(JSON.stringify(data), {
         headers: { "content-type": "application/json", ...cors },
       });
@@ -186,8 +192,23 @@ export default async (request, context) => {
         }
       }
 
+      // "details" carries the real property/area info Auto-build scraped
+      // (name, description, attractions, room type) when this hook was
+      // built that way — used by the new hook-landing.html page for its
+      // "full details" view. Deliberately not called "source" here, since
+      // that name is already used below for the admin/self routing field.
       const data = adminRecord
-        ? { booking: personalizedBooking, landing: adminRecord.landing || "", caption: adminRecord.caption || "", hashtags: adminRecord.hashtags || null, mode: mode, source: "admin", expired: expired }
+        ? {
+            booking: personalizedBooking,
+            landing: adminRecord.landing || "",
+            caption: adminRecord.caption || "",
+            hashtags: adminRecord.hashtags || null,
+            galleryCount: adminRecord.galleryCount || 0,
+            details: adminRecord.source || null,
+            mode: mode,
+            source: "admin",
+            expired: expired,
+          }
         : { mode: mode, source: "admin", expired: expired };
       // If there's genuinely nothing to show (no admin default set either),
       // return null so callers treat this hook slot as inactive — same as
@@ -198,9 +219,21 @@ export default async (request, context) => {
       });
     }
 
-    // source === "self"
+    // source === "self". Auto-build is admin-only for now, so galleryCount/
+    // details will normally be absent here — passed through defensively
+    // for shape consistency with the admin branch above.
     const data = affRecord
-      ? { booking: affRecord.booking || "", landing: affRecord.landing || "", caption: affRecord.caption || "", hashtags: affRecord.hashtags || null, mode: mode, source: "self", expired: expired }
+      ? {
+          booking: affRecord.booking || "",
+          landing: affRecord.landing || "",
+          caption: affRecord.caption || "",
+          hashtags: affRecord.hashtags || null,
+          galleryCount: affRecord.galleryCount || 0,
+          details: affRecord.source || null,
+          mode: mode,
+          source: "self",
+          expired: expired,
+        }
       : null;
     return new Response(JSON.stringify(data), {
       headers: { "content-type": "application/json", ...cors },
