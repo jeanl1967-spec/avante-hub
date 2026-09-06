@@ -381,14 +381,14 @@ export default async (request, context) => {
       }
 
       // Affiliates can choose (in the WhatsApp Messaging tab) to only be
-      // notified for "request" bookings, only "booked" ones, or both.
-      // Affiliates set up before this control existed have no
-      // whatsappNotifyOn field, which is treated as "notify on everything"
-      // so nothing that already worked silently stops working.
+      // notified for "request" bookings, "booked" ones, "confirmed" ones,
+      // or any combination. Affiliates set up before this control existed
+      // have no whatsappNotifyOn field, which is treated as "notify on
+      // everything" so nothing that already worked silently stops working.
       const notifyOn =
         matched && Array.isArray(matched.whatsappNotifyOn) && matched.whatsappNotifyOn.length
           ? matched.whatsappNotifyOn
-          : ["request", "booked"];
+          : ["request", "booked", "confirmed"];
 
       if (matched && bookingStatus !== "unknown" && !notifyOn.includes(bookingStatus)) {
         context.waitUntil(
@@ -544,8 +544,8 @@ export default async (request, context) => {
       existing.bookingEmailAlias = sanitizeAlias_(body.bookingEmailAlias || "");
       existing.whatsappGroupId = typeof body.whatsappGroupId === "string" ? body.whatsappGroupId.trim() : "";
       if (Array.isArray(body.notifyOn)) {
-        const cleaned = body.notifyOn.filter((s) => s === "request" || s === "booked");
-        existing.whatsappNotifyOn = cleaned.length ? cleaned : ["request", "booked"];
+        const cleaned = body.notifyOn.filter((s) => s === "request" || s === "booked" || s === "confirmed");
+        existing.whatsappNotifyOn = cleaned.length ? cleaned : ["request", "booked", "confirmed"];
       } else if (!Array.isArray(existing.whatsappNotifyOn) || !existing.whatsappNotifyOn.length) {
         existing.whatsappNotifyOn = ["request", "booked"];
       }
