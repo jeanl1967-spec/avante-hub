@@ -339,6 +339,44 @@
   .hook-card button.primary{ margin-top:16px; padding:10px; font-size:13px; }
   .hook-updated{ font-size:11px; color:var(--muted); margin-top:8px; }
 
+  /* ---- Auto-build (draft a hook from a property or area) ---- */
+  .autobuild-toggle{
+    width:100%; margin-top:10px; background:#fff; color:var(--teal-dark);
+    border:1.5px dashed var(--teal-dark);
+  }
+  .autobuild-box{
+    display:none; margin-top:12px; padding:14px; border-radius:10px;
+    background:var(--mint); border:1.5px solid #bfe6e2;
+  }
+  .autobuild-box.show{ display:block; }
+  .autobuild-box label{ margin-top:0; }
+  .autobuild-row{ display:flex; gap:8px; align-items:flex-start; }
+  .autobuild-row input{ flex:1; }
+  .autobuild-row button{ white-space:nowrap; padding:9px 14px; font-size:13px; }
+  .autobuild-status{ font-size:12px; color:var(--muted); margin-top:8px; min-height:16px; }
+  .autobuild-draft{ display:none; margin-top:12px; }
+  .autobuild-draft.show{ display:block; }
+  .autobuild-caption-preview{
+    font-size:12.5px; background:#fff; border:1px solid var(--line); border-radius:8px;
+    padding:10px; margin-top:6px; white-space:pre-wrap;
+  }
+  .autobuild-photo-grid{
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin-top:8px;
+  }
+  .autobuild-photo{
+    position:relative; aspect-ratio:1; border-radius:6px; overflow:hidden;
+    cursor:pointer; border:2px solid transparent;
+  }
+  .autobuild-photo img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .autobuild-photo.picked{ border-color:var(--teal-dark); }
+  .autobuild-photo-check{
+    position:absolute; top:3px; right:3px; width:18px; height:18px; border-radius:100px;
+    background:rgba(255,255,255,0.85); display:flex; align-items:center; justify-content:center;
+    font-size:11px; color:var(--teal-dark); font-weight:700;
+  }
+  .autobuild-photo:not(.picked) .autobuild-photo-check{ display:none; }
+  .autobuild-use-btn{ width:100%; margin-top:10px; padding:9px; font-size:13px; }
+
   /* ---- Share Kit (per-platform sized image + caption, ready to paste) ---- */
   .sharekit-btn{ width:100%; margin-top:10px; }
   .modal-card.sharekit-card{ max-width:660px; text-align:left; }
@@ -609,6 +647,11 @@
         <p>The shared fallback ad content for each of the 6 storefront hook slots. Any affiliate hook set to "Let Admin Manage" — or a self-managed hook whose dates have passed — shows this content automatically. Editing a hook here updates it everywhere immediately.</p>
       </div>
       <div class="hook-grid" id="defaultHookGrid"></div>
+      <!-- Shared across every hook card's Auto-build field — populated once
+           from /api/resorts with every resort name plus every unique
+           district, so typing "3 Malachite Mews" or "Knysna" both
+           autocomplete from the same list. -->
+      <datalist id="hookSourceOptions"></datalist>
     </section>
 
     <!-- ===================== PAYOUTS ===================== -->
@@ -2294,8 +2337,144 @@
       // editable — they're regenerated server-side whenever the caption
       // is saved), keyed by hook number: { facebook: [...], instagram: [...], whatsapp: [], linkedin: [...] } | null
       var defaultHookHashtags = {};
+      // Auto-build: the last draft generated per hook (booking/caption/
+      // hashtags/photos + which photo indexes are currently picked),
+      // keyed by hook number. Nothing here is saved until "Use this draft"
+      // is clicked — this is purely scratch state for the picker UI.
+      var autobuildDrafts = {};
+      var autobuildResortsLoaded = false;
 
       function isValidUrl(v){ return /^https?:\/\//i.test(v); }
+
+      // Populates the shared <datalist> once from the same public resort
+      // list the Hub's Accommodation Link Builder already uses — resort
+      // names plus every unique district, so the same Auto-build field
+      // autocompletes both a specific property and a whole area.
+      function loadAutobuildResorts(){
+        if(autobuildResortsLoaded) return Promise.resolve();
+        return fetch('/api/resorts').then(function(r){ return r.json(); }).then(function(data){
+          var resorts = (data && data.resorts) || [];
+          var seen = {};
+          var options = '';
+          resorts.forEach(function(r){
+            if(r.name && !seen[r.name]){ seen[r.name] = true; options += '<option value="' + escapeHtml(r.name) + '">'; }
+          });
+          var districts = {};
+          resorts.forEach(function(r){
+            if(r.district && !districts[r.district]){ districts[r.district] = true; options += '<option value="' + escapeHtml(r.district) + '">'; }
+          });
+          var list = document.getElementById('hookSourceOptions');
+          if(list) list.innerHTML = options;
+          autobuildResortsLoaded = true;
+        }).catch(function(){ /* best-effort — Auto-build still works by typed text alone */ });
+      }
+
+      function renderAutobuildDraft(n){
+        var draft = autobuildDrafts[n];
+        var draftBox = document.getElementById('dh' + n + '-autobuildDraft');
+        var captionEl = document.getElementById('dh' + n + '-autobuildCaption');
+        var photoGrid = document.getElementById('dh' + n + '-autobuildPhotos');
+        if(!draft){ draftBox.classList.remove('show'); return; }
+
+        captionEl.textContent = draft.caption || '(no caption generated — you can still pick photos and write your own)';
+        photoGrid.innerHTML = draft.photos.map(function(url, idx){
+          var picked = draft.picked.indexOf(idx) !== -1;
+          return '<div class="autobuild-photo' + (picked ? ' picked' : '') + '" data-autobuild-photo="' + n + ':' + idx + '">' +
+            '<img src="' + url + '" loading="lazy" alt="Candidate photo ' + (idx + 1) + '">' +
+            '<div class="autobuild-photo-check">' + (picked ? (draft.picked.indexOf(idx) + 1) : '') + '</div>' +
+          '</div>';
+        }).join('');
+        draftBox.classList.add('show');
+      }
+
+      function toggleAutobuildPhoto(n, idx){
+        var draft = autobuildDrafts[n];
+        if(!draft) return;
+        var pos = draft.picked.indexOf(idx);
+        if(pos !== -1){
+          draft.picked.splice(pos, 1);
+        }else{
+          if(draft.picked.length >= 4){
+            draft.picked.shift(); // keep it simple — oldest pick drops off past 4
+          }
+          draft.picked.push(idx);
+        }
+        renderAutobuildDraft(n);
+      }
+
+      function generateAutobuildDraft(n){
+        var input = document.getElementById('dh' + n + '-autobuildQuery');
+        var statusEl = document.getElementById('dh' + n + '-autobuildStatus');
+        var query = input.value.trim();
+        if(!query){
+          statusEl.textContent = 'Type a property name or an area first.';
+          return;
+        }
+        statusEl.textContent = 'Looking up "' + query + '" and drafting a caption…';
+        delete autobuildDrafts[n];
+        renderAutobuildDraft(n);
+
+        adminPost('generateHookDraft', { hook: n, query: query }).then(function(res){
+          if(!res.data || !res.data.ok){
+            statusEl.textContent = (res.data && res.data.error) || 'Could not build a draft for that.';
+            return;
+          }
+          var d = res.data;
+          statusEl.textContent = d.mode === 'area'
+            ? 'Built from ' + d.sourceCount + ' ' + d.label + ' propert' + (d.sourceCount === 1 ? 'y' : 'ies') + '.'
+            : 'Built from ' + d.label + '.';
+          if(!d.captionGenerated){
+            statusEl.textContent += ' (Caption drafting is unavailable right now — photos and booking link still generated; write your own caption below.)';
+          }
+          autobuildDrafts[n] = {
+            mode: d.mode,
+            label: d.label,
+            caption: d.caption || '',
+            hashtags: d.hashtags || null,
+            booking: d.booking || '',
+            photos: d.photos || [],
+            picked: (d.photos || []).slice(0, 4).map(function(_, idx){ return idx; })
+          };
+          renderAutobuildDraft(n);
+        }).catch(function(){
+          statusEl.textContent = 'Could not reach the server — please try again.';
+        });
+      }
+
+      function useAutobuildDraft(n){
+        var draft = autobuildDrafts[n];
+        if(!draft) return;
+        var statusEl = document.getElementById('dh' + n + '-autobuildStatus');
+
+        document.getElementById('dh' + n + '-caption').value = draft.caption || '';
+        if(draft.booking) document.getElementById('dh' + n + '-booking').value = draft.booking;
+        defaultHookHashtags[n] = draft.hashtags || null;
+
+        var pickedUrls = draft.picked.slice().sort(function(a, b){ return a - b; }).map(function(idx){ return draft.photos[idx]; });
+        if(!pickedUrls.length){
+          statusEl.textContent = 'Caption and booking link filled in — remember to click "Save default" below. (No photos were picked.)';
+          return;
+        }
+
+        statusEl.textContent = 'Saving ' + pickedUrls.length + ' photo' + (pickedUrls.length === 1 ? '' : 's') + '…';
+        adminPost('saveHookPhotos', { hook: n, urls: pickedUrls }).then(function(res){
+          if(res.data && res.data.ok){
+            statusEl.textContent = 'Caption, booking link and ' + res.data.saved + ' photo' + (res.data.saved === 1 ? '' : 's') + ' filled in — click "Save default" below to publish.';
+            setImageSrc(n);
+            var galleryNote = document.getElementById('dh' + n + '-galleryNote');
+            if(res.data.galleryCount > 0){
+              galleryNote.textContent = '+' + res.data.galleryCount + ' more photo' + (res.data.galleryCount === 1 ? '' : 's') + ' saved with this hook (from Auto-build)';
+              galleryNote.style.display = 'block';
+            }else{
+              galleryNote.style.display = 'none';
+            }
+          }else{
+            statusEl.textContent = 'Caption and booking link filled in, but photos could not be saved — try again, or upload one manually.';
+          }
+        }).catch(function(){
+          statusEl.textContent = 'Caption and booking link filled in, but photos could not be saved — try again, or upload one manually.';
+        });
+      }
 
       function fmtDate(iso){
         if(!iso) return 'Never updated';
@@ -2319,6 +2498,23 @@
               '<button type="button" class="btn-outline" data-upload-image="' + i + '">Upload image</button>' +
             '</div>' +
             '<div class="status" id="dh' + i + '-imageStatus"></div>' +
+            '<div class="hook-updated" id="dh' + i + '-galleryNote" style="display:none;"></div>' +
+            '<button type="button" class="btn-outline autobuild-toggle" data-autobuild-toggle="' + i + '">✨ Auto-build from property or area</button>' +
+            '<div class="autobuild-box" id="dh' + i + '-autobuildBox">' +
+              '<label for="dh' + i + '-autobuildQuery">Property name or area</label>' +
+              '<div class="autobuild-row">' +
+                '<input id="dh' + i + '-autobuildQuery" list="hookSourceOptions" placeholder="e.g. Knysna, or a specific resort name">' +
+                '<button type="button" class="btn-outline" data-autobuild-generate="' + i + '">Generate</button>' +
+              '</div>' +
+              '<div class="autobuild-status" id="dh' + i + '-autobuildStatus"></div>' +
+              '<div class="autobuild-draft" id="dh' + i + '-autobuildDraft">' +
+                '<label>Draft caption</label>' +
+                '<div class="autobuild-caption-preview" id="dh' + i + '-autobuildCaption"></div>' +
+                '<label>Real photos found — pick up to 4 (first pick becomes the cover image)</label>' +
+                '<div class="autobuild-photo-grid" id="dh' + i + '-autobuildPhotos"></div>' +
+                '<button type="button" class="primary autobuild-use-btn" data-autobuild-use="' + i + '">Use this draft</button>' +
+              '</div>' +
+            '</div>' +
             '<label for="dh' + i + '-booking">Booking link</label>' +
             '<input id="dh' + i + '-booking" placeholder="Default booking link for this hook slot">' +
             '<label for="dh' + i + '-landing">Landing page link</label>' +
@@ -2477,6 +2673,13 @@
             document.getElementById('dh' + h.hook + '-updated').textContent = fmtDate(h.updatedAt);
             defaultHookHashtags[h.hook] = h.hashtags || null;
             setImageSrc(h.hook);
+            var galleryNote = document.getElementById('dh' + h.hook + '-galleryNote');
+            if(h.galleryCount > 0){
+              galleryNote.textContent = '+' + h.galleryCount + ' more photo' + (h.galleryCount === 1 ? '' : 's') + ' saved with this hook (from Auto-build)';
+              galleryNote.style.display = 'block';
+            }else{
+              galleryNote.style.display = 'none';
+            }
           });
           loaded = true;
         });
@@ -2506,6 +2709,42 @@
             link: booking || landing,
             linkLabel: booking ? 'Booking link' : 'Landing page link'
           });
+          return;
+        }
+
+        var toggleN = e.target.getAttribute('data-autobuild-toggle');
+        if(toggleN){
+          loadAutobuildResorts();
+          document.getElementById('dh' + toggleN + '-autobuildBox').classList.toggle('show');
+          return;
+        }
+
+        var genN = e.target.getAttribute('data-autobuild-generate');
+        if(genN){
+          generateAutobuildDraft(genN);
+          return;
+        }
+
+        var useN = e.target.getAttribute('data-autobuild-use');
+        if(useN){
+          useAutobuildDraft(useN);
+          return;
+        }
+
+        var photoEl = e.target.closest && e.target.closest('[data-autobuild-photo]');
+        if(photoEl){
+          var parts = photoEl.getAttribute('data-autobuild-photo').split(':');
+          toggleAutobuildPhoto(parts[0], Number(parts[1]));
+          return;
+        }
+      });
+
+      grid.addEventListener('keydown', function(e){
+        if(e.key !== 'Enter') return;
+        var m = e.target.id && e.target.id.match(/^dh(\d+)-autobuildQuery$/);
+        if(m){
+          e.preventDefault();
+          generateAutobuildDraft(m[1]);
         }
       });
 

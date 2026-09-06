@@ -1,5 +1,6 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
+import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
 import {
   parseStockNetworkCsv,
   normalizeStockNetworkStatus,
@@ -190,6 +191,10 @@ export default async (request, context) => {
   const directoryStore = getStore({ name: "affiliates-directory", consistency: "strong" });
   const payoutStore = getStore({ name: "affiliate-payouts", consistency: "strong" });
   const hookStore = getStore({ name: "promo-hooks", consistency: "strong" });
+  // Same store resorts-api.js writes the uploaded resort master CSV to —
+  // read here (never written) so generateHookDraft's "area" mode can find
+  // which real properties sit in a given district without a second fetch.
+  const resortStore = getStore({ name: "resort-list", consistency: "strong" });
   const whatsappLogStore = getStore({ name: "whatsapp-log", consistency: "strong" });
   // One blob per imported booking, keyed by StockNetwork's RefNo, so
   // re-importing an overlapping date range (or a report with repeated rows,
@@ -253,6 +258,7 @@ export default async (request, context) => {
             landing: (rec && rec.landing) || "",
             caption: (rec && rec.caption) || "",
             hashtags: (rec && rec.hashtags) || null,
+            galleryCount: (rec && rec.galleryCount) || 0,
             updatedAt: (rec && rec.updatedAt) || null,
           });
         }
@@ -766,6 +772,154 @@ export default async (request, context) => {
       return json({ ok: send.ok, status: send.status, detail: send.body }, send.ok ? 200 : 502, cors);
     }
 
+    if (action === "generateHookDraft") {
+      // Builds a hook's caption + hashtags + candidate photos + booking
+      // link from just a property or an area — nothing is saved here, this
+      // only returns a draft for the admin to review and (optionally) hand
+      // to setDefaultHook below. The existing manual fields/flow are
+      // completely untouched by this action; it's purely an added option
+      // that pre-fills the same fields a manual save already uses.
+      // A single free-text field drives this — the admin never has to say
+      // "this is a property" vs "this is an area" up front. If the client
+      // already resolved an exact resortId (e.g. the admin picked one from
+      // the datalist), that's used directly; otherwise the query is
+      // resolved server-side against the resort list: an exact or partial
+      // property-name match wins first, and only falls back to a
+      // district/area match if nothing named that was found.
+      const bodyResortId = typeof body.resortId === "string" ? body.resortId.trim() : "";
+      const bodySiteId = typeof body.siteId === "string" ? body.siteId.trim() : "";
+      const query = typeof body.query === "string" ? body.query.trim() : "";
+      if (!bodyResortId && !query) {
+        return json({ ok: false, error: "Type or pick a property or area first." }, 400, cors);
+      }
+
+      let mode = "property";
+      let label = query;
+      let sources = [];
+
+      if (bodyResortId) {
+        const info = await fetchResortInfo(bodyResortId, bodySiteId);
+        if (!info) {
+          return json(
+            { ok: false, error: "Couldn't load that property's info page. Try again, or pick a different one." },
+            502,
+            cors
+          );
+        }
+        sources = [info];
+        label = info.name || label;
+      } else {
+        const listRecord = await resortStore.get("current", { type: "json" });
+        const allResorts = listRecord && Array.isArray(listRecord.resorts) ? listRecord.resorts : [];
+        const queryLower = query.toLowerCase();
+
+        let propertyMatch = allResorts.find((r) => r.name && r.name.toLowerCase() === queryLower);
+        if (!propertyMatch) {
+          propertyMatch = allResorts.find((r) => r.name && r.name.toLowerCase().includes(queryLower));
+        }
+
+        if (propertyMatch) {
+          label = propertyMatch.name;
+          const info = await fetchResortInfo(propertyMatch.resortId, propertyMatch.siteId);
+          if (!info) {
+            return json(
+              { ok: false, error: "Couldn't load that property's info page. Try again, or pick a different one." },
+              502,
+              cors
+            );
+          }
+          sources = [info];
+        } else {
+          mode = "area";
+          let matches = allResorts.filter((r) => r.district && r.district.toLowerCase() === queryLower);
+          if (!matches.length) {
+            matches = allResorts.filter((r) => r.district && r.district.toLowerCase().includes(queryLower));
+          }
+          if (!matches.length) {
+            return json(
+              { ok: false, error: 'Couldn\'t find a property or area matching "' + query + '" in the resort list.' },
+              404,
+              cors
+            );
+          }
+
+          // StockNetwork lists the same physical resort under multiple
+          // SiteIDs — dedupe by ResortID so an area draft draws on distinct
+          // properties, not the same one three times.
+          const seenResortIds = new Set();
+          const distinct = [];
+          for (const r of matches) {
+            if (!r.resortId || seenResortIds.has(r.resortId)) continue;
+            seenResortIds.add(r.resortId);
+            distinct.push(r);
+            if (distinct.length >= 5) break;
+          }
+
+          const fetched = await Promise.all(distinct.map((r) => fetchResortInfo(r.resortId, r.siteId)));
+          sources = fetched.filter(Boolean);
+          if (!sources.length) {
+            return json(
+              { ok: false, error: "Couldn't load property info for that area right now. Try again shortly." },
+              502,
+              cors
+            );
+          }
+        }
+      }
+
+      const caption = await draftHookCaption({ mode: mode, label: label, sources: sources });
+      // Reuses the exact same hashtag generator setDefaultHook already
+      // calls — hashtags stay consistent no matter how the caption got
+      // written.
+      const hashtags = caption ? await generateHashtags(caption) : null;
+
+      // Pool candidate photos across every source, deduped, capped at 12 —
+      // real StockNetwork listing photography, not stock images.
+      const photos = [];
+      outer: for (const s of sources) {
+        for (const url of s.images) {
+          if (!photos.includes(url)) photos.push(url);
+          if (photos.length >= 12) break outer;
+        }
+      }
+
+      // Matches the admin's own existing default-hook booking-link
+      // convention (see hooks #4/#5 already saved this way): a link built
+      // off the "Affiliate 36" placeholder — 36 being Jean's own master
+      // StockNetwork site number — which hook-api.js's
+      // personalizeStockNetworkUrl already swaps for whichever affiliate
+      // is actually viewing the hook. Dates default the same way the
+      // Accommodation Link Builder does: check-in tomorrow, 3 nights.
+      const today = new Date();
+      const checkIn = new Date(today.getTime() + 86400000);
+      const checkOut = new Date(today.getTime() + 4 * 86400000);
+      const fmtDate = (d) => d.toISOString().slice(0, 10);
+      const bookingParams = new URLSearchParams({
+        CheckInDT: fmtDate(checkIn),
+        CheckOutDT: fmtDate(checkOut),
+        Filter: label,
+      });
+      const booking =
+        "https://stock.stocknetwork.co.za/ui/" + encodeURIComponent("Affiliate 36") + "?" + bookingParams.toString();
+
+      return json(
+        {
+          ok: true,
+          mode: mode,
+          label: label,
+          caption: caption || "",
+          captionGenerated: !!caption,
+          hashtags: hashtags,
+          booking: booking,
+          photos: photos,
+          sourceCount: sources.length,
+          sourceNames: sources.map((s) => s.name).filter(Boolean),
+        },
+        200,
+        cors
+      );
+    }
+
     if (action === "setDefaultHook") {
       const n = Number(body.hook);
       if (!isFinite(n) || n < 1 || n > DEFAULT_HOOK_COUNT) {
@@ -778,9 +932,83 @@ export default async (request, context) => {
       // Best-effort: a failed/unavailable AI call just clears the cached
       // set rather than blocking the save.
       const hashtags = await generateHashtags(caption);
-      const record = { booking: booking, landing: landing, caption: caption, hashtags: hashtags, updatedAt: new Date().toISOString() };
+      // Preserve galleryCount across a manual save — it's set by
+      // saveHookPhotos below (Auto-build's photo picker), not by this form,
+      // so a normal caption/link edit here must not silently wipe out an
+      // already-saved gallery.
+      const existingForSave = await hookStore.get("__admin__:" + n, { type: "json" });
+      const record = {
+        booking: booking,
+        landing: landing,
+        caption: caption,
+        hashtags: hashtags,
+        galleryCount: (existingForSave && existingForSave.galleryCount) || 0,
+        updatedAt: new Date().toISOString(),
+      };
       await hookStore.setJSON("__admin__:" + n, record);
       return json({ ok: true, hook: n, record: record }, 200, cors);
+    }
+
+    if (action === "saveHookPhotos") {
+      // Transfers admin-picked candidate photos (real StockNetwork listing
+      // URLs returned by generateHookDraft) into our own image store, so a
+      // hook's photos keep working even if StockNetwork later reshuffles or
+      // removes that listing. The first picked photo becomes the hook's
+      // normal single "cover" image — the exact same bare aff:hook key
+      // hook-image.js and every existing display path already use, so a
+      // hook saved this way looks no different to old code than one whose
+      // cover photo was uploaded manually. Any additional photos go into
+      // new, purely additive numbered slots that only the gallery-aware UI
+      // reads — nothing about the existing single-image flow changes.
+      const n = Number(body.hook);
+      if (!isFinite(n) || n < 1 || n > DEFAULT_HOOK_COUNT) {
+        return json({ ok: false, error: "invalid hook number" }, 400, cors);
+      }
+      const urls = Array.isArray(body.urls)
+        ? body.urls.filter((u) => typeof u === "string" && u.trim()).slice(0, 6)
+        : [];
+      if (!urls.length) return json({ ok: false, error: "No photos selected." }, 400, cors);
+
+      const imageStore = getStore({ name: "promo-hook-images", consistency: "strong" });
+      let saved = 0;
+      const failed = [];
+      for (let i = 0; i < urls.length; i++) {
+        const url = urls[i].trim();
+        try {
+          const res = await fetch(url);
+          if (!res.ok) {
+            failed.push(url);
+            continue;
+          }
+          const contentType = res.headers.get("content-type") || "image/jpeg";
+          if (!contentType.startsWith("image/")) {
+            failed.push(url);
+            continue;
+          }
+          const buf = await res.arrayBuffer();
+          if (buf.byteLength > 5 * 1024 * 1024 || buf.byteLength < 1) {
+            failed.push(url);
+            continue;
+          }
+          const key = i === 0 ? "__admin__:" + n : "__admin__:" + n + ":" + i;
+          await imageStore.set(key, buf, { metadata: { contentType: contentType, sourceUrl: url } });
+          saved++;
+        } catch (e) {
+          failed.push(url);
+        }
+      }
+
+      const galleryCount = Math.max(0, saved - 1);
+      const existing = (await hookStore.get("__admin__:" + n, { type: "json" })) || {};
+      existing.galleryCount = galleryCount;
+      existing.updatedAt = new Date().toISOString();
+      await hookStore.setJSON("__admin__:" + n, existing);
+
+      return json(
+        { ok: saved > 0, saved: saved, failed: failed.length, galleryCount: galleryCount },
+        saved > 0 ? 200 : 502,
+        cors
+      );
     }
 
     if (action === "deleteAffiliate") {
