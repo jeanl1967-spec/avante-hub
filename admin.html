@@ -638,6 +638,11 @@
           <button class="btn-outline" id="refreshAffiliatesBtn">Refresh</button>
         </div>
         <div class="status" id="affiliatesStatus"></div>
+        <div class="status show" id="missingSiteNrSummary" style="margin-top:10px;"></div>
+        <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--muted); margin-top:6px;">
+          <input type="checkbox" id="missingSiteNrFilterToggle" style="width:auto; margin:0;">
+          Show only affiliates missing a Site Nr
+        </label>
         <div style="margin-top:18px;">
           <div class="table-wrap">
             <table class="data-table">
@@ -1383,18 +1388,59 @@
         });
     }
 
+    // The "Affiliate <N>" personalization on admin-managed hooks only
+    // ever works for an affiliate who has this filled in — without it,
+    // hook-api.js falls back to their Hub GUID instead of a real
+    // StockNetwork site number (see personalizeStockNetworkUrl). Kept as
+    // its own summary line (updated on every render, independent of the
+    // "show only" filter below) so it's always visible even while the
+    // table itself is filtered to something else.
+    function updateMissingSiteNrSummary(){
+      var summaryEl = document.getElementById('missingSiteNrSummary');
+      if(!summaryEl) return;
+      var missing = affiliatesCache.filter(function(a){ return !a.siteNr; });
+      if(!affiliatesCache.length){
+        summaryEl.textContent = '';
+        summaryEl.className = 'status';
+        return;
+      }
+      if(!missing.length){
+        summaryEl.textContent = 'All ' + affiliatesCache.length + ' affiliate' + (affiliatesCache.length === 1 ? ' has' : 's have') + ' a Site Nr set.';
+        summaryEl.className = 'status show ok';
+      }else{
+        summaryEl.textContent = missing.length + ' of ' + affiliatesCache.length + ' affiliate' + (affiliatesCache.length === 1 ? '' : 's') +
+          ' have no Site Nr set: ' + missing.map(function(a){ return a.name || a.affId; }).join(', ') + '.';
+        summaryEl.className = 'status show';
+      }
+    }
+
     function renderAffiliatesTable(){
       var body = document.getElementById('affiliatesTableBody');
       var empty = document.getElementById('affiliatesEmpty');
+      var filterToggle = document.getElementById('missingSiteNrFilterToggle');
       body.innerHTML = '';
+
+      updateMissingSiteNrSummary();
 
       if(!affiliatesCache.length){
         empty.style.display = 'block';
         return;
       }
+
+      var rows = (filterToggle && filterToggle.checked)
+        ? affiliatesCache.filter(function(a){ return !a.siteNr; })
+        : affiliatesCache;
+
+      if(!rows.length){
+        empty.style.display = 'block';
+        empty.textContent = filterToggle && filterToggle.checked
+          ? 'No affiliates are missing a Site Nr.'
+          : 'No affiliates added yet — click "+ Add Affiliate" to add your first one.';
+        return;
+      }
       empty.style.display = 'none';
 
-      affiliatesCache.forEach(function(a){
+      rows.forEach(function(a){
         var outstanding = (a.totalOwed || 0) - (a.totalPaid || 0);
         var tr = document.createElement('tr');
 
@@ -1518,6 +1564,7 @@
     }
 
     document.getElementById('refreshAffiliatesBtn').addEventListener('click', loadAffiliates);
+    document.getElementById('missingSiteNrFilterToggle').addEventListener('change', renderAffiliatesTable);
 
     // ---------- Leaderboard ----------
     (function(){
