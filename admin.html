@@ -2396,28 +2396,24 @@
         });
     });
 
-    // ---------- Collapsed booking/landing link checker ----------
-    // See fixCollapsedHookLinks in admin-api.js for the full story: a hook
-    // whose Booking link and Landing page link both ended up set to the
-    // exact same shortened link (most likely from pasting a shortened
-    // result into both raw fields instead of just the one meant to be
-    // shared). Always runs a dry run first and shows what it found before
-    // offering to actually apply anything.
-    (function(){
-      var checkBtn = document.getElementById('collapsedLinksCheckBtn');
-      var statusEl = document.getElementById('collapsedLinksStatus');
-      var resultsEl = document.getElementById('collapsedLinksResults');
-      var bodyEl = document.getElementById('collapsedLinksBody');
-      var applyBtn = document.getElementById('collapsedLinksApplyBtn');
+    // ---------- Hook-link data-integrity checkers ----------
+    // Shared by the "Collapsed booking/landing link" and "Misattributed
+    // booking link" tools below — both are the same check → dry-run
+    // preview → apply flow against a different admin-api.js action, so
+    // one wiring function drives both instead of duplicating it.
+    // opts: { idPrefix, action, noneLabel, foundLabel, toastLabel,
+    //         appliedNote (optional), renderCells(change) -> <td>...</td> }
+    function wireHookFixChecker(opts){
+      var checkBtn = document.getElementById(opts.idPrefix + 'CheckBtn');
+      var statusEl = document.getElementById(opts.idPrefix + 'Status');
+      var resultsEl = document.getElementById(opts.idPrefix + 'Results');
+      var bodyEl = document.getElementById(opts.idPrefix + 'Body');
+      var applyBtn = document.getElementById(opts.idPrefix + 'ApplyBtn');
       if(!checkBtn) return;
 
       function renderRows(changes){
         bodyEl.innerHTML = changes.map(function(c){
-          return '<tr>' +
-            '<td>' + escapeHtml(c.key) + '</td>' +
-            '<td style="word-break:break-all;">' + escapeHtml(c.oldLink) + '</td>' +
-            '<td style="word-break:break-all;">' + escapeHtml(c.newBooking) + '</td>' +
-          '</tr>';
+          return '<tr>' + opts.renderCells(c) + '</tr>';
         }).join('');
       }
 
@@ -2427,18 +2423,17 @@
         resultsEl.style.display = 'none';
         checkBtn.disabled = true;
 
-        adminPost('fixCollapsedHookLinks', { dryRun: true }).then(function(res){
+        adminPost(opts.action, { dryRun: true }).then(function(res){
           checkBtn.disabled = false;
           if(!res.data || !res.data.ok){
             statusEl.textContent = (res.data && res.data.error) || 'Could not run the check.';
             return;
           }
           if(!res.data.count){
-            statusEl.textContent = 'No collapsed links found — everything looks fine.';
+            statusEl.textContent = opts.noneLabel;
             return;
           }
-          statusEl.textContent = 'Found ' + res.data.count + ' hook' + (res.data.count === 1 ? '' : 's') +
-            ' with Booking link and Landing page link collapsed into the same short link:';
+          statusEl.textContent = 'Found ' + res.data.count + ' hook' + (res.data.count === 1 ? '' : 's') + ' ' + opts.foundLabel;
           renderRows(res.data.changes);
           resultsEl.style.display = 'block';
         }).catch(function(){
@@ -2450,83 +2445,7 @@
       applyBtn.addEventListener('click', function(){
         applyBtn.disabled = true;
         applyBtn.textContent = 'Applying…';
-        adminPost('fixCollapsedHookLinks', { dryRun: false }).then(function(res){
-          applyBtn.disabled = false;
-          applyBtn.textContent = 'Apply fix';
-          if(!res.data || !res.data.ok){
-            statusEl.textContent = (res.data && res.data.error) || 'Could not apply the fix.';
-            return;
-          }
-          statusEl.textContent = 'Fixed ' + res.data.count + ' hook' + (res.data.count === 1 ? '' : 's') +
-            '. Refresh the page to see any updated Default Hook cards below reflect it.' +
-            (res.data.writeErrors ? ' ' + res.data.writeErrors + ' hook' + (res.data.writeErrors === 1 ? '' : 's') + ' failed to save — click "Check now" again to retry just those.' : '');
-          resultsEl.style.display = 'none';
-          showToast('Collapsed links fixed');
-        }).catch(function(){
-          applyBtn.disabled = false;
-          applyBtn.textContent = 'Apply fix';
-          statusEl.textContent = 'Could not reach the server — please try again.';
-        });
-      });
-    })();
-
-    // ---------- Misattributed booking link checker ----------
-    // See fixMisattributedHookLinks in admin-api.js for the full story: a
-    // self-managed hook's Booking link is used exactly as stored, with no
-    // correction layer — so a StockNetwork booking link whose site
-    // identifier belongs to a different affiliate (pasted from the wrong
-    // place, an old example, or similar) silently sends every booking
-    // through that hook to that other account instead. Always runs a dry
-    // run first and shows what it found before offering to apply anything.
-    (function(){
-      var checkBtn = document.getElementById('misattributedLinksCheckBtn');
-      var statusEl = document.getElementById('misattributedLinksStatus');
-      var resultsEl = document.getElementById('misattributedLinksResults');
-      var bodyEl = document.getElementById('misattributedLinksBody');
-      var applyBtn = document.getElementById('misattributedLinksApplyBtn');
-      if(!checkBtn) return;
-
-      function renderRows(changes){
-        bodyEl.innerHTML = changes.map(function(c){
-          return '<tr>' +
-            '<td>' + escapeHtml(c.key) + '</td>' +
-            '<td>' + escapeHtml(c.wrongId) + '</td>' +
-            '<td style="word-break:break-all;">' + escapeHtml(c.oldBooking) + '</td>' +
-            '<td style="word-break:break-all;">' + escapeHtml(c.newBooking) + '</td>' +
-          '</tr>';
-        }).join('');
-      }
-
-      checkBtn.addEventListener('click', function(){
-        statusEl.className = 'status show';
-        statusEl.textContent = 'Checking every hook…';
-        resultsEl.style.display = 'none';
-        checkBtn.disabled = true;
-
-        adminPost('fixMisattributedHookLinks', { dryRun: true }).then(function(res){
-          checkBtn.disabled = false;
-          if(!res.data || !res.data.ok){
-            statusEl.textContent = (res.data && res.data.error) || 'Could not run the check.';
-            return;
-          }
-          if(!res.data.count){
-            statusEl.textContent = 'No misattributed booking links found — everything looks fine.';
-            return;
-          }
-          statusEl.textContent = 'Found ' + res.data.count + ' hook' + (res.data.count === 1 ? '' : 's') +
-            ' whose booking link is attributed to a different (or no) affiliate:';
-          renderRows(res.data.changes);
-          resultsEl.style.display = 'block';
-        }).catch(function(){
-          checkBtn.disabled = false;
-          statusEl.textContent = 'Could not reach the server — please try again.';
-        });
-      });
-
-      applyBtn.addEventListener('click', function(){
-        applyBtn.disabled = true;
-        applyBtn.textContent = 'Applying…';
-        adminPost('fixMisattributedHookLinks', { dryRun: false }).then(function(res){
+        adminPost(opts.action, { dryRun: false }).then(function(res){
           applyBtn.disabled = false;
           applyBtn.textContent = 'Apply fix';
           if(!res.data || !res.data.ok){
@@ -2534,16 +2453,56 @@
             return;
           }
           statusEl.textContent = 'Fixed ' + res.data.count + ' hook' + (res.data.count === 1 ? '' : 's') + '.' +
+            (opts.appliedNote || '') +
             (res.data.writeErrors ? ' ' + res.data.writeErrors + ' hook' + (res.data.writeErrors === 1 ? '' : 's') + ' failed to save — click "Check now" again to retry just those.' : '');
           resultsEl.style.display = 'none';
-          showToast('Misattributed links fixed');
+          showToast(opts.toastLabel);
         }).catch(function(){
           applyBtn.disabled = false;
           applyBtn.textContent = 'Apply fix';
           statusEl.textContent = 'Could not reach the server — please try again.';
         });
       });
-    })();
+    }
+
+    // See fixCollapsedHookLinks in admin-api.js for the full story: a hook
+    // whose Booking link and Landing page link both ended up set to the
+    // exact same shortened link (most likely from pasting a shortened
+    // result into both raw fields instead of just the one meant to be
+    // shared).
+    wireHookFixChecker({
+      idPrefix: 'collapsedLinks',
+      action: 'fixCollapsedHookLinks',
+      noneLabel: 'No collapsed links found — everything looks fine.',
+      foundLabel: 'with Booking link and Landing page link collapsed into the same short link:',
+      appliedNote: ' Refresh the page to see any updated Default Hook cards below reflect it.',
+      toastLabel: 'Collapsed links fixed',
+      renderCells: function(c){
+        return '<td>' + escapeHtml(c.key) + '</td>' +
+          '<td style="word-break:break-all;">' + escapeHtml(c.oldLink) + '</td>' +
+          '<td style="word-break:break-all;">' + escapeHtml(c.newBooking) + '</td>';
+      }
+    });
+
+    // See fixMisattributedHookLinks in admin-api.js for the full story: a
+    // self-managed hook's Booking link is used exactly as stored, with no
+    // correction layer — so a StockNetwork booking link whose site
+    // identifier belongs to a different affiliate (pasted from the wrong
+    // place, an old example, or similar) silently sends every booking
+    // through that hook to that other account instead.
+    wireHookFixChecker({
+      idPrefix: 'misattributedLinks',
+      action: 'fixMisattributedHookLinks',
+      noneLabel: 'No misattributed booking links found — everything looks fine.',
+      foundLabel: 'whose booking link is attributed to a different (or no) affiliate:',
+      toastLabel: 'Misattributed links fixed',
+      renderCells: function(c){
+        return '<td>' + escapeHtml(c.key) + '</td>' +
+          '<td>' + escapeHtml(c.wrongId) + '</td>' +
+          '<td style="word-break:break-all;">' + escapeHtml(c.oldBooking) + '</td>' +
+          '<td style="word-break:break-all;">' + escapeHtml(c.newBooking) + '</td>';
+      }
+    });
 
     // ---------- Default Hooks (admin fallback ad content) ----------
     (function(){

@@ -120,8 +120,16 @@ export default async (request, context) => {
       // that state back here too, so it can't be immediately re-created
       // after being fixed. `aff` is this exact hook's own affiliate, from
       // the ?aff= this request came in on — always the right id to
-      // enforce here.
-      record.booking = correctBookingLinkSiteId(record.booking, aff).url;
+      // enforce here, EXCEPT for ADMIN_KEY itself: this endpoint has no
+      // auth check at all, and admin's own default hook record
+      // (aff === ADMIN_KEY) is *supposed* to keep carrying the shared
+      // "Affiliate <N>" placeholder, not get "corrected" to the literal
+      // string "__admin__" — which would break personalization for every
+      // affiliate this default hook still serves. fixMisattributedHookLinks
+      // already excludes ADMIN_KEY: records the same way.
+      if (aff !== ADMIN_KEY) {
+        record.booking = correctBookingLinkSiteId(record.booking, aff).url;
+      }
       // Booking link and Landing page link ending up set to the exact
       // same short link is the specific mistake admin-api.js's
       // fixCollapsedHookLinks exists to clean up (see there for the full
