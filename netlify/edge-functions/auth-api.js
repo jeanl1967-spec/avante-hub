@@ -258,7 +258,7 @@ export default async (request, context) => {
       const periods = periodBounds();
       const stats = aggregateTransactions(records, periods);
       const emptyBucket = { count: 0, value: 0 };
-      const emptyStatus = { request: emptyBucket, booked: emptyBucket, cancelled: emptyBucket, confirmed: emptyBucket };
+      const emptyStatus = { request: emptyBucket, booked: emptyBucket, cancelled: emptyBucket, confirmed: emptyBucket, paid: emptyBucket };
 
       const myStats = {};
       const myRank = {};

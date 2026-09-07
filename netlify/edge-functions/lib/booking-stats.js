@@ -16,7 +16,7 @@
 // works for them the moment a matching report is imported.
 export const CHANNEL_KEYS = ["accommodation", "flights", "activities", "car", "package"];
 
-export const STATUS_KEYS = ["request", "booked", "cancelled", "confirmed"];
+export const STATUS_KEYS = ["request", "booked", "cancelled", "confirmed", "paid"];
 
 // StockNetwork site numbers whose transactions are tracked (so they still
 // show up in Admin) but never count as a competing affiliate on the
@@ -82,9 +82,13 @@ export function parseStockNetworkCsv(text) {
 }
 
 // The report's "Name" column is actually the booking's status (Request /
-// Booked / Cancelled), not a person's name. A non-empty "Confirmed On" date
-// always wins and maps to "confirmed", regardless of what's in "Name" —
-// that's the one column that can't lie about whether payment came in.
+// Booked / Cancelled / Confirmed / Paid), not a person's name. A non-empty
+// "Confirmed On" date always wins and maps to "confirmed", regardless of
+// what's in "Name" — that's the one column that can't lie about whether
+// payment came in. "Paid" is StockNetwork's own distinct status (seen on
+// manually-captured bookings that skip a separate "Confirmed On" step) and
+// is tracked as its own status here rather than folded into "confirmed" —
+// kept separate throughout (stats, leaderboard, WhatsApp notify-on).
 export function normalizeStockNetworkStatus(nameCol, confirmedOnCol) {
   if (confirmedOnCol && String(confirmedOnCol).trim()) return "confirmed";
   const n = String(nameCol || "").trim().toLowerCase();
@@ -92,6 +96,7 @@ export function normalizeStockNetworkStatus(nameCol, confirmedOnCol) {
   if (n === "booked") return "booked";
   if (n === "cancelled" || n === "canceled") return "cancelled";
   if (n === "request") return "request";
+  if (n === "paid") return "paid";
   return n || "unknown";
 }
 
