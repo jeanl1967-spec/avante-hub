@@ -1409,7 +1409,7 @@
         summaryEl.className = 'status show ok';
       }else{
         summaryEl.textContent = missing.length + ' of ' + affiliatesCache.length + ' affiliate' + (affiliatesCache.length === 1 ? '' : 's') +
-          ' have no Site Nr set: ' + missing.map(function(a){ return a.name || a.affId; }).join(', ') + '.';
+          (missing.length === 1 ? ' has' : ' have') + ' no Site Nr set: ' + missing.map(function(a){ return a.name || a.affId; }).join(', ') + '.';
         summaryEl.className = 'status show';
       }
     }
