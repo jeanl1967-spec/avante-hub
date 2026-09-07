@@ -1318,6 +1318,35 @@ export default async (request, context) => {
       return json({ ok: true, dryRun: dryRun, count: changes.length, changes: changes, writeErrors: writeErrors }, 200, cors);
     }
 
+    if (action === "clearAllBookingLinks") {
+      // Deliberate clean-slate reset, requested so a fresh rebuild of
+      // booking links (via the Booking Link Builder) starts from nothing
+      // instead of layering new links on top of old ones. Clears the
+      // Booking link field on EVERY hook — both admin's own defaults
+      // (__admin__:1..N, unlike the other hook-fix tools above, which
+      // intentionally exclude these) and every affiliate's own hook
+      // record. Landing page link, caption, photos/gallery, and mode are
+      // all left completely untouched — only booking is cleared to "".
+      //
+      // dryRun (default true unless explicitly false) only reports what
+      // would change — nothing is written. The admin UI always runs a
+      // dry run first and shows the full list before offering to apply
+      // it, since this touches every hook in the system at once.
+      const dryRun = body.dryRun !== false;
+
+      const { changes, writeErrors } = await scanAndFixHooks(hookStore, dryRun, async (key, record) => {
+        const booking = typeof record.booking === "string" ? record.booking : "";
+        if (!booking) return null; // already empty — nothing to clear
+
+        return {
+          updatedRecord: { ...record, booking: "", updatedAt: new Date().toISOString() },
+          changeInfo: { oldBooking: booking },
+        };
+      });
+
+      return json({ ok: true, dryRun: dryRun, count: changes.length, changes: changes, writeErrors: writeErrors }, 200, cors);
+    }
+
     if (action === "deleteAffiliate") {
       const affId = typeof body.affId === "string" ? body.affId.trim() : "";
       if (!affId) return json({ ok: false, error: "missing affId" }, 400, cors);
