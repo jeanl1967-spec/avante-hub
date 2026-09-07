@@ -1258,22 +1258,24 @@ export default async (request, context) => {
           }
           if (u.hostname !== "stock.stocknetwork.co.za") return;
 
-          const parts = u.pathname.split("/");
-          let lastIdx = -1;
-          for (let i = parts.length - 1; i >= 0; i--) {
-            if (parts[i]) { lastIdx = i; break; }
-          }
-          if (lastIdx === -1) return;
+          // Only ever touch the exact "/ui/<id>" shape STOCKNETWORK_BASE
+          // produces (same convention hub.html's extractAffiliateId and
+          // every booking-link builder in this codebase assumes) — not
+          // just "whatever the last path segment happens to be" on this
+          // host, which would also rewrite something like a future
+          // "/ui/<id>/gallery" page or any other shape we don't actually
+          // understand.
+          const segments = u.pathname.split("/").filter(Boolean);
+          if (segments.length !== 2 || segments[0] !== "ui") return;
           let seg;
           try {
-            seg = decodeURIComponent(parts[lastIdx]);
+            seg = decodeURIComponent(segments[1]);
           } catch (e) {
             return;
           }
           if (!seg || seg === affId) return; // already correct
 
-          parts[lastIdx] = encodeURIComponent(affId);
-          u.pathname = parts.join("/");
+          u.pathname = "/ui/" + encodeURIComponent(affId);
           const corrected = u.toString();
 
           if (!dryRun) {
