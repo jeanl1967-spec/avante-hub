@@ -1,6 +1,6 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
-import { resolveShortLink as resolveShortLinkShared } from "./lib/short-link.js";
+import { resolveShortLink as resolveShortLinkShared, isShortLink } from "./lib/short-link.js";
 
 // Special affiliate key reserved for admin-managed default hook content.
 // Chosen so it can never collide with a real affiliate ID (StockNetwork
@@ -111,6 +111,14 @@ export default async (request, context) => {
 
       if (typeof body.booking === "string") record.booking = body.booking;
       if (typeof body.landing === "string") record.landing = body.landing;
+      // Booking link and Landing page link ending up set to the exact
+      // same short link is the specific mistake admin-api.js's
+      // fixCollapsedHookLinks exists to clean up (see there for the full
+      // story) — guard against writing that state back here too, so it
+      // can't be immediately re-created after being fixed.
+      if (record.landing && record.landing === record.booking && isShortLink(record.booking)) {
+        record.landing = "";
+      }
       if (typeof body.caption === "string") {
         record.caption = body.caption;
         // Regenerate platform hashtags whenever the caption is (re)saved.

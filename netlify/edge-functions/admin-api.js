@@ -998,7 +998,13 @@ export default async (request, context) => {
         return json({ ok: false, error: "invalid hook number" }, 400, cors);
       }
       const booking = typeof body.booking === "string" ? body.booking.trim() : "";
-      const landing = typeof body.landing === "string" ? body.landing.trim() : "";
+      // Booking link and Landing page link ending up set to the exact
+      // same short link is the specific mistake fixCollapsedHookLinks
+      // exists to clean up (see there for the full story) — guard against
+      // writing that state back here too, so it can't be immediately
+      // re-created after being fixed.
+      const landingRaw = typeof body.landing === "string" ? body.landing.trim() : "";
+      const landing = landingRaw && landingRaw === booking && isShortLink(booking) ? "" : landingRaw;
       const caption = typeof body.caption === "string" ? body.caption.trim() : "";
       // Regenerate platform hashtags whenever the default hook is saved.
       // Best-effort: a failed/unavailable AI call just clears the cached
