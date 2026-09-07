@@ -1203,6 +1203,92 @@ export default async (request, context) => {
       return json({ ok: true, dryRun: dryRun, count: changes.length, changes: changes, writeErrors: writeErrors }, 200, cors);
     }
 
+    if (action === "fixMisattributedHookLinks") {
+      // A self-managed hook's Booking link is used exactly as stored —
+      // hook-api.js only ever personalizes an *admin-managed* hook's
+      // booking link (source === "admin"); a self-managed one (mode
+      // "self", not expired) is returned verbatim, with no correction
+      // layer. hub.html's own Accommodation Link Builder always puts the
+      // affiliate's own Hub ID as the StockNetwork booking link's site
+      // identifier (the last "/ui/<id>" path segment) — so if that
+      // segment doesn't match the affiliate who actually owns this hook
+      // (the affId half of its own "<affId>:<n>" key), the booking was
+      // set wrong: pasted from a different affiliate's link, an old
+      // example, or similar. Every booking through that hook then
+      // attributes to whoever that other id belongs to instead of this
+      // affiliate — including a real StockNetwork site number that isn't
+      // any registered affiliate at all, if that's what ended up there.
+      //
+      // Scans every non-admin hook (__admin__:* keys are excluded — an
+      // admin default is *supposed* to carry the "Affiliate <N>"
+      // placeholder, not any specific affiliate's id, a different,
+      // already-handled case). Only ever touches a booking link on
+      // stock.stocknetwork.co.za, whose last path segment we can
+      // confidently identify and swap for the correct one — any other
+      // link shape (a self-managed hook's booking doesn't have to be a
+      // StockNetwork link at all) is left completely untouched, exactly
+      // like personalizeStockNetworkUrl's own approach in hook-api.js.
+      // Only that one path segment changes; every query param (dates,
+      // Filter) an affiliate already set is preserved.
+      //
+      // dryRun (default true unless explicitly false) only reports what
+      // would change — nothing is written.
+      const dryRun = body.dryRun !== false;
+      const { blobs } = await hookStore.list();
+
+      const changes = [];
+      let writeErrors = 0;
+      await mapWithConcurrency(blobs, async (b) => {
+        try {
+          if (b.key.startsWith("__admin__:")) return;
+          const sep = b.key.lastIndexOf(":");
+          if (sep <= 0) return;
+          const affId = b.key.slice(0, sep);
+
+          const record = await hookStore.get(b.key, { type: "json" }).catch(() => null);
+          if (!record) return;
+          const booking = typeof record.booking === "string" ? record.booking : "";
+          if (!booking) return;
+
+          let u;
+          try {
+            u = new URL(booking);
+          } catch (e) {
+            return;
+          }
+          if (u.hostname !== "stock.stocknetwork.co.za") return;
+
+          const parts = u.pathname.split("/");
+          let lastIdx = -1;
+          for (let i = parts.length - 1; i >= 0; i--) {
+            if (parts[i]) { lastIdx = i; break; }
+          }
+          if (lastIdx === -1) return;
+          let seg;
+          try {
+            seg = decodeURIComponent(parts[lastIdx]);
+          } catch (e) {
+            return;
+          }
+          if (!seg || seg === affId) return; // already correct
+
+          parts[lastIdx] = encodeURIComponent(affId);
+          u.pathname = parts.join("/");
+          const corrected = u.toString();
+
+          if (!dryRun) {
+            const updated = { ...record, booking: corrected, updatedAt: new Date().toISOString() };
+            await hookStore.setJSON(b.key, updated);
+          }
+          changes.push({ key: b.key, oldBooking: booking, newBooking: corrected, wrongId: seg });
+        } catch (e) {
+          writeErrors++;
+        }
+      });
+
+      return json({ ok: true, dryRun: dryRun, count: changes.length, changes: changes, writeErrors: writeErrors }, 200, cors);
+    }
+
     if (action === "deleteAffiliate") {
       const affId = typeof body.affId === "string" ? body.affId.trim() : "";
       if (!affId) return json({ ok: false, error: "missing affId" }, 400, cors);
