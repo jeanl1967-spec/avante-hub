@@ -1323,10 +1323,14 @@ export default async (request, context) => {
       // booking links (via the Booking Link Builder) starts from nothing
       // instead of layering new links on top of old ones. Clears the
       // Booking link field on EVERY hook — both admin's own defaults
-      // (__admin__:1..N, unlike the other hook-fix tools above, which
-      // intentionally exclude these) and every affiliate's own hook
-      // record. Landing page link, caption, photos/gallery, and mode are
-      // all left completely untouched — only booking is cleared to "".
+      // (__admin__:1..N) and every affiliate's own hook record. Unlike
+      // fixMisattributedHookLinks and switchHooksToAdminManaged above
+      // (which intentionally exclude __admin__:* — a Site Nr or a
+      // "Manage my own" toggle only ever makes sense for a real
+      // affiliate), this one deliberately includes the admin defaults
+      // too, per the request. Landing page link, caption, photos/
+      // gallery, and mode are all left completely untouched — only
+      // booking is cleared to "".
       //
       // dryRun (default true unless explicitly false) only reports what
       // would change — nothing is written. The admin UI always runs a
