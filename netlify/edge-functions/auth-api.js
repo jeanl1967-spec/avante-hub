@@ -3,6 +3,7 @@ import {
   periodBounds,
   aggregateTransactions,
   buildLeaderboard,
+  loadAffiliatesAndTransactions,
   CHANNEL_KEYS as STATS_CHANNEL_KEYS,
   LEADERBOARD_EXCLUDED_SITE_NRS,
 } from "./lib/booking-stats.js";
@@ -241,19 +242,7 @@ export default async (request, context) => {
       // (a position and a total, never another affiliate's name or data),
       // even though the underlying stats/leaderboard are computed the same
       // way admin-api.js's bookingStats resource computes them.
-      const { blobs: affBlobs } = await directoryStore.list();
-      const affiliatesById = {};
-      for (const b of affBlobs) {
-        const rec = await directoryStore.get(b.key, { type: "json" });
-        if (rec) affiliatesById[rec.affId] = rec;
-      }
-
-      const { blobs: txBlobs } = await transactionsStore.list();
-      const records = [];
-      for (const b of txBlobs) {
-        const rec = await transactionsStore.get(b.key, { type: "json" });
-        if (rec) records.push(rec);
-      }
+      const { affiliatesById, records } = await loadAffiliatesAndTransactions(directoryStore, transactionsStore);
 
       const periods = periodBounds();
       const stats = aggregateTransactions(records, periods);

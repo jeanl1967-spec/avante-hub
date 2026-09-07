@@ -9,6 +9,8 @@ import {
   periodBounds,
   aggregateTransactions,
   buildLeaderboard,
+  loadAffiliatesAndTransactions,
+  mapWithConcurrency,
   CHANNEL_KEYS as STATS_CHANNEL_KEYS,
 } from "./lib/booking-stats.js";
 
@@ -272,19 +274,7 @@ export default async (request, context) => {
       }
 
       if (resource === "bookingStats") {
-        const { blobs: affBlobs } = await directoryStore.list();
-        const affiliatesById = {};
-        for (const b of affBlobs) {
-          const rec = await directoryStore.get(b.key, { type: "json" });
-          if (rec) affiliatesById[rec.affId] = rec;
-        }
-
-        const { blobs: txBlobs } = await transactionsStore.list();
-        const records = [];
-        for (const b of txBlobs) {
-          const rec = await transactionsStore.get(b.key, { type: "json" });
-          if (rec) records.push(rec);
-        }
+        const { affiliatesById, records } = await loadAffiliatesAndTransactions(directoryStore, transactionsStore);
 
         const periods = periodBounds();
         const stats = aggregateTransactions(records, periods);
@@ -561,13 +551,17 @@ export default async (request, context) => {
         return json({ ok: false, error: "Couldn't find any booking rows in that file." }, 400, cors);
       }
 
-      // Site Nr -> affiliate lookup, built once per import.
+      // Site Nr -> affiliate lookup, built once per import. Fetched
+      // concurrently (bounded) rather than one directoryStore.get() at a
+      // time — with dozens of affiliates that for-loop was the difference
+      // between a handful of round trips overlapping and all of them
+      // serialized end-to-end before a single CSV row could even start.
       const { blobs: affBlobs } = await directoryStore.list();
       const siteToAff = {};
-      for (const b of affBlobs) {
+      await mapWithConcurrency(affBlobs, async (b) => {
         const rec = await directoryStore.get(b.key, { type: "json" });
         if (rec && rec.siteNr) siteToAff[String(rec.siteNr).trim()] = rec;
-      }
+      });
 
       let created = 0;
       let updated = 0;
@@ -576,6 +570,11 @@ export default async (request, context) => {
       let skippedNoRef = 0;
       const seenInFile = new Set();
 
+      // Pass 1 — pure in-memory work (dedup by RefNo, match the affiliate):
+      // must run in row order so "first occurrence of a repeated RefNo
+      // wins" stays deterministic, but touches no store, so it's fast
+      // regardless of how many rows there are.
+      const toWrite = [];
       for (const row of rows) {
         const refNo = (row.RefNo || "").trim();
         if (!refNo) {
@@ -594,7 +593,17 @@ export default async (request, context) => {
           unmatchedSite++;
           continue;
         }
+        toWrite.push({ row, refNo, site, aff });
+      }
 
+      // Pass 2 — the actual store round trips (one read + one write per
+      // row, each a distinct RefNo key so none of these can collide with
+      // each other), run with bounded concurrency instead of one row at a
+      // time. created/updated/unchanged are plain counters incremented by
+      // a single synchronous statement per row — safe under this
+      // concurrency since JS never interleaves mid-statement, only at
+      // await points.
+      await mapWithConcurrency(toWrite, async ({ row, refNo, site, aff }) => {
         const status = normalizeStockNetworkStatus(row.Name, row["Confirmed On"]);
         const record = {
           refNo: refNo,
@@ -633,7 +642,7 @@ export default async (request, context) => {
           created++;
         }
         await transactionsStore.setJSON(refNo, record);
-      }
+      });
 
       return json(
         {

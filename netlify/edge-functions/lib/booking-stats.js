@@ -212,3 +212,52 @@ export function buildLeaderboard(channelStats, affiliatesById) {
   byValue.forEach((r, i) => (r.rankByValue = i + 1));
   return { byCount: byCount, byValue: byValue, totalRanked: rows.length };
 }
+
+// ---- Blob store helpers ----
+
+// Netlify Blobs has no bulk-get — reading N affiliates or transactions means
+// N separate store.get() round trips. A plain for-loop awaiting each one in
+// turn serializes all of them end-to-end, which gets slow (and risks the
+// edge function's execution-time limit) as the affiliate list or the
+// transaction history grows. A small fixed-size worker pool keeps several
+// requests in flight at once without firing hundreds of them simultaneously.
+const DEFAULT_CONCURRENCY = 20;
+
+export async function mapWithConcurrency(items, fn, concurrency) {
+  concurrency = concurrency || DEFAULT_CONCURRENCY;
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const workers = [];
+  for (let i = 0; i < Math.min(concurrency, items.length); i++) workers.push(worker());
+  await Promise.all(workers);
+  return results;
+}
+
+// Shared by admin-api.js's `bookingStats` resource and auth-api.js's
+// `getMyBookingStats` action — both need the full affiliate directory and
+// every imported transaction, fetched and shaped the exact same way. One
+// copy means both benefit from the concurrency above the same way, and
+// can't drift apart on how these two stores get read.
+export async function loadAffiliatesAndTransactions(directoryStore, transactionsStore) {
+  const { blobs: affBlobs } = await directoryStore.list();
+  const affiliatesById = {};
+  await mapWithConcurrency(affBlobs, async (b) => {
+    const rec = await directoryStore.get(b.key, { type: "json" });
+    if (rec) affiliatesById[rec.affId] = rec;
+  });
+
+  const { blobs: txBlobs } = await transactionsStore.list();
+  const records = [];
+  await mapWithConcurrency(txBlobs, async (b) => {
+    const rec = await transactionsStore.get(b.key, { type: "json" });
+    if (rec) records.push(rec);
+  });
+
+  return { affiliatesById, records };
+}
