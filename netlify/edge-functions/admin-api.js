@@ -645,19 +645,28 @@ export default async (request, context) => {
           };
 
           const existing = await transactionsStore.get(refNo, { type: "json" });
+          // Decide the outcome now, but don't count it until the write
+          // below actually succeeds — otherwise a setJSON that throws
+          // would land in both a success counter (created/updated/
+          // unchanged) and writeErrors for the same row, double-counting
+          // it and inflating the summary while the record was never
+          // actually persisted.
+          let outcome;
           if (existing) {
             record.firstImportedAt = existing.firstImportedAt || existing.importedAt;
             const changed =
               existing.status !== record.status ||
               existing.amountIncl !== record.amountIncl ||
               existing.confirmedOn !== record.confirmedOn;
-            if (changed) updated++;
-            else unchanged++;
+            outcome = changed ? "updated" : "unchanged";
           } else {
             record.firstImportedAt = record.importedAt;
-            created++;
+            outcome = "created";
           }
           await transactionsStore.setJSON(refNo, record);
+          if (outcome === "created") created++;
+          else if (outcome === "updated") updated++;
+          else unchanged++;
         } catch (e) {
           writeErrors++;
         }
@@ -1069,28 +1078,39 @@ export default async (request, context) => {
       }
 
       const galleryCount = Math.max(0, saved - 1);
-      const existing = (await hookStore.get("__admin__:" + n, { type: "json" })) || {};
-      existing.galleryCount = galleryCount;
-      // Optional — carried straight through from generateHookDraft's
-      // response rather than re-scraped here, so a hook remembers what
-      // property/area it was built from (shown on the hook card and on the
-      // new landing page's "full details"). Left untouched if this save
-      // didn't come from an Auto-build draft (e.g. a future manual photo
-      // save with no source context).
-      if (body.source && typeof body.source === "object") {
-        existing.source = {
-          mode: body.source.mode === "area" ? "area" : "property",
-          label: typeof body.source.label === "string" ? body.source.label.trim().slice(0, 200) : "",
-          description: typeof body.source.description === "string" ? body.source.description.trim().slice(0, 2000) : "",
-          attractions: typeof body.source.attractions === "string" ? body.source.attractions.trim().slice(0, 2000) : "",
-          roomType: typeof body.source.roomType === "string" ? body.source.roomType.trim().slice(0, 100) : "",
-          names: Array.isArray(body.source.names)
-            ? body.source.names.filter((x) => typeof x === "string").slice(0, 10)
-            : [],
-        };
+
+      // Every candidate photo can fail to download (dead/expired
+      // StockNetwork URLs, a network blip) — saved stays 0 and the
+      // response below already reports that as a failure. Don't touch
+      // the hook's stored record in that case: this hook may already
+      // have a working gallery from an earlier successful save, and
+      // unconditionally overwriting galleryCount to 0 here would silently
+      // wipe that out (orphaning its still-live image blobs) despite the
+      // API telling the caller nothing was saved.
+      if (saved > 0) {
+        const existing = (await hookStore.get("__admin__:" + n, { type: "json" })) || {};
+        existing.galleryCount = galleryCount;
+        // Optional — carried straight through from generateHookDraft's
+        // response rather than re-scraped here, so a hook remembers what
+        // property/area it was built from (shown on the hook card and on
+        // the new landing page's "full details"). Left untouched if this
+        // save didn't come from an Auto-build draft (e.g. a future manual
+        // photo save with no source context).
+        if (body.source && typeof body.source === "object") {
+          existing.source = {
+            mode: body.source.mode === "area" ? "area" : "property",
+            label: typeof body.source.label === "string" ? body.source.label.trim().slice(0, 200) : "",
+            description: typeof body.source.description === "string" ? body.source.description.trim().slice(0, 2000) : "",
+            attractions: typeof body.source.attractions === "string" ? body.source.attractions.trim().slice(0, 2000) : "",
+            roomType: typeof body.source.roomType === "string" ? body.source.roomType.trim().slice(0, 100) : "",
+            names: Array.isArray(body.source.names)
+              ? body.source.names.filter((x) => typeof x === "string").slice(0, 10)
+              : [],
+          };
+        }
+        existing.updatedAt = new Date().toISOString();
+        await hookStore.setJSON("__admin__:" + n, existing);
       }
-      existing.updatedAt = new Date().toISOString();
-      await hookStore.setJSON("__admin__:" + n, existing);
 
       return json(
         { ok: saved > 0, saved: saved, failed: failed.length, galleryCount: galleryCount },
