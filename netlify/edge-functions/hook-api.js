@@ -1,6 +1,7 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
 import { resolveShortLink as resolveShortLinkShared, isShortLink } from "./lib/short-link.js";
+import { correctBookingLinkSiteId } from "./lib/booking-link.js";
 
 // Special affiliate key reserved for admin-managed default hook content.
 // Chosen so it can never collide with a real affiliate ID (StockNetwork
@@ -111,6 +112,16 @@ export default async (request, context) => {
 
       if (typeof body.booking === "string") record.booking = body.booking;
       if (typeof body.landing === "string") record.landing = body.landing;
+      // A StockNetwork booking link's site identifier not matching this
+      // affiliate's own id is the specific mistake admin-api.js's
+      // fixMisattributedHookLinks exists to clean up (see there for the
+      // full story: it silently sends every booking through this hook to
+      // whoever that other id belongs to instead) — guard against writing
+      // that state back here too, so it can't be immediately re-created
+      // after being fixed. `aff` is this exact hook's own affiliate, from
+      // the ?aff= this request came in on — always the right id to
+      // enforce here.
+      record.booking = correctBookingLinkSiteId(record.booking, aff).url;
       // Booking link and Landing page link ending up set to the exact
       // same short link is the specific mistake admin-api.js's
       // fixCollapsedHookLinks exists to clean up (see there for the full

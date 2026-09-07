@@ -2,6 +2,7 @@ import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
 import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
 import { isShortLink, resolveShortLink } from "./lib/short-link.js";
+import { correctBookingLinkSiteId } from "./lib/booking-link.js";
 import {
   parseStockNetworkCsv,
   normalizeStockNetworkStatus,
@@ -177,6 +178,41 @@ function json(data, status, cors) {
     status: status || 200,
     headers: { "content-type": "application/json", ...cors },
   });
+}
+
+// Shared by fixCollapsedHookLinks and fixMisattributedHookLinks: scan
+// every hook in hookStore, ask `checkAndFix` what (if anything) needs to
+// change for each one, and either report or apply it. Each hook's own
+// read/check/write is independently caught — one hook's failure can't
+// abort the whole batch or hide what happened to every other hook run
+// concurrently alongside it (same reasoning as importStockNetworkReport's
+// row loop). The returned `changes` list only ever records a hook once
+// its fix has actually landed (or, on a dry run, once checkAndFix
+// confirmed one is needed) — never speculatively before that.
+//
+// checkAndFix(key, record) returns null if this hook needs no change, or
+// { updatedRecord, changeInfo } — updatedRecord is what gets written
+// (dryRun permitting), changeInfo is merged into `{ key, ...changeInfo }`
+// for this hook's entry in the returned changes list.
+async function scanAndFixHooks(hookStore, dryRun, checkAndFix) {
+  const { blobs } = await hookStore.list();
+  const changes = [];
+  let writeErrors = 0;
+  await mapWithConcurrency(blobs, async (b) => {
+    try {
+      const record = await hookStore.get(b.key, { type: "json" }).catch(() => null);
+      if (!record) return;
+      const result = await checkAndFix(b.key, record);
+      if (!result) return;
+      if (!dryRun) {
+        await hookStore.setJSON(b.key, result.updatedRecord);
+      }
+      changes.push({ key: b.key, ...result.changeInfo });
+    } catch (e) {
+      writeErrors++;
+    }
+  });
+  return { changes, writeErrors };
 }
 
 export default async (request, context) => {
@@ -1166,38 +1202,19 @@ export default async (request, context) => {
       // dry run first and shows the list before offering to apply it.
       const dryRun = body.dryRun !== false;
       const shortLinksStore = getStore({ name: "short-links", consistency: "strong" });
-      const { blobs } = await hookStore.list();
 
-      // Each hook catches its own failure rather than letting it reject
-      // the whole mapWithConcurrency batch (same reasoning as
-      // importStockNetworkReport's row loop above): otherwise one bad
-      // write turns the whole request into a 500 with no indication of
-      // which of the other, concurrently-running hooks already got
-      // written before the response gave up on all of them. changes only
-      // records a hook once its fix has actually landed (or, on a dry
-      // run, once it's confirmed resolvable) — never speculatively before
-      // that — so the returned list is exactly what happened.
-      const changes = [];
-      let writeErrors = 0;
-      await mapWithConcurrency(blobs, async (b) => {
-        try {
-          const record = await hookStore.get(b.key, { type: "json" }).catch(() => null);
-          if (!record) return;
-          const booking = typeof record.booking === "string" ? record.booking : "";
-          const landing = typeof record.landing === "string" ? record.landing : "";
-          if (!booking || booking !== landing || !isShortLink(booking)) return;
+      const { changes, writeErrors } = await scanAndFixHooks(hookStore, dryRun, async (key, record) => {
+        const booking = typeof record.booking === "string" ? record.booking : "";
+        const landing = typeof record.landing === "string" ? record.landing : "";
+        if (!booking || booking !== landing || !isShortLink(booking)) return null;
 
-          const resolved = await resolveShortLink(booking, shortLinksStore);
-          if (resolved === booking) return; // couldn't resolve to anything different — leave alone
+        const resolved = await resolveShortLink(booking, shortLinksStore);
+        if (resolved === booking) return null; // couldn't resolve to anything different — leave alone
 
-          if (!dryRun) {
-            const updated = { ...record, booking: resolved, landing: "", updatedAt: new Date().toISOString() };
-            await hookStore.setJSON(b.key, updated);
-          }
-          changes.push({ key: b.key, oldLink: booking, newBooking: resolved });
-        } catch (e) {
-          writeErrors++;
-        }
+        return {
+          updatedRecord: { ...record, booking: resolved, landing: "", updatedAt: new Date().toISOString() },
+          changeInfo: { oldLink: booking, newBooking: resolved },
+        };
       });
 
       return json({ ok: true, dryRun: dryRun, count: changes.length, changes: changes, writeErrors: writeErrors }, 200, cors);
@@ -1210,82 +1227,45 @@ export default async (request, context) => {
       // "self", not expired) is returned verbatim, with no correction
       // layer. hub.html's own Accommodation Link Builder always puts the
       // affiliate's own Hub ID as the StockNetwork booking link's site
-      // identifier (the last "/ui/<id>" path segment) — so if that
-      // segment doesn't match the affiliate who actually owns this hook
-      // (the affId half of its own "<affId>:<n>" key), the booking was
-      // set wrong: pasted from a different affiliate's link, an old
-      // example, or similar. Every booking through that hook then
-      // attributes to whoever that other id belongs to instead of this
-      // affiliate — including a real StockNetwork site number that isn't
-      // any registered affiliate at all, if that's what ended up there.
+      // identifier (the "/ui/<id>" path segment) — so if that segment
+      // doesn't match the affiliate who actually owns this hook (the
+      // affId half of its own "<affId>:<n>" key), the booking was set
+      // wrong: pasted from a different affiliate's link, an old example,
+      // or similar. Every booking through that hook then attributes to
+      // whoever that other id belongs to instead of this affiliate —
+      // including a real StockNetwork site number that isn't any
+      // registered affiliate at all, if that's what ended up there.
       //
       // Scans every non-admin hook (__admin__:* keys are excluded — an
       // admin default is *supposed* to carry the "Affiliate <N>"
       // placeholder, not any specific affiliate's id, a different,
-      // already-handled case). Only ever touches a booking link on
-      // stock.stocknetwork.co.za, whose last path segment we can
-      // confidently identify and swap for the correct one — any other
-      // link shape (a self-managed hook's booking doesn't have to be a
-      // StockNetwork link at all) is left completely untouched, exactly
-      // like personalizeStockNetworkUrl's own approach in hook-api.js.
-      // Only that one path segment changes; every query param (dates,
-      // Filter) an affiliate already set is preserved.
+      // already-handled case). correctBookingLinkSiteId only ever touches
+      // the exact "/ui/<id>" shape on stock.stocknetwork.co.za — any
+      // other link shape (a self-managed hook's booking doesn't have to
+      // be a StockNetwork link at all) is left completely untouched. Only
+      // that one path segment changes; every query param (dates, Filter)
+      // an affiliate already set is preserved.
       //
       // dryRun (default true unless explicitly false) only reports what
       // would change — nothing is written.
       const dryRun = body.dryRun !== false;
-      const { blobs } = await hookStore.list();
 
-      const changes = [];
-      let writeErrors = 0;
-      await mapWithConcurrency(blobs, async (b) => {
-        try {
-          if (b.key.startsWith("__admin__:")) return;
-          const sep = b.key.lastIndexOf(":");
-          if (sep <= 0) return;
-          const affId = b.key.slice(0, sep);
+      const { changes, writeErrors } = await scanAndFixHooks(hookStore, dryRun, async (key, record) => {
+        if (key.startsWith("__admin__:")) return null;
+        const sep = key.lastIndexOf(":");
+        if (sep <= 0) return null;
+        const affId = key.slice(0, sep);
 
-          const record = await hookStore.get(b.key, { type: "json" }).catch(() => null);
-          if (!record) return;
-          const booking = typeof record.booking === "string" ? record.booking : "";
-          if (!booking) return;
+        const booking = typeof record.booking === "string" ? record.booking : "";
+        if (!booking) return null;
 
-          let u;
-          try {
-            u = new URL(booking);
-          } catch (e) {
-            return;
-          }
-          if (u.hostname !== "stock.stocknetwork.co.za") return;
+        const result = correctBookingLinkSiteId(booking, affId);
+        if (!result.changed) return null;
 
-          // Only ever touch the exact "/ui/<id>" shape STOCKNETWORK_BASE
-          // produces (same convention hub.html's extractAffiliateId and
-          // every booking-link builder in this codebase assumes) — not
-          // just "whatever the last path segment happens to be" on this
-          // host, which would also rewrite something like a future
-          // "/ui/<id>/gallery" page or any other shape we don't actually
-          // understand.
-          const segments = u.pathname.split("/").filter(Boolean);
-          if (segments.length !== 2 || segments[0] !== "ui") return;
-          let seg;
-          try {
-            seg = decodeURIComponent(segments[1]);
-          } catch (e) {
-            return;
-          }
-          if (!seg || seg === affId) return; // already correct
-
-          u.pathname = "/ui/" + encodeURIComponent(affId);
-          const corrected = u.toString();
-
-          if (!dryRun) {
-            const updated = { ...record, booking: corrected, updatedAt: new Date().toISOString() };
-            await hookStore.setJSON(b.key, updated);
-          }
-          changes.push({ key: b.key, oldBooking: booking, newBooking: corrected, wrongId: seg });
-        } catch (e) {
-          writeErrors++;
-        }
+        return {
+          updatedRecord: { ...record, booking: result.url, updatedAt: new Date().toISOString() },
+          changeInfo: { oldBooking: booking, newBooking: result.url, wrongId: result.previousSiteId },
+        };
       });
 
       return json({ ok: true, dryRun: dryRun, count: changes.length, changes: changes, writeErrors: writeErrors }, 200, cors);
