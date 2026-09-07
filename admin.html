@@ -514,6 +514,9 @@
       <label class="wa-status-row" for="waNotifyConfirmedInput">
         <input type="checkbox" id="waNotifyConfirmedInput"> Confirmed &mdash; payment received
       </label>
+      <label class="wa-status-row" for="waNotifyPaidInput">
+        <input type="checkbox" id="waNotifyPaidInput"> Paid &mdash; payment received (StockNetwork "Paid" status)
+      </label>
       <div class="modal-status" id="waModalStatus"></div>
       <div class="modal-actions">
         <button type="button" class="btn-outline" id="waTestBtn" style="margin-right:auto;">Send Test Message</button>
@@ -807,7 +810,7 @@
 
         <div style="margin-top:20px;">
           <h3 style="margin-bottom:8px;">Leaderboard — Confirmed Bookings</h3>
-          <p style="color:var(--muted); margin-top:-4px; font-size:13px;">Ranked on confirmed (paid) bookings only. Affiliate 36 (the master/admin account) is tracked but never ranked here.</p>
+          <p style="color:var(--muted); margin-top:-4px; font-size:13px;">Ranked on "Confirmed" bookings only (the separate "Paid" status shown below does not count toward this ranking). Affiliate 36 (the master/admin account) is tracked but never ranked here.</p>
           <div class="table-wrap">
             <table class="data-table">
               <thead>
@@ -824,7 +827,7 @@
           <div class="table-wrap">
             <table class="data-table">
               <thead>
-                <tr><th>Affiliate</th><th>Request</th><th>Booked</th><th>Cancelled</th><th>Confirmed</th></tr>
+                <tr><th>Affiliate</th><th>Request</th><th>Booked</th><th>Cancelled</th><th>Confirmed</th><th>Paid</th></tr>
               </thead>
               <tbody id="bookingsBreakdownBody"></tbody>
             </table>
@@ -1536,7 +1539,7 @@
       });
     }
 
-    var STATUS_COLS = ['request', 'booked', 'cancelled', 'confirmed'];
+    var STATUS_COLS = ['request', 'booked', 'cancelled', 'confirmed', 'paid'];
 
     function statCell(bucket){
       if(!bucket || !bucket.count) return '—';
@@ -1721,9 +1724,9 @@
       if(a && Array.isArray(a.whatsappNotifyOn) && a.whatsappNotifyOn.length){
         return a.whatsappNotifyOn;
       }
-      return ['request', 'booked', 'confirmed'];
+      return ['request', 'booked', 'confirmed', 'paid'];
     }
-    var WA_STATUS_LABELS_ = { request: 'Request', booked: 'Booked', confirmed: 'Confirmed' };
+    var WA_STATUS_LABELS_ = { request: 'Request', booked: 'Booked', confirmed: 'Confirmed', paid: 'Paid' };
     function renderWhatsappTable(){
       var body = document.getElementById('waTableBody');
       var empty = document.getElementById('waEmpty');
@@ -1836,6 +1839,7 @@
       document.getElementById('waNotifyRequestInput').checked = notifyOn.indexOf('request') > -1;
       document.getElementById('waNotifyBookedInput').checked = notifyOn.indexOf('booked') > -1;
       document.getElementById('waNotifyConfirmedInput').checked = notifyOn.indexOf('confirmed') > -1;
+      document.getElementById('waNotifyPaidInput').checked = notifyOn.indexOf('paid') > -1;
       var picker = document.getElementById('waGroupPicker');
       picker.innerHTML = '';
       picker.style.display = 'none';
@@ -1857,6 +1861,7 @@
       if(document.getElementById('waNotifyRequestInput').checked) notifyOn.push('request');
       if(document.getElementById('waNotifyBookedInput').checked) notifyOn.push('booked');
       if(document.getElementById('waNotifyConfirmedInput').checked) notifyOn.push('confirmed');
+      if(document.getElementById('waNotifyPaidInput').checked) notifyOn.push('paid');
       if(!notifyOn.length){
         statusEl.textContent = 'Check at least one booking status to notify on.';
         statusEl.classList.add('show');

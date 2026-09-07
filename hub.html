@@ -1978,8 +1978,8 @@
       var breakdownEl = document.getElementById('dash-breakdown');
       if(!channelSel) return;
 
-      var STATUS_LABELS = { request: 'Request', booked: 'Booked', cancelled: 'Cancelled', confirmed: 'Confirmed' };
-      var STATUS_ORDER = ['request', 'booked', 'cancelled', 'confirmed'];
+      var STATUS_LABELS = { request: 'Request', booked: 'Booked', cancelled: 'Cancelled', confirmed: 'Confirmed', paid: 'Paid' };
+      var STATUS_ORDER = ['request', 'booked', 'cancelled', 'confirmed', 'paid'];
 
       function dashMoney(n){
         n = Number(n) || 0;
@@ -1995,7 +1995,7 @@
         var period = periodSel.value || 'mtd';
         var bounds = dashCache.periods[period];
 
-        var emptyStatus = { request:{count:0,value:0}, booked:{count:0,value:0}, cancelled:{count:0,value:0}, confirmed:{count:0,value:0} };
+        var emptyStatus = { request:{count:0,value:0}, booked:{count:0,value:0}, cancelled:{count:0,value:0}, confirmed:{count:0,value:0}, paid:{count:0,value:0} };
         var byStatus = (dashCache.myStats[period] && dashCache.myStats[period][channel]) || emptyStatus;
         var rank = (dashCache.myRank[period] && dashCache.myRank[period][channel]) || { byCount: null, byValue: null };
 

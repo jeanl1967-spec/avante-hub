@@ -453,13 +453,14 @@ export default async (request, context) => {
 
       // Affiliates can choose (in the WhatsApp Messaging tab) to only be
       // notified for "request" bookings, "booked" ones, "confirmed" ones,
-      // or any combination. Affiliates set up before this control existed
-      // have no whatsappNotifyOn field, which is treated as "notify on
-      // everything" so nothing that already worked silently stops working.
+      // "paid" ones, or any combination. Affiliates set up before this
+      // control existed have no whatsappNotifyOn field, which is treated as
+      // "notify on everything" so nothing that already worked silently
+      // stops working.
       const notifyOn =
         matched && Array.isArray(matched.whatsappNotifyOn) && matched.whatsappNotifyOn.length
           ? matched.whatsappNotifyOn
-          : ["request", "booked", "confirmed"];
+          : ["request", "booked", "confirmed", "paid"];
 
       if (matched && bookingStatus !== "unknown" && !notifyOn.includes(bookingStatus)) {
         context.waitUntil(
@@ -736,10 +737,12 @@ export default async (request, context) => {
       existing.bookingEmailAlias = sanitizeAlias_(body.bookingEmailAlias || "");
       existing.whatsappGroupId = typeof body.whatsappGroupId === "string" ? body.whatsappGroupId.trim() : "";
       if (Array.isArray(body.notifyOn)) {
-        const cleaned = body.notifyOn.filter((s) => s === "request" || s === "booked" || s === "confirmed");
-        existing.whatsappNotifyOn = cleaned.length ? cleaned : ["request", "booked", "confirmed"];
+        const cleaned = body.notifyOn.filter(
+          (s) => s === "request" || s === "booked" || s === "confirmed" || s === "paid"
+        );
+        existing.whatsappNotifyOn = cleaned.length ? cleaned : ["request", "booked", "confirmed", "paid"];
       } else if (!Array.isArray(existing.whatsappNotifyOn) || !existing.whatsappNotifyOn.length) {
-        existing.whatsappNotifyOn = ["request", "booked"];
+        existing.whatsappNotifyOn = ["request", "booked", "confirmed", "paid"];
       }
       existing.updatedAt = new Date().toISOString();
       await directoryStore.setJSON(affId, existing);
