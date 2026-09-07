@@ -2510,8 +2510,12 @@
         // to sit earliest in the candidate grid.
         var pickedUrls = draft.picked.map(function(idx){ return draft.photos[idx]; });
         if(!pickedUrls.length){
-          statusEl.textContent = 'Caption and booking link filled in — remember to click "Save default" below. (No photos were picked.)';
-          updateSourceNote(n, source);
+          // "Built from" is only ever persisted by the saveHookPhotos
+          // call below, alongside the picked photos — with none picked,
+          // that call never happens, so showing the note here would
+          // claim something saved that a page refresh will show was
+          // never actually stored.
+          statusEl.textContent = 'Caption and booking link filled in — remember to click "Save default" below. (No photos were picked, so "Built from" won\'t be saved this time.)';
           return;
         }
 

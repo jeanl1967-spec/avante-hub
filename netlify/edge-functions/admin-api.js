@@ -1089,6 +1089,7 @@ export default async (request, context) => {
       // API telling the caller nothing was saved.
       if (saved > 0) {
         const existing = (await hookStore.get("__admin__:" + n, { type: "json" })) || {};
+        const previousGalleryCount = existing.galleryCount || 0;
         existing.galleryCount = galleryCount;
         // Optional — carried straight through from generateHookDraft's
         // response rather than re-scraped here, so a hook remembers what
@@ -1110,6 +1111,19 @@ export default async (request, context) => {
         }
         existing.updatedAt = new Date().toISOString();
         await hookStore.setJSON("__admin__:" + n, existing);
+
+        // A previous save may have covered more gallery slots than this
+        // one did (e.g. 4 photos saved before, only 2 saved this time) —
+        // without this, the extra slots' image blobs would sit in
+        // storage forever, orphaned: no longer referenced by galleryCount
+        // above, but never deleted either.
+        if (previousGalleryCount > galleryCount) {
+          const staleSlots = [];
+          for (let slot = galleryCount + 1; slot <= previousGalleryCount; slot++) staleSlots.push(slot);
+          await mapWithConcurrency(staleSlots, (slot) =>
+            imageStore.delete("__admin__:" + n + ":" + slot).catch(() => {})
+          );
+        }
       }
 
       return json(
