@@ -377,6 +377,23 @@
   .autobuild-photo:not(.picked) .autobuild-photo-check{ display:none; }
   .autobuild-use-btn{ width:100%; margin-top:10px; padding:9px; font-size:13px; }
 
+  /* ---- Booking Link Builder (build this hook's default booking link) ---- */
+  .linkbuilder-toggle{
+    width:100%; margin-top:10px; background:#fff; color:var(--navy);
+    border:1.5px dashed var(--navy);
+  }
+  .linkbuilder-box{
+    display:none; margin-top:12px; padding:14px; border-radius:10px;
+    background:#f2f4f8; border:1.5px solid var(--line);
+  }
+  .linkbuilder-box.show{ display:block; }
+  .linkbuilder-box label{ margin-top:0; }
+  .linkbuilder-box input{ margin-top:0; }
+  .linkbuilder-dates{ display:flex; gap:8px; margin-top:10px; }
+  .linkbuilder-dates > div{ flex:1; }
+  .linkbuilder-generate-btn{ width:100%; margin-top:10px; padding:9px; font-size:13px; }
+  .linkbuilder-status{ font-size:12px; color:var(--muted); margin-top:8px; min-height:16px; }
+
   /* ---- Share Kit (per-platform sized image + caption, ready to paste) ---- */
   .sharekit-btn{ width:100%; margin-top:10px; }
   .modal-card.sharekit-card{ max-width:660px; text-align:left; }
@@ -1003,6 +1020,15 @@
     // Same base used throughout the Hub/landing page for an affiliate's
     // personal StockNetwork accommodation booking link.
     var STOCKNETWORK_BASE = 'https://stock.stocknetwork.co.za/ui/';
+    // Jean's own "Avante Travel" master StockNetwork site number — must
+    // match LEADERBOARD_EXCLUDED_SITE_NRS[0] in
+    // netlify/edge-functions/lib/booking-stats.js (this page has no
+    // access to that server-side module, so it's kept in sync by hand).
+    // Every default hook's booking link is built off this placeholder —
+    // see the Booking Link Builder below — and hook-api.js's
+    // personalizeStockNetworkUrl swaps it for whichever affiliate is
+    // actually viewing the hook before it's ever shown to them.
+    var ADMIN_MASTER_SITE_NR = '36';
     // Same Impact.com/Travelstart tracking link used in hub.html/landing.html,
     // with each affiliate's ID appended as a Sub ID.
     var FLIGHT_BASE_URL = 'https://travelstart.zwjlk6.net/LPVYJM';
@@ -2580,6 +2606,23 @@
                 '<button type="button" class="primary autobuild-use-btn" data-autobuild-use="' + i + '">Use this draft</button>' +
               '</div>' +
             '</div>' +
+            '<button type="button" class="btn-outline linkbuilder-toggle" data-linkbuilder-toggle="' + i + '">🔗 Build booking link</button>' +
+            '<div class="linkbuilder-box" id="dh' + i + '-linkbuilderBox">' +
+              '<label for="dh' + i + '-linkArea">Area or resort name</label>' +
+              '<input id="dh' + i + '-linkArea" list="hookSourceOptions" placeholder="Leave blank for a link showing everything available">' +
+              '<div class="linkbuilder-dates">' +
+                '<div>' +
+                  '<label for="dh' + i + '-linkCheckIn">Check-in</label>' +
+                  '<input type="date" id="dh' + i + '-linkCheckIn">' +
+                '</div>' +
+                '<div>' +
+                  '<label for="dh' + i + '-linkCheckOut">Check-out</label>' +
+                  '<input type="date" id="dh' + i + '-linkCheckOut">' +
+                '</div>' +
+              '</div>' +
+              '<button type="button" class="primary linkbuilder-generate-btn" data-linkbuilder-generate="' + i + '">Fill in booking link</button>' +
+              '<div class="linkbuilder-status" id="dh' + i + '-linkbuilderStatus"></div>' +
+            '</div>' +
             '<label for="dh' + i + '-booking">Booking link</label>' +
             '<input id="dh' + i + '-booking" placeholder="Default booking link for this hook slot">' +
             '<label for="dh' + i + '-landing">Landing page link</label>' +
@@ -2594,6 +2637,54 @@
           '</div>';
       }
       grid.innerHTML = html;
+
+      // Booking Link Builder default dates — the same "one month out, one
+      // night" fallback admin-api.js's Auto-build flow already uses for
+      // its own generated booking links (a viewer picks their own dates
+      // on the landing page before booking; this is only what shows
+      // first), so a manually-built link defaults to matching it.
+      (function(){
+        var today = new Date();
+        var defaultCheckIn = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, today.getUTCDate()));
+        var defaultCheckOut = new Date(defaultCheckIn.getTime() + 86400000);
+        function fmt(d){ return d.toISOString().slice(0, 10); }
+        for(var li = 1; li <= HOOK_COUNT; li++){
+          document.getElementById('dh' + li + '-linkCheckIn').value = fmt(defaultCheckIn);
+          document.getElementById('dh' + li + '-linkCheckOut').value = fmt(defaultCheckOut);
+        }
+      })();
+
+      // Builds this hook's default booking link in the exact format every
+      // other admin-managed default hook already uses (see the comment on
+      // ADMIN_MASTER_SITE_NR above): the master placeholder as the site
+      // identifier, plus CheckInDT/CheckOutDT/Filter — so hook-api.js's
+      // personalizeStockNetworkUrl reliably recognizes and swaps it for
+      // whichever affiliate is actually viewing the hook. Only fills in
+      // the Booking link field below; "Save default" still has to be
+      // clicked to persist it, same as typing one in by hand.
+      function buildAdminBookingLink(n){
+        var statusEl = document.getElementById('dh' + n + '-linkbuilderStatus');
+        statusEl.textContent = '';
+
+        var checkIn = document.getElementById('dh' + n + '-linkCheckIn').value;
+        var checkOut = document.getElementById('dh' + n + '-linkCheckOut').value;
+        if(!checkIn || !checkOut){
+          statusEl.textContent = 'Please choose check-in and check-out dates.';
+          return;
+        }
+        if(checkOut <= checkIn){
+          statusEl.textContent = 'Check-out must be after check-in.';
+          return;
+        }
+
+        var area = document.getElementById('dh' + n + '-linkArea').value.trim();
+        var params = new URLSearchParams({ CheckInDT: checkIn, CheckOutDT: checkOut });
+        if(area) params.set('Filter', area);
+        var link = STOCKNETWORK_BASE + encodeURIComponent('Affiliate ' + ADMIN_MASTER_SITE_NR) + '?' + params.toString();
+
+        document.getElementById('dh' + n + '-booking').value = link;
+        statusEl.textContent = 'Booking link filled in below — remember to click "Save default".';
+      }
 
       function setImageSrc(n){
         var img = document.getElementById('dh' + n + '-image');
@@ -2789,6 +2880,19 @@
         if(toggleN){
           loadAutobuildResorts();
           document.getElementById('dh' + toggleN + '-autobuildBox').classList.toggle('show');
+          return;
+        }
+
+        var linkToggleN = e.target.getAttribute('data-linkbuilder-toggle');
+        if(linkToggleN){
+          loadAutobuildResorts(); // same resort/district datalist, shared with Auto-build's field
+          document.getElementById('dh' + linkToggleN + '-linkbuilderBox').classList.toggle('show');
+          return;
+        }
+
+        var linkGenN = e.target.getAttribute('data-linkbuilder-generate');
+        if(linkGenN){
+          buildAdminBookingLink(linkGenN);
           return;
         }
 
