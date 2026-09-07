@@ -666,6 +666,21 @@
         <h1>Default Hooks</h1>
         <p>The shared fallback ad content for each of the 6 storefront hook slots. Any affiliate hook set to "Let Admin Manage" — or a self-managed hook whose dates have passed — shows this content automatically. Editing a hook here updates it everywhere immediately.</p>
       </div>
+      <div class="card" style="margin-bottom:20px;">
+        <h3 style="margin-top:0;">Check for collapsed booking/landing links</h3>
+        <p class="modal-sub" style="margin:-4px 0 10px;">Scans every hook — these defaults, and every affiliate's own self-managed hooks — for one specific mistake: Booking link and Landing page link both set to the exact same shortened (go.avantetravel.co.za) link, which breaks per-affiliate attribution on that hook. When found, restores Booking link to what that short link actually points to and clears Landing page link back to empty.</p>
+        <button type="button" class="btn-outline" id="collapsedLinksCheckBtn">Check now</button>
+        <div class="status" id="collapsedLinksStatus"></div>
+        <div id="collapsedLinksResults" style="display:none; margin-top:12px;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Hook</th><th>Current (collapsed) link</th><th>Will become</th></tr></thead>
+              <tbody id="collapsedLinksBody"></tbody>
+            </table>
+          </div>
+          <button type="button" class="primary" id="collapsedLinksApplyBtn" style="margin-top:10px;">Apply fix</button>
+        </div>
+      </div>
       <div class="hook-grid" id="defaultHookGrid"></div>
       <!-- Shared across every hook card's Auto-build field — populated once
            from /api/resorts with every resort name plus every unique
@@ -2365,6 +2380,80 @@
           btn.textContent = 'Add Revenue Entry';
         });
     });
+
+    // ---------- Collapsed booking/landing link checker ----------
+    // See fixCollapsedHookLinks in admin-api.js for the full story: a hook
+    // whose Booking link and Landing page link both ended up set to the
+    // exact same shortened link (most likely from pasting a shortened
+    // result into both raw fields instead of just the one meant to be
+    // shared). Always runs a dry run first and shows what it found before
+    // offering to actually apply anything.
+    (function(){
+      var checkBtn = document.getElementById('collapsedLinksCheckBtn');
+      var statusEl = document.getElementById('collapsedLinksStatus');
+      var resultsEl = document.getElementById('collapsedLinksResults');
+      var bodyEl = document.getElementById('collapsedLinksBody');
+      var applyBtn = document.getElementById('collapsedLinksApplyBtn');
+      if(!checkBtn) return;
+
+      function renderRows(changes){
+        bodyEl.innerHTML = changes.map(function(c){
+          return '<tr>' +
+            '<td>' + escapeHtml(c.key) + '</td>' +
+            '<td style="word-break:break-all;">' + escapeHtml(c.oldLink) + '</td>' +
+            '<td style="word-break:break-all;">' + escapeHtml(c.newBooking) + '</td>' +
+          '</tr>';
+        }).join('');
+      }
+
+      checkBtn.addEventListener('click', function(){
+        statusEl.className = 'status show';
+        statusEl.textContent = 'Checking every hook…';
+        resultsEl.style.display = 'none';
+        checkBtn.disabled = true;
+
+        adminPost('fixCollapsedHookLinks', { dryRun: true }).then(function(res){
+          checkBtn.disabled = false;
+          if(!res.data || !res.data.ok){
+            statusEl.textContent = (res.data && res.data.error) || 'Could not run the check.';
+            return;
+          }
+          if(!res.data.count){
+            statusEl.textContent = 'No collapsed links found — everything looks fine.';
+            return;
+          }
+          statusEl.textContent = 'Found ' + res.data.count + ' hook' + (res.data.count === 1 ? '' : 's') +
+            ' with Booking link and Landing page link collapsed into the same short link:';
+          renderRows(res.data.changes);
+          resultsEl.style.display = 'block';
+        }).catch(function(){
+          checkBtn.disabled = false;
+          statusEl.textContent = 'Could not reach the server — please try again.';
+        });
+      });
+
+      applyBtn.addEventListener('click', function(){
+        applyBtn.disabled = true;
+        applyBtn.textContent = 'Applying…';
+        adminPost('fixCollapsedHookLinks', { dryRun: false }).then(function(res){
+          applyBtn.disabled = false;
+          applyBtn.textContent = 'Apply fix';
+          if(!res.data || !res.data.ok){
+            statusEl.textContent = (res.data && res.data.error) || 'Could not apply the fix.';
+            return;
+          }
+          statusEl.textContent = 'Fixed ' + res.data.count + ' hook' + (res.data.count === 1 ? '' : 's') +
+            '. Refresh the page to see any updated Default Hook cards below reflect it.' +
+            (res.data.writeErrors ? ' ' + res.data.writeErrors + ' hook' + (res.data.writeErrors === 1 ? '' : 's') + ' failed to save — click "Check now" again to retry just those.' : '');
+          resultsEl.style.display = 'none';
+          showToast('Collapsed links fixed');
+        }).catch(function(){
+          applyBtn.disabled = false;
+          applyBtn.textContent = 'Apply fix';
+          statusEl.textContent = 'Could not reach the server — please try again.';
+        });
+      });
+    })();
 
     // ---------- Default Hooks (admin fallback ad content) ----------
     (function(){

@@ -1,16 +1,11 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
+import { resolveShortLink as resolveShortLinkShared, isShortLink } from "./lib/short-link.js";
 
 // Special affiliate key reserved for admin-managed default hook content.
 // Chosen so it can never collide with a real affiliate ID (StockNetwork
 // GUIDs / affiliate numbers never contain double underscores).
 const ADMIN_KEY = "__admin__";
-
-// Host used by the link shortener (go-redirect.js). Admin-set booking links
-// are sometimes shortened before being saved — to personalize the real
-// destination per affiliate we need to resolve the short link back to its
-// original long URL first.
-const SHORT_HOST = "go.avantetravel.co.za";
 
 // Pull the CheckInDT=YYYY-MM-DD date off a booking link built by the
 // Accommodation Link Builder, if present. Links pasted in by hand (or built
@@ -74,18 +69,8 @@ function personalizeStockNetworkUrl(rawUrl, replacement) {
 // we have something we can actually personalize. Falls back to the
 // original URL untouched if it isn't one of ours or the lookup fails.
 async function resolveShortLink(rawUrl) {
-  if (!rawUrl) return rawUrl;
-  try {
-    const u = new URL(rawUrl);
-    if (u.hostname !== SHORT_HOST) return rawUrl;
-    const slug = u.pathname.replace(/^\/+/, "").replace(/\/+$/, "");
-    if (!slug) return rawUrl;
-    const shortStore = getStore({ name: "short-links", consistency: "strong" });
-    const record = await shortStore.get(slug, { type: "json" });
-    return record && record.url ? record.url : rawUrl;
-  } catch (e) {
-    return rawUrl;
-  }
+  const shortStore = getStore({ name: "short-links", consistency: "strong" });
+  return resolveShortLinkShared(rawUrl, shortStore);
 }
 
 async function personalizeBooking(rawUrl, replacement) {
@@ -126,6 +111,14 @@ export default async (request, context) => {
 
       if (typeof body.booking === "string") record.booking = body.booking;
       if (typeof body.landing === "string") record.landing = body.landing;
+      // Booking link and Landing page link ending up set to the exact
+      // same short link is the specific mistake admin-api.js's
+      // fixCollapsedHookLinks exists to clean up (see there for the full
+      // story) — guard against writing that state back here too, so it
+      // can't be immediately re-created after being fixed.
+      if (record.landing && record.landing === record.booking && isShortLink(record.booking)) {
+        record.landing = "";
+      }
       if (typeof body.caption === "string") {
         record.caption = body.caption;
         // Regenerate platform hashtags whenever the caption is (re)saved.

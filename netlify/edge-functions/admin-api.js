@@ -1,6 +1,7 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
 import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
+import { isShortLink, resolveShortLink } from "./lib/short-link.js";
 import {
   parseStockNetworkCsv,
   normalizeStockNetworkStatus,
@@ -997,7 +998,13 @@ export default async (request, context) => {
         return json({ ok: false, error: "invalid hook number" }, 400, cors);
       }
       const booking = typeof body.booking === "string" ? body.booking.trim() : "";
-      const landing = typeof body.landing === "string" ? body.landing.trim() : "";
+      // Booking link and Landing page link ending up set to the exact
+      // same short link is the specific mistake fixCollapsedHookLinks
+      // exists to clean up (see there for the full story) — guard against
+      // writing that state back here too, so it can't be immediately
+      // re-created after being fixed.
+      const landingRaw = typeof body.landing === "string" ? body.landing.trim() : "";
+      const landing = landingRaw && landingRaw === booking && isShortLink(booking) ? "" : landingRaw;
       const caption = typeof body.caption === "string" ? body.caption.trim() : "";
       // Regenerate platform hashtags whenever the default hook is saved.
       // Best-effort: a failed/unavailable AI call just clears the cached
@@ -1129,6 +1136,71 @@ export default async (request, context) => {
         saved > 0 ? 200 : 502,
         cors
       );
+    }
+
+    if (action === "fixCollapsedHookLinks") {
+      // A hook's Booking link and Landing page link are meant to be two
+      // distinct destinations. Both fields ending up set to the exact
+      // same go.avantetravel.co.za short link is a specific, recognizable
+      // mistake (most likely: the booking link got shortened for sharing
+      // and the short result was then pasted into both raw fields instead
+      // of just the one meant to be shared) — never a valid, intentional
+      // state, and it breaks per-affiliate attribution: hook-api.js's
+      // personalizeStockNetworkUrl needs the real "Affiliate <N>" booking
+      // URL to recognize and personalize, not an opaque short link.
+      //
+      // Scans every hook this system has — both admin's own defaults
+      // (__admin__:1..N) and every affiliate's self-managed ones
+      // (<affId>:<n>), since they all live in this one promo-hooks store
+      // under the same key shape. For each match, resolves the short link
+      // back to the real long URL it was originally shortening (the
+      // short-links store keeps that mapping from when it was created)
+      // and restores it as the Booking link, clearing Landing page link
+      // back to empty — a normal, already-supported "no custom landing"
+      // state — rather than leaving it as a broken duplicate. A short
+      // link whose original record is gone (so it can't be resolved to
+      // anything different) is left untouched rather than guessed at.
+      //
+      // dryRun (default true unless explicitly false) only reports what
+      // would change — nothing is written. The admin UI always runs a
+      // dry run first and shows the list before offering to apply it.
+      const dryRun = body.dryRun !== false;
+      const shortLinksStore = getStore({ name: "short-links", consistency: "strong" });
+      const { blobs } = await hookStore.list();
+
+      // Each hook catches its own failure rather than letting it reject
+      // the whole mapWithConcurrency batch (same reasoning as
+      // importStockNetworkReport's row loop above): otherwise one bad
+      // write turns the whole request into a 500 with no indication of
+      // which of the other, concurrently-running hooks already got
+      // written before the response gave up on all of them. changes only
+      // records a hook once its fix has actually landed (or, on a dry
+      // run, once it's confirmed resolvable) — never speculatively before
+      // that — so the returned list is exactly what happened.
+      const changes = [];
+      let writeErrors = 0;
+      await mapWithConcurrency(blobs, async (b) => {
+        try {
+          const record = await hookStore.get(b.key, { type: "json" }).catch(() => null);
+          if (!record) return;
+          const booking = typeof record.booking === "string" ? record.booking : "";
+          const landing = typeof record.landing === "string" ? record.landing : "";
+          if (!booking || booking !== landing || !isShortLink(booking)) return;
+
+          const resolved = await resolveShortLink(booking, shortLinksStore);
+          if (resolved === booking) return; // couldn't resolve to anything different — leave alone
+
+          if (!dryRun) {
+            const updated = { ...record, booking: resolved, landing: "", updatedAt: new Date().toISOString() };
+            await hookStore.setJSON(b.key, updated);
+          }
+          changes.push({ key: b.key, oldLink: booking, newBooking: resolved });
+        } catch (e) {
+          writeErrors++;
+        }
+      });
+
+      return json({ ok: true, dryRun: dryRun, count: changes.length, changes: changes, writeErrors: writeErrors }, 200, cors);
     }
 
     if (action === "deleteAffiliate") {
