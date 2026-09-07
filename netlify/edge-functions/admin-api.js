@@ -1,6 +1,7 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
 import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
+import { isShortLink, resolveShortLink } from "./lib/short-link.js";
 import {
   parseStockNetworkCsv,
   normalizeStockNetworkStatus,
@@ -1129,6 +1130,58 @@ export default async (request, context) => {
         saved > 0 ? 200 : 502,
         cors
       );
+    }
+
+    if (action === "fixCollapsedHookLinks") {
+      // A hook's Booking link and Landing page link are meant to be two
+      // distinct destinations. Both fields ending up set to the exact
+      // same go.avantetravel.co.za short link is a specific, recognizable
+      // mistake (most likely: the booking link got shortened for sharing
+      // and the short result was then pasted into both raw fields instead
+      // of just the one meant to be shared) — never a valid, intentional
+      // state, and it breaks per-affiliate attribution: hook-api.js's
+      // personalizeStockNetworkUrl needs the real "Affiliate <N>" booking
+      // URL to recognize and personalize, not an opaque short link.
+      //
+      // Scans every hook this system has — both admin's own defaults
+      // (__admin__:1..N) and every affiliate's self-managed ones
+      // (<affId>:<n>), since they all live in this one promo-hooks store
+      // under the same key shape. For each match, resolves the short link
+      // back to the real long URL it was originally shortening (the
+      // short-links store keeps that mapping from when it was created)
+      // and restores it as the Booking link, clearing Landing page link
+      // back to empty — a normal, already-supported "no custom landing"
+      // state — rather than leaving it as a broken duplicate. A short
+      // link whose original record is gone (so it can't be resolved to
+      // anything different) is left untouched rather than guessed at.
+      //
+      // dryRun (default true unless explicitly false) only reports what
+      // would change — nothing is written. The admin UI always runs a
+      // dry run first and shows the list before offering to apply it.
+      const dryRun = body.dryRun !== false;
+      const shortLinksStore = getStore({ name: "short-links", consistency: "strong" });
+      const { blobs } = await hookStore.list();
+
+      const changes = [];
+      await mapWithConcurrency(blobs, async (b) => {
+        const record = await hookStore.get(b.key, { type: "json" }).catch(() => null);
+        if (!record) return;
+        const booking = typeof record.booking === "string" ? record.booking : "";
+        const landing = typeof record.landing === "string" ? record.landing : "";
+        if (!booking || booking !== landing || !isShortLink(booking)) return;
+
+        const resolved = await resolveShortLink(booking, shortLinksStore);
+        if (resolved === booking) return; // couldn't resolve to anything different — leave alone
+
+        changes.push({ key: b.key, oldLink: booking, newBooking: resolved });
+
+        if (!dryRun) {
+          const updated = { ...record, booking: resolved, landing: "", updatedAt: new Date().toISOString() };
+          await hookStore.setJSON(b.key, updated);
+        }
+      });
+
+      return json({ ok: true, dryRun: dryRun, count: changes.length, changes: changes }, 200, cors);
     }
 
     if (action === "deleteAffiliate") {

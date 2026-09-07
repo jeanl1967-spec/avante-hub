@@ -1,16 +1,11 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
+import { resolveShortLink as resolveShortLinkShared } from "./lib/short-link.js";
 
 // Special affiliate key reserved for admin-managed default hook content.
 // Chosen so it can never collide with a real affiliate ID (StockNetwork
 // GUIDs / affiliate numbers never contain double underscores).
 const ADMIN_KEY = "__admin__";
-
-// Host used by the link shortener (go-redirect.js). Admin-set booking links
-// are sometimes shortened before being saved — to personalize the real
-// destination per affiliate we need to resolve the short link back to its
-// original long URL first.
-const SHORT_HOST = "go.avantetravel.co.za";
 
 // Pull the CheckInDT=YYYY-MM-DD date off a booking link built by the
 // Accommodation Link Builder, if present. Links pasted in by hand (or built
@@ -74,18 +69,8 @@ function personalizeStockNetworkUrl(rawUrl, replacement) {
 // we have something we can actually personalize. Falls back to the
 // original URL untouched if it isn't one of ours or the lookup fails.
 async function resolveShortLink(rawUrl) {
-  if (!rawUrl) return rawUrl;
-  try {
-    const u = new URL(rawUrl);
-    if (u.hostname !== SHORT_HOST) return rawUrl;
-    const slug = u.pathname.replace(/^\/+/, "").replace(/\/+$/, "");
-    if (!slug) return rawUrl;
-    const shortStore = getStore({ name: "short-links", consistency: "strong" });
-    const record = await shortStore.get(slug, { type: "json" });
-    return record && record.url ? record.url : rawUrl;
-  } catch (e) {
-    return rawUrl;
-  }
+  const shortStore = getStore({ name: "short-links", consistency: "strong" });
+  return resolveShortLinkShared(rawUrl, shortStore);
 }
 
 async function personalizeBooking(rawUrl, replacement) {
