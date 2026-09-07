@@ -2938,6 +2938,22 @@
       // Pull the affiliate's own ID off the end of their booking link, e.g.
       // https://stock.stocknetwork.co.za/ui/c2fef00f-7330-4eb3-b993-f5f43fc73dff
       // -> "c2fef00f-7330-4eb3-b993-f5f43fc73dff" (query string, if any, is ignored).
+      //
+      // Every save/upload/share call site below uses this ONLY as a
+      // fallback when AFF_ID is blank (no personalized ?aff= link at all
+      // — the rare "found the bare hub.html URL directly" case), always
+      // as `AFF_ID || (booking ? extractAffiliateId(booking) : '')`, never
+      // the other way around. AFF_ID (from this affiliate's own
+      // personalized Hub link) is the trusted identity for this whole
+      // session; deriving it from whatever happens to be typed in a
+      // booking field instead, whenever AFF_ID is already known, would
+      // mean pasting a *different* affiliate's booking link into your own
+      // hook silently reroutes your save (caption, landing link, image,
+      // everything) onto that other affiliate's storage key instead of
+      // your own — exactly the kind of misattribution
+      // fixMisattributedHookLinks (admin-api.js) exists to clean up after
+      // the fact. Getting this priority order right here is what stops
+      // it from happening in the first place.
       function extractAffiliateId(bookingUrl){
         try{
           var u = new URL(bookingUrl);
@@ -3084,7 +3100,7 @@
 
       function saveMode(n, mode){
         var bookingVal = document.getElementById('h' + n + '-booking').value.trim();
-        var affId = (bookingVal ? extractAffiliateId(bookingVal) : '') || AFF_ID;
+        var affId = AFF_ID || (bookingVal ? extractAffiliateId(bookingVal) : '');
         if(!affId){
           showToast('Add your booking link above before setting who manages this hook.');
           return;
@@ -3155,7 +3171,7 @@
         statusEl.textContent = '';
 
         var bookingVal = document.getElementById('h' + n + '-booking').value.trim();
-        var affId = (bookingVal ? extractAffiliateId(bookingVal) : '') || AFF_ID;
+        var affId = AFF_ID || (bookingVal ? extractAffiliateId(bookingVal) : '');
         if(!affId){
           statusEl.textContent = 'Add your booking link above (or open the Hub using your own personalized link) before uploading an image.';
           statusEl.className = 'status show';
@@ -3225,7 +3241,7 @@
           return;
         }
 
-        var affId = (booking ? extractAffiliateId(booking) : '') || AFF_ID;
+        var affId = AFF_ID || (booking ? extractAffiliateId(booking) : '');
 
         var bookingRow = document.getElementById(p + 'bookingRow');
         var landingRow = document.getElementById(p + 'landingRow');
@@ -3291,10 +3307,10 @@
         if(savedB || savedL || savedC){
           saveHook(hi);
         }else{
-          var affIdForImage = (bEl.value.trim() ? extractAffiliateId(bEl.value.trim()) : '') || AFF_ID;
+          var affIdForImage = AFF_ID || (bEl.value.trim() ? extractAffiliateId(bEl.value.trim()) : '');
           setHookImageSrc(hi, affIdForImage);
         }
-        var affIdForMode = (bEl.value.trim() ? extractAffiliateId(bEl.value.trim()) : '') || AFF_ID;
+        var affIdForMode = AFF_ID || (bEl.value.trim() ? extractAffiliateId(bEl.value.trim()) : '');
         loadHookMode(hi, affIdForMode);
       }
 
@@ -3334,7 +3350,7 @@
         var shareN = e.target.getAttribute('data-sharekit');
         if(shareN && window.openShareKit){
           var bookingVal = document.getElementById('h' + shareN + '-booking').value.trim();
-          var affIdForShare = (bookingVal ? extractAffiliateId(bookingVal) : '') || AFF_ID;
+          var affIdForShare = AFF_ID || (bookingVal ? extractAffiliateId(bookingVal) : '');
           var resolved = hookLiveData[shareN] || null;
           var isAdminSourced = !!(resolved && resolved.source === 'admin');
           var imageAff = isAdminSourced ? '__admin__' : affIdForShare;
