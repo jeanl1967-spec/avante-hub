@@ -18,8 +18,12 @@ export default async (request, context) => {
   const hook = (url.searchParams.get("hook") || "").trim();
   // Optional — only ever used to GET one of the extra gallery photos a
   // hook's Auto-build "Use this" step may have saved (see admin-api.js's
-  // saveHookPhotos). Left out entirely, this behaves exactly as before:
-  // the hook's one normal cover image, same key, same POST/GET behavior.
+  // saveHookPhotos). Distinguish "no ?slot= at all" (every single-image
+  // caller — Hub, Share Kit, admin preview — which wants the rotation
+  // below) from an explicit "?slot=0" (hook-landing.html's gallery asking
+  // for its deterministic first frame, the cover, by index): both read
+  // the same bare aff:hook key, but only the former should rotate.
+  const hasSlot = url.searchParams.has("slot");
   const slot = (url.searchParams.get("slot") || "").trim();
 
   if (!aff || !hook) {
@@ -32,7 +36,7 @@ export default async (request, context) => {
   const store = getStore({ name: "promo-hook-images", consistency: "strong" });
   // Only read for GET rotation below — never written here.
   const hookStore = getStore({ name: "promo-hooks", consistency: "strong" });
-  let key = slot ? aff + ":" + hook + ":" + slot : aff + ":" + hook;
+  let key = slot && slot !== "0" ? aff + ":" + hook + ":" + slot : aff + ":" + hook;
 
   try {
     if (request.method === "POST") {
@@ -58,15 +62,18 @@ export default async (request, context) => {
 });
 }
 
-    // GET, no explicit slot: if this hook has extra gallery photos (saved
+    // GET, no ?slot= at all: if this hook has extra gallery photos (saved
     // by Auto-build's photo picker), rotate — pick a random one of the
     // saved photos (the cover or any gallery slot) on every request
     // instead of always the same fixed cover, so every place this image
     // shows (Hub, Share Kit, admin preview) naturally cycles through the
     // set. A hook with no gallery photos (the overwhelming majority —
     // anything not built with Auto-build's multi-photo picker) behaves
-    // exactly as before: the one key it has ever had.
-    if (!slot) {
+    // exactly as before: the one key it has ever had. An explicit
+    // ?slot=0 (hook-landing.html's gallery asking for its first frame by
+    // index) is deliberately excluded from rotation — it wants that exact
+    // frame, not a random one.
+    if (!hasSlot) {
       try {
         const hookRecord = await hookStore.get(aff + ":" + hook, { type: "json" });
         const galleryCount = (hookRecord && hookRecord.galleryCount) || 0;

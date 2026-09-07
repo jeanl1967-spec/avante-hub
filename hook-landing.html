@@ -202,7 +202,11 @@
       // Auto-build's multi-photo picker.
       galleryUrls = [];
       for(var i = 0; i <= count; i++){
-        var src = '/api/hook-image?aff=' + encodeURIComponent(imgAff) + '&hook=' + encodeURIComponent(hook) + (i > 0 ? '&slot=' + i : '');
+        // Always pass &slot= (0 for the cover frame) — hook-image.js only
+        // rotates the random Hub/Share-Kit "surprise me" image when ?slot=
+        // is absent entirely; the gallery needs each frame's exact photo,
+        // deterministically, not a random one.
+        var src = '/api/hook-image?aff=' + encodeURIComponent(imgAff) + '&hook=' + encodeURIComponent(hook) + '&slot=' + i;
         galleryUrls.push(src);
       }
       var frames = galleryUrls.map(function(url, i){

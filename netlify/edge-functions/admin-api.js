@@ -1026,7 +1026,12 @@ export default async (request, context) => {
             failed.push(url);
             continue;
           }
-          const key = i === 0 ? "__admin__:" + n : "__admin__:" + n + ":" + i;
+          // Keyed by how many photos have actually saved so far (`saved`),
+          // not by this URL's original position in `urls` (`i`) — a
+          // download failing partway through the batch must not leave a
+          // gap between the keys written here and the contiguous 0..N
+          // range galleryCount below promises hook-image.js's rotation.
+          const key = saved === 0 ? "__admin__:" + n : "__admin__:" + n + ":" + saved;
           await imageStore.set(key, buf, { metadata: { contentType: contentType, sourceUrl: url } });
           saved++;
         } catch (e) {
