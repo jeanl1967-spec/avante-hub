@@ -1,6 +1,7 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
 import { resolveShortLink as resolveShortLinkShared, isShortLink } from "./lib/short-link.js";
+import { correctBookingLinkSiteId } from "./lib/booking-link.js";
 
 // Special affiliate key reserved for admin-managed default hook content.
 // Chosen so it can never collide with a real affiliate ID (StockNetwork
@@ -111,6 +112,33 @@ export default async (request, context) => {
 
       if (typeof body.booking === "string") record.booking = body.booking;
       if (typeof body.landing === "string") record.landing = body.landing;
+      // A StockNetwork booking link's site identifier not matching this
+      // affiliate's own id is the specific mistake admin-api.js's
+      // fixMisattributedHookLinks exists to clean up (see there for the
+      // full story: it silently sends every booking through this hook to
+      // whoever that other id belongs to instead) — guard against writing
+      // that state back here too, so it can't be immediately re-created
+      // after being fixed. `aff` is this exact hook's own affiliate, from
+      // the ?aff= this request came in on — always the right id to
+      // enforce here, EXCEPT for ADMIN_KEY itself: this endpoint has no
+      // auth check at all, and admin's own default hook record
+      // (aff === ADMIN_KEY) is *supposed* to keep carrying the shared
+      // "Affiliate <N>" placeholder, not get "corrected" to the literal
+      // string "__admin__" — which would break personalization for every
+      // affiliate this default hook still serves. fixMisattributedHookLinks
+      // already excludes ADMIN_KEY: records the same way.
+      //
+      // The misattribution can hide behind one of our own short links
+      // too (shortened, then pasted somewhere raw) — resolve one before
+      // checking, or this would only ever see "go.avantetravel.co.za" and
+      // never the real destination underneath. Only rewrites booking when
+      // a correction is actually needed — an already-correct short link
+      // is left exactly as saved, not eagerly unshortened.
+      if (aff !== ADMIN_KEY && record.booking) {
+        const resolvedForCheck = isShortLink(record.booking) ? await resolveShortLink(record.booking) : record.booking;
+        const bookingCheck = correctBookingLinkSiteId(resolvedForCheck, aff);
+        if (bookingCheck.changed) record.booking = bookingCheck.url;
+      }
       // Booking link and Landing page link ending up set to the exact
       // same short link is the specific mistake admin-api.js's
       // fixCollapsedHookLinks exists to clean up (see there for the full
