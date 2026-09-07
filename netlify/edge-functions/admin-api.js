@@ -9,6 +9,9 @@ import {
   periodBounds,
   aggregateTransactions,
   buildLeaderboard,
+  loadAffiliatesAndTransactions,
+  fetchAllRecords,
+  mapWithConcurrency,
   CHANNEL_KEYS as STATS_CHANNEL_KEYS,
 } from "./lib/booking-stats.js";
 
@@ -272,19 +275,7 @@ export default async (request, context) => {
       }
 
       if (resource === "bookingStats") {
-        const { blobs: affBlobs } = await directoryStore.list();
-        const affiliatesById = {};
-        for (const b of affBlobs) {
-          const rec = await directoryStore.get(b.key, { type: "json" });
-          if (rec) affiliatesById[rec.affId] = rec;
-        }
-
-        const { blobs: txBlobs } = await transactionsStore.list();
-        const records = [];
-        for (const b of txBlobs) {
-          const rec = await transactionsStore.get(b.key, { type: "json" });
-          if (rec) records.push(rec);
-        }
+        const { affiliatesById, records } = await loadAffiliatesAndTransactions(directoryStore, transactionsStore);
 
         const periods = periodBounds();
         const stats = aggregateTransactions(records, periods);
@@ -561,11 +552,21 @@ export default async (request, context) => {
         return json({ ok: false, error: "Couldn't find any booking rows in that file." }, 400, cors);
       }
 
-      // Site Nr -> affiliate lookup, built once per import.
-      const { blobs: affBlobs } = await directoryStore.list();
+      // Site Nr -> affiliate lookup, built once per import. Fetched
+      // concurrently (bounded) rather than one directoryStore.get() at a
+      // time — with dozens of affiliates that for-loop was the difference
+      // between a handful of round trips overlapping and all of them
+      // serialized end-to-end before a single CSV row could even start.
+      // siteToAff itself is still built afterward, as one ordered pass
+      // over the fetched records (not from inside each concurrent
+      // fetch) — Site Nr is a free-text admin field, not a directory
+      // record's key, so two affiliates could end up sharing one by
+      // typo; if that ever happens, which one wins should stay whichever
+      // comes later in directoryStore.list()'s own order, the same every
+      // run, not whichever concurrent fetch happened to resolve last.
+      const affRecords = await fetchAllRecords(directoryStore);
       const siteToAff = {};
-      for (const b of affBlobs) {
-        const rec = await directoryStore.get(b.key, { type: "json" });
+      for (const rec of affRecords) {
         if (rec && rec.siteNr) siteToAff[String(rec.siteNr).trim()] = rec;
       }
 
@@ -576,6 +577,11 @@ export default async (request, context) => {
       let skippedNoRef = 0;
       const seenInFile = new Set();
 
+      // Pass 1 — pure in-memory work (dedup by RefNo, match the affiliate):
+      // must run in row order so "first occurrence of a repeated RefNo
+      // wins" stays deterministic, but touches no store, so it's fast
+      // regardless of how many rows there are.
+      const toWrite = [];
       for (const row of rows) {
         const refNo = (row.RefNo || "").trim();
         if (!refNo) {
@@ -594,46 +600,75 @@ export default async (request, context) => {
           unmatchedSite++;
           continue;
         }
-
-        const status = normalizeStockNetworkStatus(row.Name, row["Confirmed On"]);
-        const record = {
-          refNo: refNo,
-          channel: channel,
-          site: site,
-          affId: aff.affId,
-          status: status,
-          amountIncl: parseMoney(row["Total Amount Incl."]),
-          currency: row.Currency || "ZAR",
-          transactionDate: parseUsDateToYmd(row["Transaction Date"]),
-          confirmedOn: parseUsDateToYmd(row["Confirmed On"]),
-          guestName: row.Fullname || "",
-          guestEmail: row.EmailAddress || "",
-          resortName: row["Resort Name"] || "",
-          unitType: row["Unit Type"] || "",
-          checkIn: parseUsDateToYmd(row["Check In Date"]),
-          checkOut: parseUsDateToYmd(row["Check Out Date"]),
-          nights: Number(row.Nights) || 0,
-          companyName: row.CompanyName || "",
-          customerReference: row.CustomerReference || "",
-          sourceLabel: sourceLabel,
-          importedAt: new Date().toISOString(),
-        };
-
-        const existing = await transactionsStore.get(refNo, { type: "json" });
-        if (existing) {
-          record.firstImportedAt = existing.firstImportedAt || existing.importedAt;
-          const changed =
-            existing.status !== record.status ||
-            existing.amountIncl !== record.amountIncl ||
-            existing.confirmedOn !== record.confirmedOn;
-          if (changed) updated++;
-          else unchanged++;
-        } else {
-          record.firstImportedAt = record.importedAt;
-          created++;
-        }
-        await transactionsStore.setJSON(refNo, record);
+        toWrite.push({ row, refNo, site, aff });
       }
+
+      // Pass 2 — the actual store round trips (one read + one write per
+      // row, each a distinct RefNo key so none of these can collide with
+      // each other), run with bounded concurrency instead of one row at a
+      // time. created/updated/unchanged are plain counters incremented by
+      // a single synchronous statement per row — safe under this
+      // concurrency since JS never interleaves mid-statement, only at
+      // await points. Each row catches its own failure rather than
+      // letting it reject the whole mapWithConcurrency batch — a bad row
+      // (a transient store error, say) would otherwise abort the request
+      // with a 500 while every other row's write is still in flight,
+      // uncounted and unconfirmed either way; this way a single bad row
+      // is simply skipped and reported, everything else still lands.
+      let writeErrors = 0;
+      await mapWithConcurrency(toWrite, async ({ row, refNo, site, aff }) => {
+        try {
+          const status = normalizeStockNetworkStatus(row.Name, row["Confirmed On"]);
+          const record = {
+            refNo: refNo,
+            channel: channel,
+            site: site,
+            affId: aff.affId,
+            status: status,
+            amountIncl: parseMoney(row["Total Amount Incl."]),
+            currency: row.Currency || "ZAR",
+            transactionDate: parseUsDateToYmd(row["Transaction Date"]),
+            confirmedOn: parseUsDateToYmd(row["Confirmed On"]),
+            guestName: row.Fullname || "",
+            guestEmail: row.EmailAddress || "",
+            resortName: row["Resort Name"] || "",
+            unitType: row["Unit Type"] || "",
+            checkIn: parseUsDateToYmd(row["Check In Date"]),
+            checkOut: parseUsDateToYmd(row["Check Out Date"]),
+            nights: Number(row.Nights) || 0,
+            companyName: row.CompanyName || "",
+            customerReference: row.CustomerReference || "",
+            sourceLabel: sourceLabel,
+            importedAt: new Date().toISOString(),
+          };
+
+          const existing = await transactionsStore.get(refNo, { type: "json" });
+          // Decide the outcome now, but don't count it until the write
+          // below actually succeeds — otherwise a setJSON that throws
+          // would land in both a success counter (created/updated/
+          // unchanged) and writeErrors for the same row, double-counting
+          // it and inflating the summary while the record was never
+          // actually persisted.
+          let outcome;
+          if (existing) {
+            record.firstImportedAt = existing.firstImportedAt || existing.importedAt;
+            const changed =
+              existing.status !== record.status ||
+              existing.amountIncl !== record.amountIncl ||
+              existing.confirmedOn !== record.confirmedOn;
+            outcome = changed ? "updated" : "unchanged";
+          } else {
+            record.firstImportedAt = record.importedAt;
+            outcome = "created";
+          }
+          await transactionsStore.setJSON(refNo, record);
+          if (outcome === "created") created++;
+          else if (outcome === "updated") updated++;
+          else unchanged++;
+        } catch (e) {
+          writeErrors++;
+        }
+      });
 
       return json(
         {
@@ -645,6 +680,7 @@ export default async (request, context) => {
             unchanged: unchanged,
             unmatchedSite: unmatchedSite,
             skippedNoRef: skippedNoRef,
+            writeErrors: writeErrors,
           },
         },
         200,
@@ -1026,7 +1062,12 @@ export default async (request, context) => {
             failed.push(url);
             continue;
           }
-          const key = i === 0 ? "__admin__:" + n : "__admin__:" + n + ":" + i;
+          // Keyed by how many photos have actually saved so far (`saved`),
+          // not by this URL's original position in `urls` (`i`) — a
+          // download failing partway through the batch must not leave a
+          // gap between the keys written here and the contiguous 0..N
+          // range galleryCount below promises hook-image.js's rotation.
+          const key = saved === 0 ? "__admin__:" + n : "__admin__:" + n + ":" + saved;
           await imageStore.set(key, buf, { metadata: { contentType: contentType, sourceUrl: url } });
           saved++;
         } catch (e) {
@@ -1035,28 +1076,53 @@ export default async (request, context) => {
       }
 
       const galleryCount = Math.max(0, saved - 1);
-      const existing = (await hookStore.get("__admin__:" + n, { type: "json" })) || {};
-      existing.galleryCount = galleryCount;
-      // Optional — carried straight through from generateHookDraft's
-      // response rather than re-scraped here, so a hook remembers what
-      // property/area it was built from (shown on the hook card and on the
-      // new landing page's "full details"). Left untouched if this save
-      // didn't come from an Auto-build draft (e.g. a future manual photo
-      // save with no source context).
-      if (body.source && typeof body.source === "object") {
-        existing.source = {
-          mode: body.source.mode === "area" ? "area" : "property",
-          label: typeof body.source.label === "string" ? body.source.label.trim().slice(0, 200) : "",
-          description: typeof body.source.description === "string" ? body.source.description.trim().slice(0, 2000) : "",
-          attractions: typeof body.source.attractions === "string" ? body.source.attractions.trim().slice(0, 2000) : "",
-          roomType: typeof body.source.roomType === "string" ? body.source.roomType.trim().slice(0, 100) : "",
-          names: Array.isArray(body.source.names)
-            ? body.source.names.filter((x) => typeof x === "string").slice(0, 10)
-            : [],
-        };
+
+      // Every candidate photo can fail to download (dead/expired
+      // StockNetwork URLs, a network blip) — saved stays 0 and the
+      // response below already reports that as a failure. Don't touch
+      // the hook's stored record in that case: this hook may already
+      // have a working gallery from an earlier successful save, and
+      // unconditionally overwriting galleryCount to 0 here would silently
+      // wipe that out (orphaning its still-live image blobs) despite the
+      // API telling the caller nothing was saved.
+      if (saved > 0) {
+        const existing = (await hookStore.get("__admin__:" + n, { type: "json" })) || {};
+        const previousGalleryCount = existing.galleryCount || 0;
+        existing.galleryCount = galleryCount;
+        // Optional — carried straight through from generateHookDraft's
+        // response rather than re-scraped here, so a hook remembers what
+        // property/area it was built from (shown on the hook card and on
+        // the new landing page's "full details"). Left untouched if this
+        // save didn't come from an Auto-build draft (e.g. a future manual
+        // photo save with no source context).
+        if (body.source && typeof body.source === "object") {
+          existing.source = {
+            mode: body.source.mode === "area" ? "area" : "property",
+            label: typeof body.source.label === "string" ? body.source.label.trim().slice(0, 200) : "",
+            description: typeof body.source.description === "string" ? body.source.description.trim().slice(0, 2000) : "",
+            attractions: typeof body.source.attractions === "string" ? body.source.attractions.trim().slice(0, 2000) : "",
+            roomType: typeof body.source.roomType === "string" ? body.source.roomType.trim().slice(0, 100) : "",
+            names: Array.isArray(body.source.names)
+              ? body.source.names.filter((x) => typeof x === "string").slice(0, 10)
+              : [],
+          };
+        }
+        existing.updatedAt = new Date().toISOString();
+        await hookStore.setJSON("__admin__:" + n, existing);
+
+        // A previous save may have covered more gallery slots than this
+        // one did (e.g. 4 photos saved before, only 2 saved this time) —
+        // without this, the extra slots' image blobs would sit in
+        // storage forever, orphaned: no longer referenced by galleryCount
+        // above, but never deleted either.
+        if (previousGalleryCount > galleryCount) {
+          const staleSlots = [];
+          for (let slot = galleryCount + 1; slot <= previousGalleryCount; slot++) staleSlots.push(slot);
+          await mapWithConcurrency(staleSlots, (slot) =>
+            imageStore.delete("__admin__:" + n + ":" + slot).catch(() => {})
+          );
+        }
       }
-      existing.updatedAt = new Date().toISOString();
-      await hookStore.setJSON("__admin__:" + n, existing);
 
       return json(
         { ok: saved > 0, saved: saved, failed: failed.length, galleryCount: galleryCount },

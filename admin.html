@@ -1536,6 +1536,15 @@
     function loadBookingStats(){
       return adminGet('bookingStats').then(function(data){
         bookingStatsCache = (data && data.ok) ? data : null;
+      }).catch(function(){
+        // Without this, a rejected fetch here (network error, non-JSON
+        // response) skips renderBookingsPanel entirely — the Bookings tab
+        // would stay blank with no feedback. Fall back to the same "no
+        // data" empty state renderBookingsPanel already shows when
+        // bookingStatsCache is null, plus a toast so it reads as a
+        // failure rather than "nothing imported yet".
+        bookingStatsCache = null;
+        showToast('Could not load booking stats — please try again.');
       });
     }
 
@@ -1628,7 +1637,8 @@
             }
             var s = res.data.summary;
             statusEl.textContent = 'Imported ' + file.name + ': ' + s.created + ' new, ' + s.updated + ' updated, ' +
-              s.unchanged + ' unchanged, ' + s.unmatchedSite + ' skipped (no matching affiliate site).';
+              s.unchanged + ' unchanged, ' + s.unmatchedSite + ' skipped (no matching affiliate site).' +
+              (s.writeErrors ? ' ' + s.writeErrors + ' row' + (s.writeErrors === 1 ? '' : 's') + ' failed to save — try re-uploading the same file to retry just those.' : '');
             input.value = '';
             loadBookingStats().then(renderBookingsPanel);
           })
@@ -2492,10 +2502,20 @@
           names: draft.sourceNames || []
         };
 
-        var pickedUrls = draft.picked.slice().sort(function(a, b){ return a - b; }).map(function(idx){ return draft.photos[idx]; });
+        // draft.picked is already in click order (toggleAutobuildPhoto
+        // pushes on pick), which is also what its on-screen "1/2/3/4"
+        // badges show — do NOT sort by grid position, or the admin's
+        // actual first pick (labeled "1" and promised as the cover image)
+        // can silently lose that slot to whichever picked photo happens
+        // to sit earliest in the candidate grid.
+        var pickedUrls = draft.picked.map(function(idx){ return draft.photos[idx]; });
         if(!pickedUrls.length){
-          statusEl.textContent = 'Caption and booking link filled in — remember to click "Save default" below. (No photos were picked.)';
-          updateSourceNote(n, source);
+          // "Built from" is only ever persisted by the saveHookPhotos
+          // call below, alongside the picked photos — with none picked,
+          // that call never happens, so showing the note here would
+          // claim something saved that a page refresh will show was
+          // never actually stored.
+          statusEl.textContent = 'Caption and booking link filled in — remember to click "Save default" below. (No photos were picked, so "Built from" won\'t be saved this time.)';
           return;
         }
 

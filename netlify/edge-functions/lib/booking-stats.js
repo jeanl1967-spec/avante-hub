@@ -212,3 +212,72 @@ export function buildLeaderboard(channelStats, affiliatesById) {
   byValue.forEach((r, i) => (r.rankByValue = i + 1));
   return { byCount: byCount, byValue: byValue, totalRanked: rows.length };
 }
+
+// ---- Blob store helpers ----
+
+// Netlify Blobs has no bulk-get — reading N affiliates or transactions means
+// N separate store.get() round trips. A plain for-loop awaiting each one in
+// turn serializes all of them end-to-end, which gets slow (and risks the
+// edge function's execution-time limit) as the affiliate list or the
+// transaction history grows. A small fixed-size worker pool keeps several
+// requests in flight at once without firing hundreds of them simultaneously.
+// A rejection from `fn` propagates out of Promise.all immediately, but the
+// other workers already mid-await keep running in the background — they
+// are not cancelled. That's fine for read-only lookups (worst case, a
+// result nobody reads), but a caller doing writes inside `fn` (e.g. one
+// row of a CSV import) must catch its own errors and record the failure
+// instead of throwing, so one bad item can't abort in-flight writes for
+// every other item still being processed.
+const DEFAULT_CONCURRENCY = 20;
+
+export async function mapWithConcurrency(items, fn, concurrency) {
+  concurrency = concurrency || DEFAULT_CONCURRENCY;
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const workers = [];
+  for (let i = 0; i < Math.min(concurrency, items.length); i++) workers.push(worker());
+  await Promise.all(workers);
+  return results;
+}
+
+// Lists every key in `store` and fetches all of their records with bounded
+// concurrency, in one shot. A single record's fetch failing doesn't lose
+// the rest — it resolves to null there (filtered out by callers that want
+// a plain list, kept as a positional null by callers, like siteToAff below,
+// that need to line results back up with what they listed).
+export async function fetchAllRecords(store) {
+  const { blobs } = await store.list();
+  return mapWithConcurrency(blobs, (b) => store.get(b.key, { type: "json" }).catch(() => null));
+}
+
+// Shared by admin-api.js's `bookingStats` resource and auth-api.js's
+// `getMyBookingStats` action — both need the full affiliate directory and
+// every imported transaction, fetched and shaped the exact same way. One
+// copy means both benefit from the concurrency below the same way, and
+// can't drift apart on how these two stores get read.
+export async function loadAffiliatesAndTransactions(directoryStore, transactionsStore) {
+  // The affiliate directory and the transaction history are fully
+  // independent of each other — fetch both concurrently rather than
+  // waiting for all of one before starting the other.
+  const [affRecords, records] = await Promise.all([fetchAllRecords(directoryStore), fetchAllRecords(transactionsStore)]);
+
+  // Built as one final, ordered pass over the fetched results — not by
+  // mutating a shared object from inside each concurrent worker — so
+  // that if two directory records were ever somehow saved under the same
+  // affId, which one wins stays whichever came later in
+  // directoryStore.list()'s own order, the same every run, rather than
+  // depending on which of two concurrent fetches happened to resolve
+  // last.
+  const affiliatesById = {};
+  for (const rec of affRecords) {
+    if (rec) affiliatesById[rec.affId] = rec;
+  }
+
+  return { affiliatesById, records: records.filter(Boolean) };
+}
