@@ -716,6 +716,21 @@
           <button type="button" class="primary" id="adminManagedApplyBtn" style="margin-top:10px;">Switch to admin-managed</button>
         </div>
       </div>
+      <div class="card" style="margin-bottom:20px; border-color:#f0c8c2;">
+        <h3 style="margin-top:0; color:#c0453a;">Clear all booking links</h3>
+        <p class="modal-sub" style="margin:-4px 0 10px;">Clears the Booking link on every hook — these 6 defaults and every affiliate's own hook record — back to empty, so a fresh rebuild (via Build booking link, above each hook's Booking link field) starts from nothing instead of layering new links onto old ones. Landing page link, caption, photos, and who-manages-this-hook are all left exactly as they are; only Booking link is cleared. This is live content affiliates and their clients currently see — review the list carefully before applying.</p>
+        <button type="button" class="btn-outline" id="clearBookingLinksCheckBtn">Check now</button>
+        <div class="status" id="clearBookingLinksStatus"></div>
+        <div id="clearBookingLinksResults" style="display:none; margin-top:12px;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Hook</th><th>Current booking link (will be cleared)</th></tr></thead>
+              <tbody id="clearBookingLinksBody"></tbody>
+            </table>
+          </div>
+          <button type="button" class="btn-danger" id="clearBookingLinksApplyBtn" style="margin-top:10px;">Clear all booking links</button>
+        </div>
+      </div>
       <div class="hook-grid" id="defaultHookGrid"></div>
       <!-- Shared across every hook card's Auto-build field — populated once
            from /api/resorts with every resort name plus every unique
@@ -2586,6 +2601,24 @@
       renderCells: function(c){
         return '<td>' + escapeHtml(c.key) + '</td>' +
           '<td>Manage my own → Let admin manage</td>';
+      }
+    });
+
+    // See clearAllBookingLinks in admin-api.js: a deliberate clean-slate
+    // reset for a fresh rebuild — clears Booking link on every hook
+    // (admin defaults included) back to empty. Landing/caption/photos/
+    // mode are untouched.
+    wireHookFixChecker({
+      idPrefix: 'clearBookingLinks',
+      action: 'clearAllBookingLinks',
+      noneLabel: 'Every Booking link is already empty — nothing to clear.',
+      foundLabel: 'with a Booking link that will be cleared:',
+      applyBtnLabel: 'Clear all booking links',
+      appliedVerb: 'Cleared',
+      toastLabel: 'Booking links cleared',
+      renderCells: function(c){
+        return '<td>' + escapeHtml(c.key) + '</td>' +
+          '<td style="word-break:break-all;">' + escapeHtml(c.oldBooking) + '</td>';
       }
     });
 
