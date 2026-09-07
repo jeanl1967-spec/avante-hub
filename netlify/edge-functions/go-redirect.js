@@ -1,16 +1,16 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
+import { SHORT_LINK_HOST } from "./lib/short-link.js";
 
-// The branded short-link domain. Every other host this site answers on
-// (the main netlify.app domain, deploy previews, etc.) is left completely
-// untouched by this function — it only ever acts when a request actually
-// arrives on go.avantetravel.co.za.
-const SHORT_HOST = "go.avantetravel.co.za";
 const FALLBACK_URL = "https://stocknetwork-affiliate-link-builder.netlify.app/hub.html";
 
 export default async (request, context) => {
   const url = new URL(request.url);
 
-  if (url.hostname !== SHORT_HOST) {
+  // Every other host this site answers on (the main netlify.app domain,
+  // deploy previews, etc.) is left completely untouched by this function
+  // — it only ever acts when a request actually arrives on the branded
+  // short-link domain.
+  if (url.hostname !== SHORT_LINK_HOST) {
     return context.next();
   }
 

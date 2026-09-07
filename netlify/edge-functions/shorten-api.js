@@ -1,4 +1,5 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
+import { SHORT_LINK_HOST } from "./lib/short-link.js";
 
 const ALPHABET = "23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ"; // no 0/O/1/l/I
 const RANDOM_SLUG_LEN = 6;
@@ -56,7 +57,7 @@ export default async (request, context) => {
         for (const s of slugs) {
           const record = await store.get(s, { type: "json" });
           if (record) {
-            links.push({ slug: s, shortUrl: "https://go.avantetravel.co.za/" + s, ...record });
+            links.push({ slug: s, shortUrl: "https://" + SHORT_LINK_HOST + "/" + s, ...record });
           }
         }
         return new Response(JSON.stringify({ ok: true, links }), {
@@ -161,7 +162,7 @@ export default async (request, context) => {
       }
 
       return new Response(
-        JSON.stringify({ ok: true, slug, shortUrl: "https://go.avantetravel.co.za/" + slug, ...record }),
+        JSON.stringify({ ok: true, slug, shortUrl: "https://" + SHORT_LINK_HOST + "/" + slug, ...record }),
         { headers: { "content-type": "application/json", ...cors } }
       );
     }

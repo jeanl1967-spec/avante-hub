@@ -2443,7 +2443,8 @@
             return;
           }
           statusEl.textContent = 'Fixed ' + res.data.count + ' hook' + (res.data.count === 1 ? '' : 's') +
-            '. Refresh the page to see any updated Default Hook cards below reflect it.';
+            '. Refresh the page to see any updated Default Hook cards below reflect it.' +
+            (res.data.writeErrors ? ' ' + res.data.writeErrors + ' hook' + (res.data.writeErrors === 1 ? '' : 's') + ' failed to save — click "Check now" again to retry just those.' : '');
           resultsEl.style.display = 'none';
           showToast('Collapsed links fixed');
         }).catch(function(){

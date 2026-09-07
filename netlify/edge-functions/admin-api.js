@@ -1162,26 +1162,39 @@ export default async (request, context) => {
       const shortLinksStore = getStore({ name: "short-links", consistency: "strong" });
       const { blobs } = await hookStore.list();
 
+      // Each hook catches its own failure rather than letting it reject
+      // the whole mapWithConcurrency batch (same reasoning as
+      // importStockNetworkReport's row loop above): otherwise one bad
+      // write turns the whole request into a 500 with no indication of
+      // which of the other, concurrently-running hooks already got
+      // written before the response gave up on all of them. changes only
+      // records a hook once its fix has actually landed (or, on a dry
+      // run, once it's confirmed resolvable) — never speculatively before
+      // that — so the returned list is exactly what happened.
       const changes = [];
+      let writeErrors = 0;
       await mapWithConcurrency(blobs, async (b) => {
-        const record = await hookStore.get(b.key, { type: "json" }).catch(() => null);
-        if (!record) return;
-        const booking = typeof record.booking === "string" ? record.booking : "";
-        const landing = typeof record.landing === "string" ? record.landing : "";
-        if (!booking || booking !== landing || !isShortLink(booking)) return;
+        try {
+          const record = await hookStore.get(b.key, { type: "json" }).catch(() => null);
+          if (!record) return;
+          const booking = typeof record.booking === "string" ? record.booking : "";
+          const landing = typeof record.landing === "string" ? record.landing : "";
+          if (!booking || booking !== landing || !isShortLink(booking)) return;
 
-        const resolved = await resolveShortLink(booking, shortLinksStore);
-        if (resolved === booking) return; // couldn't resolve to anything different — leave alone
+          const resolved = await resolveShortLink(booking, shortLinksStore);
+          if (resolved === booking) return; // couldn't resolve to anything different — leave alone
 
-        changes.push({ key: b.key, oldLink: booking, newBooking: resolved });
-
-        if (!dryRun) {
-          const updated = { ...record, booking: resolved, landing: "", updatedAt: new Date().toISOString() };
-          await hookStore.setJSON(b.key, updated);
+          if (!dryRun) {
+            const updated = { ...record, booking: resolved, landing: "", updatedAt: new Date().toISOString() };
+            await hookStore.setJSON(b.key, updated);
+          }
+          changes.push({ key: b.key, oldLink: booking, newBooking: resolved });
+        } catch (e) {
+          writeErrors++;
         }
       });
 
-      return json({ ok: true, dryRun: dryRun, count: changes.length, changes: changes }, 200, cors);
+      return json({ ok: true, dryRun: dryRun, count: changes.length, changes: changes, writeErrors: writeErrors }, 200, cors);
     }
 
     if (action === "deleteAffiliate") {
