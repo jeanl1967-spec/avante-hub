@@ -41,11 +41,11 @@ function todayUTCDateOnly() {
 // "Affiliate <number>" form (StockNetwork's own site number) so the
 // booking gets attributed to whichever site the admin built the promo for.
 // To make an admin-managed hook still credit the *viewing* affiliate, we
-// swap that number out for their own StockNetwork Site Nr wherever we
-// recognize this exact pattern. Any other URL shape is left untouched —
-// we only ever touch a link we can confidently recognize.
-function personalizeStockNetworkUrl(rawUrl, siteNr) {
-  if (!rawUrl || !siteNr) return rawUrl;
+// swap that last segment out for `replacement` wherever we recognize this
+// exact "Affiliate <number>" pattern. Any other URL shape is left
+// untouched — we only ever touch a link we can confidently recognize.
+function personalizeStockNetworkUrl(rawUrl, replacement) {
+  if (!rawUrl || !replacement) return rawUrl;
   try {
     const u = new URL(rawUrl);
     const parts = u.pathname.split("/");
@@ -61,7 +61,7 @@ function personalizeStockNetworkUrl(rawUrl, siteNr) {
       return rawUrl;
     }
     if (!/^Affiliate\s+\d+$/i.test(seg)) return rawUrl;
-    parts[lastIdx] = encodeURIComponent("Affiliate " + siteNr);
+    parts[lastIdx] = encodeURIComponent(replacement);
     u.pathname = parts.join("/");
     return u.toString();
   } catch (e) {
@@ -88,9 +88,9 @@ async function resolveShortLink(rawUrl) {
   }
 }
 
-async function personalizeBooking(rawUrl, siteNr) {
+async function personalizeBooking(rawUrl, replacement) {
   const resolved = await resolveShortLink(rawUrl);
-  return personalizeStockNetworkUrl(resolved, siteNr);
+  return personalizeStockNetworkUrl(resolved, replacement);
 }
 
 export default async (request, context) => {
@@ -181,12 +181,19 @@ export default async (request, context) => {
       if (personalizedBooking) {
         // Look up this affiliate's StockNetwork Site Nr so admin-authored
         // booking links can be attributed to them, not to whichever site
-        // the admin happened to build the link for.
+        // the admin happened to build the link for. Site Nr is an optional,
+        // admin-set field though — an affiliate can exist without one on
+        // file. Rather than silently leaving the link on the admin's own
+        // placeholder site in that case (crediting Jean's master account
+        // instead of the affiliate), fall back to the affiliate's own Hub
+        // ID — the same ID self-managed hooks already use as their booking
+        // link's site identifier.
         try {
           const directoryStore = getStore({ name: "affiliates-directory", consistency: "strong" });
           const affDirRecord = await directoryStore.get(aff, { type: "json" });
           const siteNr = (affDirRecord && affDirRecord.siteNr) || "";
-          personalizedBooking = await personalizeBooking(personalizedBooking, siteNr);
+          const replacement = siteNr ? "Affiliate " + siteNr : aff;
+          personalizedBooking = await personalizeBooking(personalizedBooking, replacement);
         } catch (e) {
           // Best-effort — fall back to the admin's link exactly as saved.
         }
