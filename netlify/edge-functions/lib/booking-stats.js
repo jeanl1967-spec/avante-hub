@@ -246,6 +246,16 @@ export async function mapWithConcurrency(items, fn, concurrency) {
   return results;
 }
 
+// Lists every key in `store` and fetches all of their records with bounded
+// concurrency, in one shot. A single record's fetch failing doesn't lose
+// the rest — it resolves to null there (filtered out by callers that want
+// a plain list, kept as a positional null by callers, like siteToAff below,
+// that need to line results back up with what they listed).
+export async function fetchAllRecords(store) {
+  const { blobs } = await store.list();
+  return mapWithConcurrency(blobs, (b) => store.get(b.key, { type: "json" }).catch(() => null));
+}
+
 // Shared by admin-api.js's `bookingStats` resource and auth-api.js's
 // `getMyBookingStats` action — both need the full affiliate directory and
 // every imported transaction, fetched and shaped the exact same way. One
@@ -255,14 +265,7 @@ export async function loadAffiliatesAndTransactions(directoryStore, transactions
   // The affiliate directory and the transaction history are fully
   // independent of each other — fetch both concurrently rather than
   // waiting for all of one before starting the other.
-  const [affRecords, records] = await Promise.all([
-    directoryStore.list().then(({ blobs }) =>
-      mapWithConcurrency(blobs, (b) => directoryStore.get(b.key, { type: "json" }).catch(() => null))
-    ),
-    transactionsStore.list().then(({ blobs }) =>
-      mapWithConcurrency(blobs, (b) => transactionsStore.get(b.key, { type: "json" }).catch(() => null))
-    ),
-  ]);
+  const [affRecords, records] = await Promise.all([fetchAllRecords(directoryStore), fetchAllRecords(transactionsStore)]);
 
   // Built as one final, ordered pass over the fetched results — not by
   // mutating a shared object from inside each concurrent worker — so

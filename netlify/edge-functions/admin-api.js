@@ -10,6 +10,7 @@ import {
   aggregateTransactions,
   buildLeaderboard,
   loadAffiliatesAndTransactions,
+  fetchAllRecords,
   mapWithConcurrency,
   CHANNEL_KEYS as STATS_CHANNEL_KEYS,
 } from "./lib/booking-stats.js";
@@ -563,10 +564,7 @@ export default async (request, context) => {
       // typo; if that ever happens, which one wins should stay whichever
       // comes later in directoryStore.list()'s own order, the same every
       // run, not whichever concurrent fetch happened to resolve last.
-      const { blobs: affBlobs } = await directoryStore.list();
-      const affRecords = await mapWithConcurrency(affBlobs, (b) =>
-        directoryStore.get(b.key, { type: "json" }).catch(() => null)
-      );
+      const affRecords = await fetchAllRecords(directoryStore);
       const siteToAff = {};
       for (const rec of affRecords) {
         if (rec && rec.siteNr) siteToAff[String(rec.siteNr).trim()] = rec;
