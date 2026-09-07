@@ -701,6 +701,21 @@
           <button type="button" class="primary" id="misattributedLinksApplyBtn" style="margin-top:10px;">Apply fix</button>
         </div>
       </div>
+      <div class="card" style="margin-bottom:20px;">
+        <h3 style="margin-top:0;">Switch every affiliate to "Let admin manage"</h3>
+        <p class="modal-sub" style="margin:-4px 0 10px;">Finds every hook an affiliate has explicitly switched to "Manage my own" and switches it back to "Let admin manage" — so every affiliate's storefront shows your admin default content (personalized to their own Site Nr) instead. Non-destructive: only the mode changes — whatever booking link, landing link, caption, or photos an affiliate set for themselves stays saved untouched and reappears exactly as they left it if they ever switch back to managing that hook themselves.</p>
+        <button type="button" class="btn-outline" id="adminManagedCheckBtn">Check now</button>
+        <div class="status" id="adminManagedStatus"></div>
+        <div id="adminManagedResults" style="display:none; margin-top:12px;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Hook</th><th>Change</th></tr></thead>
+              <tbody id="adminManagedBody"></tbody>
+            </table>
+          </div>
+          <button type="button" class="primary" id="adminManagedApplyBtn" style="margin-top:10px;">Switch to admin-managed</button>
+        </div>
+      </div>
       <div class="hook-grid" id="defaultHookGrid"></div>
       <!-- Shared across every hook card's Auto-build field — populated once
            from /api/resorts with every resort name plus every unique
@@ -2490,24 +2505,28 @@
         });
       });
 
+      var applyBtnLabel = opts.applyBtnLabel || 'Apply fix';
+      var appliedVerb = opts.appliedVerb || 'Fixed';
+      applyBtn.textContent = applyBtnLabel;
+
       applyBtn.addEventListener('click', function(){
         applyBtn.disabled = true;
         applyBtn.textContent = 'Applying…';
         adminPost(opts.action, { dryRun: false }).then(function(res){
           applyBtn.disabled = false;
-          applyBtn.textContent = 'Apply fix';
+          applyBtn.textContent = applyBtnLabel;
           if(!res.data || !res.data.ok){
             statusEl.textContent = (res.data && res.data.error) || 'Could not apply the fix.';
             return;
           }
-          statusEl.textContent = 'Fixed ' + res.data.count + ' hook' + (res.data.count === 1 ? '' : 's') + '.' +
+          statusEl.textContent = appliedVerb + ' ' + res.data.count + ' hook' + (res.data.count === 1 ? '' : 's') + '.' +
             (opts.appliedNote || '') +
             (res.data.writeErrors ? ' ' + res.data.writeErrors + ' hook' + (res.data.writeErrors === 1 ? '' : 's') + ' failed to save — click "Check now" again to retry just those.' : '');
           resultsEl.style.display = 'none';
           showToast(opts.toastLabel);
         }).catch(function(){
           applyBtn.disabled = false;
-          applyBtn.textContent = 'Apply fix';
+          applyBtn.textContent = applyBtnLabel;
           statusEl.textContent = 'Could not reach the server — please try again.';
         });
       });
@@ -2549,6 +2568,24 @@
           '<td>' + escapeHtml(c.wrongId) + '</td>' +
           '<td style="word-break:break-all;">' + escapeHtml(c.oldBooking) + '</td>' +
           '<td style="word-break:break-all;">' + escapeHtml(c.newBooking) + '</td>';
+      }
+    });
+
+    // See switchHooksToAdminManaged in admin-api.js: every hook is
+    // already effectively admin-managed unless an affiliate explicitly
+    // switched it to "Manage my own" — this finds those and switches
+    // them back, without touching anything else in the record.
+    wireHookFixChecker({
+      idPrefix: 'adminManaged',
+      action: 'switchHooksToAdminManaged',
+      noneLabel: 'Every affiliate hook is already admin-managed — nothing to switch.',
+      foundLabel: 'currently set to "Manage my own" that will switch to "Let admin manage":',
+      applyBtnLabel: 'Switch to admin-managed',
+      appliedVerb: 'Switched',
+      toastLabel: 'Switched to admin-managed',
+      renderCells: function(c){
+        return '<td>' + escapeHtml(c.key) + '</td>' +
+          '<td>Manage my own → Let admin manage</td>';
       }
     });
 

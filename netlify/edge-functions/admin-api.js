@@ -1284,6 +1284,40 @@ export default async (request, context) => {
       return json({ ok: true, dryRun: dryRun, count: changes.length, changes: changes, writeErrors: writeErrors }, 200, cors);
     }
 
+    if (action === "switchHooksToAdminManaged") {
+      // "Every affiliate should be set up with admin manages": a hook is
+      // already effectively admin-managed by default — hook-api.js's GET
+      // (`mode = (affRecord && affRecord.mode) === "self" ? "self" :
+      // "admin"`) falls through to "admin" for no record at all, or any
+      // mode value other than the literal string "self". The only
+      // records that need touching are ones an affiliate explicitly
+      // switched to "Manage my own" at some point (mode === "self") —
+      // flip those back so every affiliate's storefront shows the
+      // (freshly rebuilt, Site-Nr-personalized) admin defaults instead.
+      //
+      // Deliberately non-destructive: only the mode field changes.
+      // Whatever booking/landing/caption/hashtags/gallery an affiliate
+      // had set for themselves is left completely untouched in the
+      // record — they can switch back to "Manage my own" later and find
+      // it exactly as they left it.
+      //
+      // dryRun (default true unless explicitly false) only reports what
+      // would change — nothing is written.
+      const dryRun = body.dryRun !== false;
+
+      const { changes, writeErrors } = await scanAndFixHooks(hookStore, dryRun, async (key, record) => {
+        if (key.startsWith("__admin__:")) return null;
+        if (record.mode !== "self") return null; // already effectively admin-managed
+
+        return {
+          updatedRecord: { ...record, mode: "admin", updatedAt: new Date().toISOString() },
+          changeInfo: {},
+        };
+      });
+
+      return json({ ok: true, dryRun: dryRun, count: changes.length, changes: changes, writeErrors: writeErrors }, 200, cors);
+    }
+
     if (action === "deleteAffiliate") {
       const affId = typeof body.affId === "string" ? body.affId.trim() : "";
       if (!affId) return json({ ok: false, error: "missing affId" }, 400, cors);
