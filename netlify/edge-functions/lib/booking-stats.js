@@ -221,6 +221,13 @@ export function buildLeaderboard(channelStats, affiliatesById) {
 // edge function's execution-time limit) as the affiliate list or the
 // transaction history grows. A small fixed-size worker pool keeps several
 // requests in flight at once without firing hundreds of them simultaneously.
+// A rejection from `fn` propagates out of Promise.all immediately, but the
+// other workers already mid-await keep running in the background — they
+// are not cancelled. That's fine for read-only lookups (worst case, a
+// result nobody reads), but a caller doing writes inside `fn` (e.g. one
+// row of a CSV import) must catch its own errors and record the failure
+// instead of throwing, so one bad item can't abort in-flight writes for
+// every other item still being processed.
 const DEFAULT_CONCURRENCY = 20;
 
 export async function mapWithConcurrency(items, fn, concurrency) {
@@ -242,22 +249,32 @@ export async function mapWithConcurrency(items, fn, concurrency) {
 // Shared by admin-api.js's `bookingStats` resource and auth-api.js's
 // `getMyBookingStats` action — both need the full affiliate directory and
 // every imported transaction, fetched and shaped the exact same way. One
-// copy means both benefit from the concurrency above the same way, and
+// copy means both benefit from the concurrency below the same way, and
 // can't drift apart on how these two stores get read.
 export async function loadAffiliatesAndTransactions(directoryStore, transactionsStore) {
-  const { blobs: affBlobs } = await directoryStore.list();
+  // The affiliate directory and the transaction history are fully
+  // independent of each other — fetch both concurrently rather than
+  // waiting for all of one before starting the other.
+  const [affRecords, records] = await Promise.all([
+    directoryStore.list().then(({ blobs }) =>
+      mapWithConcurrency(blobs, (b) => directoryStore.get(b.key, { type: "json" }).catch(() => null))
+    ),
+    transactionsStore.list().then(({ blobs }) =>
+      mapWithConcurrency(blobs, (b) => transactionsStore.get(b.key, { type: "json" }).catch(() => null))
+    ),
+  ]);
+
+  // Built as one final, ordered pass over the fetched results — not by
+  // mutating a shared object from inside each concurrent worker — so
+  // that if two directory records were ever somehow saved under the same
+  // affId, which one wins stays whichever came later in
+  // directoryStore.list()'s own order, the same every run, rather than
+  // depending on which of two concurrent fetches happened to resolve
+  // last.
   const affiliatesById = {};
-  await mapWithConcurrency(affBlobs, async (b) => {
-    const rec = await directoryStore.get(b.key, { type: "json" });
+  for (const rec of affRecords) {
     if (rec) affiliatesById[rec.affId] = rec;
-  });
+  }
 
-  const { blobs: txBlobs } = await transactionsStore.list();
-  const records = [];
-  await mapWithConcurrency(txBlobs, async (b) => {
-    const rec = await transactionsStore.get(b.key, { type: "json" });
-    if (rec) records.push(rec);
-  });
-
-  return { affiliatesById, records };
+  return { affiliatesById, records: records.filter(Boolean) };
 }

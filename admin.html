@@ -1637,7 +1637,8 @@
             }
             var s = res.data.summary;
             statusEl.textContent = 'Imported ' + file.name + ': ' + s.created + ' new, ' + s.updated + ' updated, ' +
-              s.unchanged + ' unchanged, ' + s.unmatchedSite + ' skipped (no matching affiliate site).';
+              s.unchanged + ' unchanged, ' + s.unmatchedSite + ' skipped (no matching affiliate site).' +
+              (s.writeErrors ? ' ' + s.writeErrors + ' row' + (s.writeErrors === 1 ? '' : 's') + ' failed to save — try re-uploading the same file to retry just those.' : '');
             input.value = '';
             loadBookingStats().then(renderBookingsPanel);
           })

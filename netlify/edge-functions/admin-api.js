@@ -556,12 +556,21 @@ export default async (request, context) => {
       // time — with dozens of affiliates that for-loop was the difference
       // between a handful of round trips overlapping and all of them
       // serialized end-to-end before a single CSV row could even start.
+      // siteToAff itself is still built afterward, as one ordered pass
+      // over the fetched records (not from inside each concurrent
+      // fetch) — Site Nr is a free-text admin field, not a directory
+      // record's key, so two affiliates could end up sharing one by
+      // typo; if that ever happens, which one wins should stay whichever
+      // comes later in directoryStore.list()'s own order, the same every
+      // run, not whichever concurrent fetch happened to resolve last.
       const { blobs: affBlobs } = await directoryStore.list();
+      const affRecords = await mapWithConcurrency(affBlobs, (b) =>
+        directoryStore.get(b.key, { type: "json" }).catch(() => null)
+      );
       const siteToAff = {};
-      await mapWithConcurrency(affBlobs, async (b) => {
-        const rec = await directoryStore.get(b.key, { type: "json" });
+      for (const rec of affRecords) {
         if (rec && rec.siteNr) siteToAff[String(rec.siteNr).trim()] = rec;
-      });
+      }
 
       let created = 0;
       let updated = 0;
@@ -602,46 +611,56 @@ export default async (request, context) => {
       // time. created/updated/unchanged are plain counters incremented by
       // a single synchronous statement per row — safe under this
       // concurrency since JS never interleaves mid-statement, only at
-      // await points.
+      // await points. Each row catches its own failure rather than
+      // letting it reject the whole mapWithConcurrency batch — a bad row
+      // (a transient store error, say) would otherwise abort the request
+      // with a 500 while every other row's write is still in flight,
+      // uncounted and unconfirmed either way; this way a single bad row
+      // is simply skipped and reported, everything else still lands.
+      let writeErrors = 0;
       await mapWithConcurrency(toWrite, async ({ row, refNo, site, aff }) => {
-        const status = normalizeStockNetworkStatus(row.Name, row["Confirmed On"]);
-        const record = {
-          refNo: refNo,
-          channel: channel,
-          site: site,
-          affId: aff.affId,
-          status: status,
-          amountIncl: parseMoney(row["Total Amount Incl."]),
-          currency: row.Currency || "ZAR",
-          transactionDate: parseUsDateToYmd(row["Transaction Date"]),
-          confirmedOn: parseUsDateToYmd(row["Confirmed On"]),
-          guestName: row.Fullname || "",
-          guestEmail: row.EmailAddress || "",
-          resortName: row["Resort Name"] || "",
-          unitType: row["Unit Type"] || "",
-          checkIn: parseUsDateToYmd(row["Check In Date"]),
-          checkOut: parseUsDateToYmd(row["Check Out Date"]),
-          nights: Number(row.Nights) || 0,
-          companyName: row.CompanyName || "",
-          customerReference: row.CustomerReference || "",
-          sourceLabel: sourceLabel,
-          importedAt: new Date().toISOString(),
-        };
+        try {
+          const status = normalizeStockNetworkStatus(row.Name, row["Confirmed On"]);
+          const record = {
+            refNo: refNo,
+            channel: channel,
+            site: site,
+            affId: aff.affId,
+            status: status,
+            amountIncl: parseMoney(row["Total Amount Incl."]),
+            currency: row.Currency || "ZAR",
+            transactionDate: parseUsDateToYmd(row["Transaction Date"]),
+            confirmedOn: parseUsDateToYmd(row["Confirmed On"]),
+            guestName: row.Fullname || "",
+            guestEmail: row.EmailAddress || "",
+            resortName: row["Resort Name"] || "",
+            unitType: row["Unit Type"] || "",
+            checkIn: parseUsDateToYmd(row["Check In Date"]),
+            checkOut: parseUsDateToYmd(row["Check Out Date"]),
+            nights: Number(row.Nights) || 0,
+            companyName: row.CompanyName || "",
+            customerReference: row.CustomerReference || "",
+            sourceLabel: sourceLabel,
+            importedAt: new Date().toISOString(),
+          };
 
-        const existing = await transactionsStore.get(refNo, { type: "json" });
-        if (existing) {
-          record.firstImportedAt = existing.firstImportedAt || existing.importedAt;
-          const changed =
-            existing.status !== record.status ||
-            existing.amountIncl !== record.amountIncl ||
-            existing.confirmedOn !== record.confirmedOn;
-          if (changed) updated++;
-          else unchanged++;
-        } else {
-          record.firstImportedAt = record.importedAt;
-          created++;
+          const existing = await transactionsStore.get(refNo, { type: "json" });
+          if (existing) {
+            record.firstImportedAt = existing.firstImportedAt || existing.importedAt;
+            const changed =
+              existing.status !== record.status ||
+              existing.amountIncl !== record.amountIncl ||
+              existing.confirmedOn !== record.confirmedOn;
+            if (changed) updated++;
+            else unchanged++;
+          } else {
+            record.firstImportedAt = record.importedAt;
+            created++;
+          }
+          await transactionsStore.setJSON(refNo, record);
+        } catch (e) {
+          writeErrors++;
         }
-        await transactionsStore.setJSON(refNo, record);
       });
 
       return json(
@@ -654,6 +673,7 @@ export default async (request, context) => {
             unchanged: unchanged,
             unmatchedSite: unmatchedSite,
             skippedNoRef: skippedNoRef,
+            writeErrors: writeErrors,
           },
         },
         200,
