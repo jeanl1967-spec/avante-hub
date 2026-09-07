@@ -127,8 +127,17 @@ export default async (request, context) => {
       // string "__admin__" — which would break personalization for every
       // affiliate this default hook still serves. fixMisattributedHookLinks
       // already excludes ADMIN_KEY: records the same way.
-      if (aff !== ADMIN_KEY) {
-        record.booking = correctBookingLinkSiteId(record.booking, aff).url;
+      //
+      // The misattribution can hide behind one of our own short links
+      // too (shortened, then pasted somewhere raw) — resolve one before
+      // checking, or this would only ever see "go.avantetravel.co.za" and
+      // never the real destination underneath. Only rewrites booking when
+      // a correction is actually needed — an already-correct short link
+      // is left exactly as saved, not eagerly unshortened.
+      if (aff !== ADMIN_KEY && record.booking) {
+        const resolvedForCheck = isShortLink(record.booking) ? await resolveShortLink(record.booking) : record.booking;
+        const bookingCheck = correctBookingLinkSiteId(resolvedForCheck, aff);
+        if (bookingCheck.changed) record.booking = bookingCheck.url;
       }
       // Booking link and Landing page link ending up set to the exact
       // same short link is the specific mistake admin-api.js's

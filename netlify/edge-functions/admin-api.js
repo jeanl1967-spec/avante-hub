@@ -1246,9 +1246,21 @@ export default async (request, context) => {
       // that one path segment changes; every query param (dates, Filter)
       // an affiliate already set is preserved.
       //
+      // A misattributed booking link can also hide behind one of our own
+      // go.avantetravel.co.za short links (the same habit
+      // fixCollapsedHookLinks's own comment documents — shortening a link
+      // and pasting the short result somewhere raw) — resolve one before
+      // checking its site id, same as fixCollapsedHookLinks already does,
+      // or this checker would see only "go.avantetravel.co.za" and never
+      // recognize the real, wrongly-attributed destination underneath.
+      // Only ever rewrites booking to the resolved long form when a
+      // genuine correction is needed — an already-correct short link is
+      // left exactly as the affiliate set it, not eagerly unshortened.
+      //
       // dryRun (default true unless explicitly false) only reports what
       // would change — nothing is written.
       const dryRun = body.dryRun !== false;
+      const shortLinksStore = getStore({ name: "short-links", consistency: "strong" });
 
       const { changes, writeErrors } = await scanAndFixHooks(hookStore, dryRun, async (key, record) => {
         if (key.startsWith("__admin__:")) return null;
@@ -1259,7 +1271,8 @@ export default async (request, context) => {
         const booking = typeof record.booking === "string" ? record.booking : "";
         if (!booking) return null;
 
-        const result = correctBookingLinkSiteId(booking, affId);
+        const resolvedForCheck = isShortLink(booking) ? await resolveShortLink(booking, shortLinksStore) : booking;
+        const result = correctBookingLinkSiteId(resolvedForCheck, affId);
         if (!result.changed) return null;
 
         return {
