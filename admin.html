@@ -638,7 +638,7 @@
           <button class="btn-outline" id="refreshAffiliatesBtn">Refresh</button>
         </div>
         <div class="status" id="affiliatesStatus"></div>
-        <div class="status show" id="missingSiteNrSummary" style="margin-top:10px;"></div>
+        <div class="status" id="missingSiteNrSummary" style="margin-top:10px;"></div>
         <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--muted); margin-top:6px;">
           <input type="checkbox" id="missingSiteNrFilterToggle" style="width:auto; margin:0;">
           Show only affiliates missing a Site Nr
@@ -1424,6 +1424,7 @@
 
       if(!affiliatesCache.length){
         empty.style.display = 'block';
+        empty.textContent = 'No affiliates added yet — click "+ Add Affiliate" to add your first one.';
         return;
       }
 
