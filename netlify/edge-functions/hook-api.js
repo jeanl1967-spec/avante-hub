@@ -1,7 +1,7 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
 import { resolveShortLink as resolveShortLinkShared, isShortLink } from "./lib/short-link.js";
-import { correctBookingLinkSiteId } from "./lib/booking-link.js";
+import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-link.js";
 
 // Special affiliate key reserved for admin-managed default hook content.
 // Chosen so it can never collide with a real affiliate ID (StockNetwork
@@ -33,13 +33,15 @@ function todayUTCDateOnly() {
 
 // StockNetwork's "/ui/<id>" booking links carry the site identifier as the
 // last path segment. Self-managed hooks put the affiliate's own Hub ID
-// there; admin-authored promo links instead often use a short
-// "Affiliate <number>" form (StockNetwork's own site number) so the
-// booking gets attributed to whichever site the admin built the promo for.
-// To make an admin-managed hook still credit the *viewing* affiliate, we
-// swap that last segment out for `replacement` wherever we recognize this
-// exact "Affiliate <number>" pattern. Any other URL shape is left
-// untouched — we only ever touch a link we can confidently recognize.
+// there; an admin-authored default hook instead uses Jean's own master
+// site GUID (ADMIN_MASTER_SITE_GUID) as a placeholder, so the booking can
+// be re-attributed to whichever affiliate is actually viewing it. Earlier
+// admin default hooks were built with a literal "Affiliate <number>" text
+// segment instead — confirmed NOT to be a real StockNetwork site
+// identifier (it doesn't open the site it names), but still recognized
+// here too so any hook not yet rebuilt with the real GUID still gets
+// personalized rather than silently shown broken. Any other URL shape is
+// left untouched — we only ever touch a link we can confidently recognize.
 function personalizeStockNetworkUrl(rawUrl, replacement) {
   if (!rawUrl || !replacement) return rawUrl;
   try {
@@ -56,7 +58,8 @@ function personalizeStockNetworkUrl(rawUrl, replacement) {
     } catch (e) {
       return rawUrl;
     }
-    if (!/^Affiliate\s+\d+$/i.test(seg)) return rawUrl;
+    const isPlaceholder = seg === ADMIN_MASTER_SITE_GUID || /^Affiliate\s+\d+$/i.test(seg);
+    if (!isPlaceholder) return rawUrl;
     parts[lastIdx] = encodeURIComponent(replacement);
     u.pathname = parts.join("/");
     return u.toString();
@@ -123,10 +126,11 @@ export default async (request, context) => {
       // enforce here, EXCEPT for ADMIN_KEY itself: this endpoint has no
       // auth check at all, and admin's own default hook record
       // (aff === ADMIN_KEY) is *supposed* to keep carrying the shared
-      // "Affiliate <N>" placeholder, not get "corrected" to the literal
-      // string "__admin__" — which would break personalization for every
-      // affiliate this default hook still serves. fixMisattributedHookLinks
-      // already excludes ADMIN_KEY: records the same way.
+      // ADMIN_MASTER_SITE_GUID placeholder (see personalizeStockNetworkUrl
+      // above), not get "corrected" to the literal string "__admin__" —
+      // which would break personalization for every affiliate this default
+      // hook still serves. fixMisattributedHookLinks already excludes
+      // ADMIN_KEY records the same way.
       //
       // The misattribution can hide behind one of our own short links
       // too (shortened, then pasted somewhere raw) — resolve one before
@@ -200,21 +204,17 @@ export default async (request, context) => {
 
       let personalizedBooking = adminRecord ? adminRecord.booking || "" : "";
       if (personalizedBooking) {
-        // Look up this affiliate's StockNetwork Site Nr so admin-authored
-        // booking links can be attributed to them, not to whichever site
-        // the admin happened to build the link for. Site Nr is an optional,
-        // admin-set field though — an affiliate can exist without one on
-        // file. Rather than silently leaving the link on the admin's own
-        // placeholder site in that case (crediting Jean's master account
-        // instead of the affiliate), fall back to the affiliate's own Hub
-        // ID — the same ID self-managed hooks already use as their booking
-        // link's site identifier.
+        // Re-attribute the admin's placeholder booking link to whichever
+        // affiliate is actually viewing it, using their own real
+        // StockNetwork site GUID (`aff` — the same ID self-managed hooks
+        // already use directly as their booking link's site identifier;
+        // see the "Add Affiliate" modal, which requires this to match the
+        // affiliate's real Hub/StockNetwork ID exactly). Confirmed directly
+        // that StockNetwork's numeric "Site Nr" field (used elsewhere for
+        // CSV/leaderboard matching only) does NOT work as a /ui/<id> URL
+        // segment, so it must never be used here — only a real GUID does.
         try {
-          const directoryStore = getStore({ name: "affiliates-directory", consistency: "strong" });
-          const affDirRecord = await directoryStore.get(aff, { type: "json" });
-          const siteNr = (affDirRecord && affDirRecord.siteNr) || "";
-          const replacement = siteNr ? "Affiliate " + siteNr : aff;
-          personalizedBooking = await personalizeBooking(personalizedBooking, replacement);
+          personalizedBooking = await personalizeBooking(personalizedBooking, aff);
         } catch (e) {
           // Best-effort — fall back to the admin's link exactly as saved.
         }

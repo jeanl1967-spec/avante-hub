@@ -2,7 +2,7 @@ import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
 import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
 import { isShortLink, resolveShortLink } from "./lib/short-link.js";
-import { correctBookingLinkSiteId } from "./lib/booking-link.js";
+import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-link.js";
 import {
   parseStockNetworkCsv,
   normalizeStockNetworkStatus,
@@ -971,10 +971,8 @@ export default async (request, context) => {
         }
       }
 
-      // Matches the admin's own existing default-hook booking-link
-      // convention (see hooks #4/#5 already saved this way): a link built
-      // off the "Affiliate 36" placeholder — 36 being Jean's own master
-      // StockNetwork site number — which hook-api.js's
+      // Built off ADMIN_MASTER_SITE_GUID — Jean's own real StockNetwork
+      // site GUID, used as a placeholder — which hook-api.js's
       // personalizeStockNetworkUrl already swaps for whichever affiliate
       // is actually viewing the hook. Dates default to one month out for a
       // one-night stay — a viewer picks their own dates on the landing
@@ -989,7 +987,7 @@ export default async (request, context) => {
         Filter: label,
       });
       const booking =
-        "https://stock.stocknetwork.co.za/ui/" + encodeURIComponent("Affiliate 36") + "?" + bookingParams.toString();
+        "https://stock.stocknetwork.co.za/ui/" + encodeURIComponent(ADMIN_MASTER_SITE_GUID) + "?" + bookingParams.toString();
 
       // Merged real content from every source — carried back to the client
       // so a later saveHookPhotos call can persist it onto the hook record
@@ -1182,8 +1180,8 @@ export default async (request, context) => {
       // and the short result was then pasted into both raw fields instead
       // of just the one meant to be shared) — never a valid, intentional
       // state, and it breaks per-affiliate attribution: hook-api.js's
-      // personalizeStockNetworkUrl needs the real "Affiliate <N>" booking
-      // URL to recognize and personalize, not an opaque short link.
+      // personalizeStockNetworkUrl needs the real ADMIN_MASTER_SITE_GUID
+      // booking URL to recognize and personalize, not an opaque short link.
       //
       // Scans every hook this system has — both admin's own defaults
       // (__admin__:1..N) and every affiliate's self-managed ones
@@ -1237,7 +1235,7 @@ export default async (request, context) => {
       // registered affiliate at all, if that's what ended up there.
       //
       // Scans every non-admin hook (__admin__:* keys are excluded — an
-      // admin default is *supposed* to carry the "Affiliate <N>"
+      // admin default is *supposed* to carry the ADMIN_MASTER_SITE_GUID
       // placeholder, not any specific affiliate's id, a different,
       // already-handled case). correctBookingLinkSiteId only ever touches
       // the exact "/ui/<id>" shape on stock.stocknetwork.co.za — any
