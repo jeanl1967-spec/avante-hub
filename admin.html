@@ -1100,11 +1100,24 @@
     // match LEADERBOARD_EXCLUDED_SITE_NRS[0] in
     // netlify/edge-functions/lib/booking-stats.js (this page has no
     // access to that server-side module, so it's kept in sync by hand).
-    // Every default hook's booking link is built off this placeholder —
-    // see the Booking Link Builder below — and hook-api.js's
-    // personalizeStockNetworkUrl swaps it for whichever affiliate is
-    // actually viewing the hook before it's ever shown to them.
+    // Only meaningful in StockNetwork's own report/CSV exports (affiliate
+    // revenue matching, leaderboard exclusion) — NOT a valid StockNetwork
+    // booking-page URL identifier (confirmed directly: a /ui/Affiliate 36
+    // style link does not open site 36's real listing). Do not use this
+    // for building or personalizing a booking link — see
+    // ADMIN_MASTER_SITE_GUID below for that.
     var ADMIN_MASTER_SITE_NR = '36';
+    // Jean's own real StockNetwork site GUID — confirmed directly by
+    // opening https://stock.stocknetwork.co.za/ui/<this> and seeing it
+    // load his actual site. Every default hook's booking link is built
+    // off this placeholder — see the Booking Link Builder below — and
+    // hook-api.js's personalizeStockNetworkUrl swaps it for whichever
+    // affiliate is actually viewing the hook before it's ever shown to
+    // them, using that affiliate's own real ID the exact same way. Must
+    // match ADMIN_MASTER_SITE_GUID in
+    // netlify/edge-functions/lib/booking-link.js (kept in sync by hand,
+    // same as ADMIN_MASTER_SITE_NR above).
+    var ADMIN_MASTER_SITE_GUID = 'c2fef00f-7330-4eb3-b993-f5f43fc73dff';
     // Same Impact.com/Travelstart tracking link used in hub.html/landing.html,
     // with each affiliate's ID appended as a Sub ID.
     var FLIGHT_BASE_URL = 'https://travelstart.zwjlk6.net/LPVYJM';
@@ -2929,7 +2942,7 @@
 
       // Builds this hook's default booking link in the exact format every
       // other admin-managed default hook already uses (see the comment on
-      // ADMIN_MASTER_SITE_NR above): the master placeholder as the site
+      // ADMIN_MASTER_SITE_GUID above): the master placeholder as the site
       // identifier, plus CheckInDT/CheckOutDT/Filter — so hook-api.js's
       // personalizeStockNetworkUrl reliably recognizes and swaps it for
       // whichever affiliate is actually viewing the hook. Only fills in
@@ -2953,7 +2966,7 @@
         var area = document.getElementById('dh' + n + '-linkArea').value.trim();
         var params = new URLSearchParams({ CheckInDT: checkIn, CheckOutDT: checkOut });
         if(area) params.set('Filter', area);
-        var link = STOCKNETWORK_BASE + encodeURIComponent('Affiliate ' + ADMIN_MASTER_SITE_NR) + '?' + params.toString();
+        var link = STOCKNETWORK_BASE + encodeURIComponent(ADMIN_MASTER_SITE_GUID) + '?' + params.toString();
 
         document.getElementById('dh' + n + '-booking').value = link;
         statusEl.textContent = 'Booking link filled in below — remember to click "Save default".';
