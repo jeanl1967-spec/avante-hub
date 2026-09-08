@@ -30,6 +30,70 @@ function clean(v, max) {
   return typeof v === "string" ? v.trim().slice(0, max || 500) : "";
 }
 
+// Minimal CSV field-splitter (handles quoted fields, embedded commas, and
+// "" escaped quotes) — same approach as resorts-api.js's parseCsvLine,
+// duplicated locally rather than shared since it's a few lines and this
+// file shouldn't import from another routed function.
+function parseCsvLine(line) {
+  const result = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; }
+        else { inQuotes = false; }
+      } else {
+        cur += ch;
+      }
+    } else {
+      if (ch === '"') { inQuotes = true; }
+      else if (ch === ",") { result.push(cur); cur = ""; }
+      else { cur += ch; }
+    }
+  }
+  result.push(cur);
+  return result;
+}
+
+function parseActivitiesCsv(text) {
+  const lines = text.split(/\r\n|\r|\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return [];
+  const header = parseCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+  const idx = (name) => header.indexOf(name);
+  const cols = {
+    id: idx("id"),
+    name: idx("name"),
+    area: idx("area"),
+    zone: idx("zone"),
+    price: idx("price"),
+    contactLink: idx("contactlink"),
+    description: idx("description"),
+    latitude: idx("latitude"),
+    longitude: idx("longitude"),
+  };
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const fields = parseCsvLine(lines[i]);
+    const get = (key) => (cols[key] > -1 ? (fields[cols[key]] || "").trim() : "");
+    const name = get("name");
+    if (!name) continue;
+    rows.push({
+      id: get("id"),
+      name: name,
+      area: get("area"),
+      zone: get("zone"),
+      price: get("price"),
+      contactLink: get("contactLink"),
+      description: get("description"),
+      latitude: get("latitude"),
+      longitude: get("longitude"),
+    });
+  }
+  return rows;
+}
+
 function genActivityId() {
   const n = Math.floor(Math.random() * 900000) + 100000;
   return "A-" + n;
@@ -195,6 +259,38 @@ export default async (request, context) => {
       const activities = await Promise.all(actBlobs.map((b) => activitiesStore.get(b.key, { type: "json" })));
 
       return json({ ok: true, properties, activities: activities.filter(Boolean) });
+    }
+
+    if (action === "importActivitiesCsv") {
+      const csvText = typeof body.csv === "string" ? body.csv : "";
+      if (!csvText.trim()) return json({ error: "Uploaded file was empty." }, 400);
+      const rows = parseActivitiesCsv(csvText);
+      if (!rows.length) return json({ error: "Could not find any activity rows (need at least a 'name' column)." }, 400);
+
+      const { blobs: existingBlobs } = await activitiesStore.list();
+      const existingRecords = await Promise.all(existingBlobs.map((b) => activitiesStore.get(b.key, { type: "json" })));
+      const byId = new Map(existingRecords.filter(Boolean).map((r) => [r.id, r]));
+      const byName = new Map(existingRecords.filter(Boolean).map((r) => [(r.name || "").toLowerCase(), r]));
+
+      let created = 0;
+      let updated = 0;
+      for (const row of rows) {
+        const matchExisting = (row.id && byId.get(row.id)) || byName.get(row.name.toLowerCase());
+        const record = sanitizeActivity(row, matchExisting || {});
+        if (matchExisting) {
+          record.id = matchExisting.id;
+          record.updatedAt = new Date().toISOString();
+          updated++;
+        } else {
+          record.id = genActivityId();
+          record.createdAt = new Date().toISOString();
+          record.updatedAt = record.createdAt;
+          created++;
+        }
+        await activitiesStore.setJSON(record.id, record);
+      }
+
+      return json({ ok: true, created: created, updated: updated });
     }
 
     if (action === "addActivity") {
