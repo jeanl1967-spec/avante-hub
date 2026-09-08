@@ -817,7 +817,15 @@
   @media (max-width: 480px){
     .a2hs-banner{ left:10px; right:10px; bottom:10px; padding:12px; }
   }
+
+  /* ---- Explore Map ---- */
+  #exploreMapEl{ width:100%; height:520px; border-radius:10px; }
+  .map-filter-row{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; }
+  .map-popup-photo{ width:100%; max-width:220px; height:120px; object-fit:cover; border-radius:6px; margin-bottom:8px; display:block; }
+  .map-popup-title{ font-weight:600; margin-bottom:4px; }
+  .map-popup-desc{ font-size:13px; margin-bottom:6px; }
 </style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 </head>
 <body>
 
@@ -899,6 +907,7 @@
       <button class="tab" data-panel="dashboard">My Dashboard</button>
       <button class="tab" data-panel="marketing">Affiliate Marketing</button>
       <button class="tab" data-panel="accom">Accommodation Link Builder</button>
+      <button class="tab" data-panel="exploreMap">Explore Map</button>
       <button class="tab" data-panel="package">Build Your Package</button>
       <button class="tab" data-panel="flight">Your Flight Link</button>
       <button class="tab" data-panel="activity">Your Activity Link</button>
@@ -1165,6 +1174,26 @@
           </div>
           <iframe class="preview" id="r-previewFrame" title="Resort info preview"></iframe>
         </div>
+      </div>
+    </section>
+
+    <!-- ===================== EXPLORE MAP ===================== -->
+    <section class="panel" id="panel-exploreMap">
+      <div class="hero">
+        <h1>Explore Map</h1>
+        <p>Properties and local activities/experiences, plotted on a map — click a pin for photos, details, and how to book</p>
+      </div>
+      <div class="card">
+        <div class="map-filter-row">
+          <label for="em-areaFilter" style="margin:0;">Filter by area</label>
+          <select id="em-areaFilter">
+            <option value="">All areas</option>
+          </select>
+          <label style="margin:0;"><input type="checkbox" id="em-showProperties" checked> Properties</label>
+          <label style="margin:0;"><input type="checkbox" id="em-showActivities" checked> Activities</label>
+        </div>
+        <div class="status" id="em-status"></div>
+        <div id="exploreMapEl"></div>
       </div>
     </section>
 
@@ -3396,6 +3425,7 @@
     nothing needs passing in explicitly.
   -->
   <script src="share-kit.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script>
 
     // ---------- Link shortener (shared across every link the Hub builds) ----------
@@ -3757,6 +3787,145 @@
       if(accountTab){
         accountTab.addEventListener('click', function(){
           if(!loaded) load();
+        });
+      }
+    })();
+
+    // ---------- Explore Map ----------
+    (function(){
+      var mapElId = 'exploreMapEl';
+      var statusEl = document.getElementById('em-status');
+      var areaFilterEl = document.getElementById('em-areaFilter');
+      var showPropsEl = document.getElementById('em-showProperties');
+      var showActsEl = document.getElementById('em-showActivities');
+      if(!document.getElementById(mapElId)) return;
+
+      var leafletMap = null;
+      var markers = []; // { marker, kind, area }
+      var loaded = false;
+
+      function escapeHtml(s){
+        return String(s == null ? '' : s)
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+
+      function popupHtml(item){
+        var parts = [];
+        if(item.photo){
+          parts.push('<img class="map-popup-photo" src="' + escapeHtml(item.photo) + '" alt="">');
+        }
+        parts.push('<div class="map-popup-title">' + escapeHtml(item.name || 'Untitled') + '</div>');
+        var subtitle = item.kind === 'property'
+          ? [item.city, item.country].filter(Boolean).join(', ')
+          : item.area;
+        if(subtitle) parts.push('<div class="map-popup-desc" style="color:#777;">' + escapeHtml(subtitle) + '</div>');
+        if(item.kind === 'activity' && item.price){
+          parts.push('<div class="map-popup-desc"><strong>' + escapeHtml(item.price) + '</strong></div>');
+        }
+        if(item.description){
+          parts.push('<div class="map-popup-desc">' + escapeHtml(item.description) + '</div>');
+        }
+        var linkUrl = item.kind === 'property' ? (item.bookingLink || item.infoLink) : item.contactLink;
+        if(linkUrl){
+          var label = item.kind === 'property' ? 'Visit / book' : 'Book / contact';
+          parts.push('<a href="' + escapeHtml(linkUrl) + '" target="_blank" rel="noopener" class="btn-secondary" style="display:inline-block; margin-top:4px; text-decoration:none; padding:6px 12px; border-radius:6px;">' + label + '</a>');
+        }
+        return parts.join('');
+      }
+
+      function applyFilters(){
+        var area = areaFilterEl.value;
+        var showProps = showPropsEl.checked;
+        var showActs = showActsEl.checked;
+        markers.forEach(function(m){
+          var kindOk = (m.kind === 'property' && showProps) || (m.kind === 'activity' && showActs);
+          var areaOk = !area || m.area === area;
+          if(kindOk && areaOk){
+            if(!leafletMap.hasLayer(m.marker)) m.marker.addTo(leafletMap);
+          } else {
+            if(leafletMap.hasLayer(m.marker)) leafletMap.removeLayer(m.marker);
+          }
+        });
+      }
+
+      function populateAreaFilter(items){
+        var areas = [];
+        items.forEach(function(it){
+          var a = it.kind === 'property' ? (it.area || it.city) : it.area;
+          if(a && areas.indexOf(a) === -1) areas.push(a);
+        });
+        areas.sort();
+        areaFilterEl.innerHTML = '<option value="">All areas</option>';
+        areas.forEach(function(a){
+          var opt = document.createElement('option');
+          opt.value = a;
+          opt.textContent = a;
+          areaFilterEl.appendChild(opt);
+        });
+      }
+
+      function loadMap(){
+        if(loaded) return;
+        loaded = true;
+        statusEl.textContent = 'Loading map\u2026';
+        statusEl.className = 'status show';
+
+        leafletMap = L.map(mapElId).setView([-30.5595, 22.9375], 6); // South Africa
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 18,
+          attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(leafletMap);
+
+        fetch('/api/map').then(function(r){ return r.json(); }).then(function(res){
+          statusEl.textContent = '';
+          statusEl.className = 'status';
+          if(!res || !res.ok){
+            statusEl.textContent = (res && res.error) || 'Could not load the map.';
+            statusEl.className = 'status show';
+            return;
+          }
+          var properties = (res.properties || []).map(function(p){ p.kind = 'property'; return p; });
+          var activities = (res.activities || []).map(function(a){ a.kind = 'activity'; return a; });
+          var all = properties.concat(activities);
+
+          if(!all.length){
+            statusEl.textContent = 'No properties or activities are on the map yet.';
+            statusEl.className = 'status show';
+          }
+
+          populateAreaFilter(all);
+
+          all.forEach(function(item){
+            if(typeof item.latitude !== 'number' || typeof item.longitude !== 'number') return;
+            var icon = item.kind === 'activity'
+              ? L.divIcon({ className: '', html: '<div style="background:#0e7c66; width:14px; height:14px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 2px rgba(0,0,0,.4);"></div>', iconSize: [14,14] })
+              : L.divIcon({ className: '', html: '<div style="background:#1a4d7a; width:14px; height:14px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 2px rgba(0,0,0,.4);"></div>', iconSize: [14,14] });
+            var marker = L.marker([item.latitude, item.longitude], { icon: icon });
+            marker.bindPopup(popupHtml(item), { maxWidth: 260 });
+            markers.push({ marker: marker, kind: item.kind, area: item.kind === 'property' ? (item.area || item.city) : item.area });
+          });
+
+          applyFilters();
+
+          if(markers.length){
+            var group = L.featureGroup(markers.map(function(m){ return m.marker; }));
+            leafletMap.fitBounds(group.getBounds().pad(0.2));
+          }
+        }).catch(function(){
+          statusEl.textContent = 'Could not load the map.';
+          statusEl.className = 'status show';
+        });
+      }
+
+      areaFilterEl.addEventListener('change', applyFilters);
+      showPropsEl.addEventListener('change', applyFilters);
+      showActsEl.addEventListener('change', applyFilters);
+
+      var mapTab = document.querySelector('.tab[data-panel="exploreMap"]');
+      if(mapTab){
+        mapTab.addEventListener('click', function(){
+          loadMap();
+          setTimeout(function(){ if(leafletMap) leafletMap.invalidateSize(); }, 150);
         });
       }
     })();
