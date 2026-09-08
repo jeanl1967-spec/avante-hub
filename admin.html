@@ -1046,6 +1046,7 @@
       <div class="card">
         <h3 style="margin-top:0;">Master map</h3>
         <p style="margin-top:0;">Every property and activity, including hidden ones (shown dimmed). Click a pin to show/hide it on the affiliate-facing map.</p>
+        <div class="status" id="missingCoordsSummary" style="margin-top:0;"></div>
         <div class="map-filter-row" style="display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin-bottom:12px;">
           <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#1a4d7a; display:inline-block;"></span> Property (shown)</label>
           <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#0e7c66; display:inline-block;"></span> Activity (shown)</label>
@@ -1138,6 +1139,7 @@
                 <tr>
                   <th>Name</th>
                   <th>Area</th>
+                  <th>Coordinates</th>
                   <th>Price</th>
                   <th>Photo</th>
                   <th>Visible</th>
@@ -3944,6 +3946,18 @@
           tdArea.textContent = a.area || '\u2014';
           tr.appendChild(tdArea);
 
+          var lat = parseFloat(a.latitude);
+          var lng = parseFloat(a.longitude);
+          var hasCoords = isFinite(lat) && isFinite(lng);
+          var tdCoords = document.createElement('td');
+          tdCoords.textContent = hasCoords ? (lat.toFixed(4) + ', ' + lng.toFixed(4)) : 'Missing';
+          tdCoords.style.fontSize = '12px';
+          if(!hasCoords){
+            tdCoords.style.color = '#b42318';
+            tdCoords.style.fontWeight = '600';
+          }
+          tr.appendChild(tdCoords);
+
           var tdPrice = document.createElement('td');
           tdPrice.textContent = a.price || '\u2014';
           tr.appendChild(tdPrice);
@@ -4108,6 +4122,29 @@
         });
       }
 
+      function renderMissingCoordsSummary(missingProperties, activities){
+        var el = document.getElementById('missingCoordsSummary');
+        var missingActivities = activities.filter(function(a){
+          var lat = parseFloat(a.latitude);
+          var lng = parseFloat(a.longitude);
+          return !isFinite(lat) || !isFinite(lng);
+        });
+        var propCount = missingProperties.length;
+        var actCount = missingActivities.length;
+        if(!propCount && !actCount){
+          el.textContent = 'Every property and activity has coordinates.';
+          el.className = 'status show';
+          el.style.color = '';
+          return;
+        }
+        var parts = [];
+        if(propCount) parts.push(propCount + ' propert' + (propCount === 1 ? 'y' : 'ies'));
+        if(actCount) parts.push(actCount + ' activit' + (actCount === 1 ? 'y' : 'ies'));
+        el.textContent = parts.join(' and ') + ' missing coordinates \u2014 see the tables below.';
+        el.className = 'status show';
+        el.style.color = '#b42318';
+      }
+
       function renderMissingCoordsTable(rows){
         var body = document.getElementById('missingCoordsTableBody');
         var empty = document.getElementById('missingCoordsEmpty');
@@ -4145,6 +4182,7 @@
             renderMapPropertiesTable(res.data.properties || []);
             renderAdminMap(res.data.properties || [], res.data.activities || []);
             renderMissingCoordsTable(res.data.missingCoordinates || []);
+            renderMissingCoordsSummary(res.data.missingCoordinates || [], res.data.activities || []);
           } else {
             actStatusEl.textContent = (res.data && res.data.error) || 'Could not load map data.';
             actStatusEl.className = 'status show';
