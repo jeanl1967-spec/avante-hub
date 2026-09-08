@@ -1,5 +1,5 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
-import { ZONES, provinceToZone } from "./lib/zones.js";
+import { ZONES, provinceToZone, districtToZone } from "./lib/zones.js";
 
 // Backs the new "Map & Activities" admin tab and the new "Explore Map" hub
 // tab. Two data sources feed one shared response:
@@ -121,6 +121,7 @@ function toPropertyPin(record, hidden) {
   return {
     kind: "property",
     listingId: record.listingId,
+    source: "onboarded",
     name: record.propertyName || "",
     area: record.area || record.district || "",
     city: record.city || "",
@@ -132,6 +133,49 @@ function toPropertyPin(record, hidden) {
     infoLink: record.infoLink || "",
     bookingLink: record.bookingLink || "",
     photo: coverImageUrl(record.images),
+    hidden: !!hidden,
+  };
+}
+
+// StockNetwork's own resort list is a much bigger dataset (thousands of
+// properties) than the hand-onboarded property-listings above — it's the
+// full inventory, kept up to date by re-uploading a CSV from StockNetwork
+// via the existing /api/resorts endpoint (see resorts-api.js). Most rows
+// won't have Latitude/Longitude unless that CSV export includes them, so
+// only ones that do become pins here — same "skip if no usable
+// coordinates" rule as onboarded properties. listingId is synthetic
+// (resort:<resortId>:<siteId>) so a resort pin can still be individually
+// hidden via the same map-visibility store as everything else, even
+// though there's no per-row edit UI for this dataset (updates happen by
+// re-uploading the whole CSV, not one row at a time).
+function resortPinId(record) {
+  return "resort:" + (record.resortId || "") + ":" + (record.siteId || "");
+}
+
+function toResortPin(record, hidden) {
+  const lat = parseFloat(record.latitude);
+  const lng = parseFloat(record.longitude);
+  if (!isFinite(lat) || !isFinite(lng)) return null;
+  const infoLink = record.resortId
+    ? "https://old.stocknetwork.co.za/ResortInfo.aspx?ResortID=" +
+      encodeURIComponent(record.resortId) +
+      (record.siteId ? "&SiteID=" + encodeURIComponent(record.siteId) : "")
+    : "";
+  return {
+    kind: "property",
+    listingId: resortPinId(record),
+    source: "resort-list",
+    name: record.name || "",
+    area: record.district || "",
+    city: "",
+    country: "South Africa",
+    zone: districtToZone(record.district),
+    description: "",
+    latitude: lat,
+    longitude: lng,
+    infoLink: infoLink,
+    bookingLink: "",
+    photo: "",
     hidden: !!hidden,
   };
 }
@@ -228,6 +272,7 @@ export default async (request, context) => {
   const listingsStore = getStore({ name: "property-listings", consistency: "strong" });
   const activitiesStore = getStore({ name: "map-activities", consistency: "strong" });
   const visibilityStore = getStore({ name: "map-visibility", consistency: "strong" });
+  const resortListStore = getStore({ name: "resort-list", consistency: "strong" });
 
   try {
     if (request.method === "GET") {
@@ -239,11 +284,20 @@ export default async (request, context) => {
         visBlobs.filter((b, i) => visFlags[i] && visFlags[i].hidden).map((b) => b.key)
       );
 
-      const properties = listings
+      const onboardedProperties = listings
         .filter((r) => r && r.status === "Listed")
         .filter((r) => !hiddenIds.has(r.listingId))
         .map((r) => toPropertyPin(r, false))
         .filter(Boolean);
+
+      const resortRecord = await resortListStore.get("current", { type: "json" });
+      const resortList = (resortRecord && Array.isArray(resortRecord.resorts)) ? resortRecord.resorts : [];
+      const resortProperties = resortList
+        .filter((r) => !hiddenIds.has(resortPinId(r)))
+        .map((r) => toResortPin(r, false))
+        .filter(Boolean);
+
+      const properties = onboardedProperties.concat(resortProperties);
 
       const { blobs: actBlobs } = await activitiesStore.list();
       const activities = (await Promise.all(actBlobs.map((b) => activitiesStore.get(b.key, { type: "json" }))))
@@ -277,7 +331,7 @@ export default async (request, context) => {
       const hiddenIds = new Set(visBlobs.filter((b, i) => visRecords[i] && visRecords[i].hidden).map((b) => b.key));
 
       const listedListings = listings.filter((r) => r && r.status === "Listed");
-      const properties = listedListings.map((r) => toPropertyPin(r, hiddenIds.has(r.listingId))).filter(Boolean);
+      const onboardedProperties = listedListings.map((r) => toPropertyPin(r, hiddenIds.has(r.listingId))).filter(Boolean);
 
       // Listed properties with no usable coordinates never become a pin, so
       // they're surfaced here separately — the admin tab uses this to show
@@ -296,10 +350,23 @@ export default async (request, context) => {
           country: r.country || "",
         }));
 
+      const resortRecord = await resortListStore.get("current", { type: "json" });
+      const resortList = (resortRecord && Array.isArray(resortRecord.resorts)) ? resortRecord.resorts : [];
+      const resortProperties = resortList
+        .map((r) => toResortPin(r, hiddenIds.has(resortPinId(r))))
+        .filter(Boolean);
+      const resortStats = {
+        total: resortList.length,
+        withCoordinates: resortProperties.length,
+        updatedAt: (resortRecord && resortRecord.updatedAt) || null,
+      };
+
+      const properties = onboardedProperties.concat(resortProperties);
+
       const { blobs: actBlobs } = await activitiesStore.list();
       const activities = await Promise.all(actBlobs.map((b) => activitiesStore.get(b.key, { type: "json" })));
 
-      return json({ ok: true, properties, activities: activities.filter(Boolean), missingCoordinates });
+      return json({ ok: true, properties, activities: activities.filter(Boolean), missingCoordinates, resortStats });
     }
 
     if (action === "importPropertyCoordinatesCsv") {
