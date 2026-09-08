@@ -817,7 +817,15 @@
   @media (max-width: 480px){
     .a2hs-banner{ left:10px; right:10px; bottom:10px; padding:12px; }
   }
+
+  /* ---- Explore Map ---- */
+  #exploreMapEl{ width:100%; height:520px; border-radius:10px; }
+  .map-filter-row{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; }
+  .map-popup-photo{ width:100%; max-width:220px; height:120px; object-fit:cover; border-radius:6px; margin-bottom:8px; display:block; }
+  .map-popup-title{ font-weight:600; margin-bottom:4px; }
+  .map-popup-desc{ font-size:13px; margin-bottom:6px; }
 </style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 </head>
 <body>
 
@@ -899,6 +907,7 @@
       <button class="tab" data-panel="dashboard">My Dashboard</button>
       <button class="tab" data-panel="marketing">Affiliate Marketing</button>
       <button class="tab" data-panel="accom">Accommodation Link Builder</button>
+      <button class="tab" data-panel="exploreMap">Explore Map</button>
       <button class="tab" data-panel="package">Build Your Package</button>
       <button class="tab" data-panel="flight">Your Flight Link</button>
       <button class="tab" data-panel="activity">Your Activity Link</button>
@@ -1165,6 +1174,34 @@
           </div>
           <iframe class="preview" id="r-previewFrame" title="Resort info preview"></iframe>
         </div>
+      </div>
+    </section>
+
+    <!-- ===================== EXPLORE MAP ===================== -->
+    <section class="panel" id="panel-exploreMap">
+      <div class="hero">
+        <h1>Explore Map</h1>
+        <p>Properties and local activities/experiences, plotted on a map — click a pin for photos, details, and how to book</p>
+      </div>
+      <div class="card">
+        <div class="map-filter-row">
+          <label for="em-areaFilter" style="margin:0;">Filter by zone</label>
+          <select id="em-areaFilter">
+            <option value="">All zones</option>
+            <option value="Western Cape (Cape Town &amp; Winelands)">Western Cape (Cape Town &amp; Winelands)</option>
+            <option value="Eastern Cape &amp; Garden Route">Eastern Cape &amp; Garden Route</option>
+            <option value="Northern Cape">Northern Cape</option>
+            <option value="Free State">Free State</option>
+            <option value="KwaZulu-Natal">KwaZulu-Natal</option>
+            <option value="Gauteng &amp; North West">Gauteng &amp; North West</option>
+            <option value="Mpumalanga">Mpumalanga</option>
+            <option value="Limpopo">Limpopo</option>
+          </select>
+          <label style="margin:0;"><input type="checkbox" id="em-showProperties" checked> Properties</label>
+          <label style="margin:0;"><input type="checkbox" id="em-showActivities" checked> Activities</label>
+        </div>
+        <div class="status" id="em-status"></div>
+        <div id="exploreMapEl"></div>
       </div>
     </section>
 
@@ -3396,6 +3433,7 @@
     nothing needs passing in explicitly.
   -->
   <script src="share-kit.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script>
 
     // ---------- Link shortener (shared across every link the Hub builds) ----------
@@ -3757,6 +3795,212 @@
       if(accountTab){
         accountTab.addEventListener('click', function(){
           if(!loaded) load();
+        });
+      }
+    })();
+
+    // ---------- Explore Map ----------
+    (function(){
+      var mapElId = 'exploreMapEl';
+      var statusEl = document.getElementById('em-status');
+      var areaFilterEl = document.getElementById('em-areaFilter');
+      var showPropsEl = document.getElementById('em-showProperties');
+      var showActsEl = document.getElementById('em-showActivities');
+      if(!document.getElementById(mapElId)) return;
+
+      var leafletMap = null;
+      var markers = []; // { marker, kind, area }
+      var loaded = false;
+
+      function popupContent(item){
+        var wrap = document.createElement('div');
+
+        var photos = item.kind === 'activity' && Array.isArray(item.photos) && item.photos.length
+          ? item.photos
+          : (item.photo ? [item.photo] : []);
+
+        if(photos.length){
+          var photoWrap = document.createElement('div');
+          photoWrap.style.position = 'relative';
+          var img = document.createElement('img');
+          img.className = 'map-popup-photo';
+          img.src = photos[0];
+          photoWrap.appendChild(img);
+
+          if(photos.length > 1){
+            var idx = 0;
+            var counter = document.createElement('div');
+            counter.style.cssText = 'position:absolute; bottom:6px; right:6px; background:rgba(0,0,0,.55); color:#fff; font-size:11px; padding:1px 6px; border-radius:10px;';
+            counter.textContent = '1 / ' + photos.length;
+            photoWrap.appendChild(counter);
+
+            function navBtn(dir, label){
+              var b = document.createElement('button');
+              b.type = 'button';
+              b.textContent = label;
+              b.style.cssText = 'position:absolute; top:50%; transform:translateY(-50%); ' + dir + ':2px; background:rgba(0,0,0,.45); color:#fff; border:none; width:22px; height:22px; border-radius:50%; cursor:pointer; font-size:12px; line-height:1;';
+              b.addEventListener('click', function(e){
+                e.stopPropagation();
+                idx = (idx + (label === '\u2039' ? -1 : 1) + photos.length) % photos.length;
+                img.src = photos[idx];
+                counter.textContent = (idx + 1) + ' / ' + photos.length;
+              });
+              return b;
+            }
+            photoWrap.appendChild(navBtn('left', '\u2039'));
+            photoWrap.appendChild(navBtn('right', '\u203a'));
+          }
+          wrap.appendChild(photoWrap);
+        }
+
+        var title = document.createElement('div');
+        title.className = 'map-popup-title';
+        title.textContent = item.name || 'Untitled';
+        wrap.appendChild(title);
+
+        var subtitle = item.kind === 'property'
+          ? [item.city, item.country].filter(Boolean).join(', ')
+          : item.area;
+        if(subtitle){
+          var subEl = document.createElement('div');
+          subEl.className = 'map-popup-desc';
+          subEl.style.color = '#777';
+          subEl.textContent = subtitle;
+          wrap.appendChild(subEl);
+        }
+
+        if(item.kind === 'activity' && item.price){
+          var priceEl = document.createElement('div');
+          priceEl.className = 'map-popup-desc';
+          var strong = document.createElement('strong');
+          strong.textContent = item.price;
+          priceEl.appendChild(strong);
+          wrap.appendChild(priceEl);
+        }
+
+        if(item.description){
+          var descEl = document.createElement('div');
+          descEl.className = 'map-popup-desc';
+          descEl.textContent = item.description;
+          wrap.appendChild(descEl);
+        }
+
+        var linkUrl = item.kind === 'property' ? (item.bookingLink || item.infoLink) : item.contactLink;
+        if(linkUrl){
+          var a = document.createElement('a');
+          a.href = linkUrl;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          a.className = 'btn-secondary';
+          a.style.cssText = 'display:inline-block; margin-top:4px; text-decoration:none; padding:6px 12px; border-radius:6px;';
+          a.textContent = item.kind === 'property' ? 'Visit / book' : 'Book / contact';
+          wrap.appendChild(a);
+        }
+
+        return wrap;
+      }
+
+      function applyFilters(){
+        var zone = areaFilterEl.value;
+        var showProps = showPropsEl.checked;
+        var showActs = showActsEl.checked;
+        markers.forEach(function(m){
+          var kindOk = (m.kind === 'property' && showProps) || (m.kind === 'activity' && showActs);
+          var zoneOk = !zone || m.zone === zone;
+          if(kindOk && zoneOk){
+            if(!leafletMap.hasLayer(m.marker)) m.marker.addTo(leafletMap);
+          } else {
+            if(leafletMap.hasLayer(m.marker)) leafletMap.removeLayer(m.marker);
+          }
+        });
+      }
+
+      // Fetches the current affiliate's assigned zone (set by admin in the
+      // Affiliates tab) so the filter can default to it. Resolves to '' if
+      // there's no AFF_ID, no zone assigned, or the request fails — the map
+      // just falls back to showing every zone, same as before this existed.
+      function fetchAffiliateZone(){
+        if(!AFF_ID) return Promise.resolve('');
+        return fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'getProfile', aff: AFF_ID })
+        }).then(function(r){ return r.json(); }).then(function(data){
+          return (data && data.ok && data.profile && data.profile.zone) || '';
+        }).catch(function(){ return ''; });
+      }
+
+      function loadMap(){
+        if(loaded) return;
+        loaded = true;
+        statusEl.textContent = 'Loading map\u2026';
+        statusEl.className = 'status show';
+
+        leafletMap = L.map(mapElId).setView([-30.5595, 22.9375], 6); // South Africa
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 18,
+          attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(leafletMap);
+
+        Promise.all([
+          fetch('/api/map').then(function(r){ return r.json(); }),
+          fetchAffiliateZone()
+        ]).then(function(results){
+          var res = results[0];
+          var affiliateZone = results[1];
+          statusEl.textContent = '';
+          statusEl.className = 'status';
+          if(!res || !res.ok){
+            statusEl.textContent = (res && res.error) || 'Could not load the map.';
+            statusEl.className = 'status show';
+            return;
+          }
+          var properties = (res.properties || []).map(function(p){ p.kind = 'property'; return p; });
+          var activities = (res.activities || []).map(function(a){ a.kind = 'activity'; return a; });
+          var all = properties.concat(activities);
+
+          if(!all.length){
+            statusEl.textContent = 'No properties or activities are on the map yet.';
+            statusEl.className = 'status show';
+          }
+
+          all.forEach(function(item){
+            if(typeof item.latitude !== 'number' || typeof item.longitude !== 'number') return;
+            var icon = item.kind === 'activity'
+              ? L.divIcon({ className: '', html: '<div style="background:#0e7c66; width:14px; height:14px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 2px rgba(0,0,0,.4);"></div>', iconSize: [14,14] })
+              : L.divIcon({ className: '', html: '<div style="background:#1a4d7a; width:14px; height:14px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 2px rgba(0,0,0,.4);"></div>', iconSize: [14,14] });
+            var marker = L.marker([item.latitude, item.longitude], { icon: icon });
+            marker.bindPopup(popupContent(item), { maxWidth: 260 });
+            markers.push({ marker: marker, kind: item.kind, zone: item.zone || '' });
+          });
+
+          if(affiliateZone && markers.some(function(m){ return m.zone === affiliateZone; })){
+            areaFilterEl.value = affiliateZone;
+            statusEl.textContent = 'Showing your zone (' + affiliateZone + ') \u2014 switch to "All zones" to see everything.';
+            statusEl.className = 'status show';
+          }
+
+          applyFilters();
+
+          if(markers.length){
+            var group = L.featureGroup(markers.map(function(m){ return m.marker; }));
+            leafletMap.fitBounds(group.getBounds().pad(0.2));
+          }
+        }).catch(function(){
+          statusEl.textContent = 'Could not load the map.';
+          statusEl.className = 'status show';
+        });
+      }
+
+      areaFilterEl.addEventListener('change', applyFilters);
+      showPropsEl.addEventListener('change', applyFilters);
+      showActsEl.addEventListener('change', applyFilters);
+
+      var mapTab = document.querySelector('.tab[data-panel="exploreMap"]');
+      if(mapTab){
+        mapTab.addEventListener('click', function(){
+          loadMap();
+          setTimeout(function(){ if(leafletMap) leafletMap.invalidateSize(); }, 150);
         });
       }
     })();

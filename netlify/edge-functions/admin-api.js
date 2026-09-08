@@ -3,6 +3,7 @@ import { generateHashtags } from "./lib/hashtag-helper.js";
 import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
 import { isShortLink, resolveShortLink } from "./lib/short-link.js";
 import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-link.js";
+import { ZONES } from "./lib/zones.js";
 import {
   parseStockNetworkCsv,
   normalizeStockNetworkStatus,
@@ -764,6 +765,7 @@ export default async (request, context) => {
       const name = typeof body.name === "string" ? body.name.trim() : "";
       const email = typeof body.email === "string" ? body.email.trim() : "";
       const siteNr = typeof body.siteNr === "string" ? body.siteNr.trim() : "";
+      const zone = typeof body.zone === "string" && ZONES.includes(body.zone) ? body.zone : "";
       const revenueShare = sanitizeRevenueShare(body.revenueShare, 0);
       const bank = sanitizeBankDetails(body.bank);
       const notes = typeof body.notes === "string" ? body.notes.trim() : "";
@@ -778,6 +780,7 @@ export default async (request, context) => {
         // booking link is tied to. Admin-set only — shown read-only in the
         // affiliate's own Hub (Account Details tab).
         siteNr: siteNr,
+        zone: zone,
         // Not editable from this admin form (yet) — preserve whatever the
         // affiliate has set for themselves via their Hub's Account Details
         // tab, rather than silently wiping it out on every admin save.
