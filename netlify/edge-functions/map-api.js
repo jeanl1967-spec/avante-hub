@@ -69,7 +69,7 @@ function toPropertyPin(record, hidden) {
 
 function sanitizeActivity(body, existing) {
   const record = existing ? Object.assign({}, existing) : {};
-  const fields = ["name", "area", "description", "price", "contactLink", "photoKey"];
+  const fields = ["name", "area", "description", "price", "contactLink"];
   fields.forEach((f) => {
     if (typeof body[f] === "string") {
       record[f] = clean(body[f], f === "description" ? 2000 : 300);
@@ -91,6 +91,8 @@ function sanitizeActivity(body, existing) {
 function toActivityPin(record) {
   const lat = parseFloat(record.latitude);
   const lng = parseFloat(record.longitude);
+  const keys = Array.isArray(record.photoKeys) ? record.photoKeys : record.photoKey ? [record.photoKey] : [];
+  const photos = keys.map((k) => "/api/property-file?key=" + encodeURIComponent(k));
   return {
     kind: "activity",
     id: record.id,
@@ -99,7 +101,8 @@ function toActivityPin(record) {
     description: (record.description || "").slice(0, 400),
     price: record.price || "",
     contactLink: record.contactLink || "",
-    photo: record.photoKey ? "/api/property-file?key=" + encodeURIComponent(record.photoKey) : "",
+    photo: photos[0] || "",
+    photos: photos,
     latitude: isFinite(lat) ? lat : null,
     longitude: isFinite(lng) ? lng : null,
     hidden: record.visible === false,
@@ -212,6 +215,36 @@ export default async (request, context) => {
       if (!id) return json({ error: "missing id" }, 400);
       await activitiesStore.delete(id);
       return json({ ok: true });
+    }
+
+    if (action === "addActivityPhoto") {
+      const id = clean(body.id, 20);
+      const photoKey = clean(body.photoKey, 300);
+      if (!id || !photoKey) return json({ error: "missing id or photoKey" }, 400);
+      const existing = await activitiesStore.get(id, { type: "json" });
+      if (!existing) return json({ error: "not found" }, 404);
+      const keys = Array.isArray(existing.photoKeys) ? existing.photoKeys.slice() : existing.photoKey ? [existing.photoKey] : [];
+      if (keys.length >= 12) return json({ error: "Maximum 12 photos per activity." }, 400);
+      keys.push(photoKey);
+      existing.photoKeys = keys;
+      delete existing.photoKey;
+      existing.updatedAt = new Date().toISOString();
+      await activitiesStore.setJSON(id, existing);
+      return json({ ok: true, activity: existing });
+    }
+
+    if (action === "removeActivityPhoto") {
+      const id = clean(body.id, 20);
+      const photoKey = clean(body.photoKey, 300);
+      if (!id || !photoKey) return json({ error: "missing id or photoKey" }, 400);
+      const existing = await activitiesStore.get(id, { type: "json" });
+      if (!existing) return json({ error: "not found" }, 404);
+      const keys = Array.isArray(existing.photoKeys) ? existing.photoKeys.slice() : existing.photoKey ? [existing.photoKey] : [];
+      existing.photoKeys = keys.filter((k) => k !== photoKey);
+      delete existing.photoKey;
+      existing.updatedAt = new Date().toISOString();
+      await activitiesStore.setJSON(id, existing);
+      return json({ ok: true, activity: existing });
     }
 
     if (action === "setPropertyVisibility") {

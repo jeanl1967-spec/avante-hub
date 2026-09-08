@@ -3777,37 +3777,74 @@
           tr.appendChild(tdPrice);
 
           var tdPhoto = document.createElement('td');
+          var photoWrap = document.createElement('div');
+          photoWrap.style.display = 'flex';
+          photoWrap.style.flexWrap = 'wrap';
+          photoWrap.style.gap = '4px';
+          photoWrap.style.maxWidth = '180px';
+          (a.photoKeys || (a.photoKey ? [a.photoKey] : [])).forEach(function(key){
+            var thumbWrap = document.createElement('div');
+            thumbWrap.style.position = 'relative';
+            var thumb = document.createElement('img');
+            thumb.src = '/api/property-file?key=' + encodeURIComponent(key);
+            thumb.style.width = '40px';
+            thumb.style.height = '40px';
+            thumb.style.objectFit = 'cover';
+            thumb.style.borderRadius = '4px';
+            thumbWrap.appendChild(thumb);
+            var rmBtn = document.createElement('button');
+            rmBtn.type = 'button';
+            rmBtn.textContent = '\u00d7';
+            rmBtn.title = 'Remove photo';
+            rmBtn.style.cssText = 'position:absolute; top:-6px; right:-6px; width:16px; height:16px; line-height:14px; padding:0; border-radius:50%; border:none; background:#b42318; color:#fff; font-size:11px; cursor:pointer;';
+            rmBtn.addEventListener('click', function(){
+              mapAdminPost('removeActivityPhoto', { id: a.id, photoKey: key }).then(function(){ loadActivities(); });
+            });
+            thumbWrap.appendChild(rmBtn);
+            photoWrap.appendChild(thumbWrap);
+          });
+          tdPhoto.appendChild(photoWrap);
+
           var fileInput = document.createElement('input');
           fileInput.type = 'file';
           fileInput.accept = 'image/*';
-          fileInput.style.maxWidth = '140px';
+          fileInput.multiple = true;
+          fileInput.style.maxWidth = '160px';
+          fileInput.style.marginTop = '6px';
+          fileInput.style.display = 'block';
           fileInput.addEventListener('change', function(){
-            if(!fileInput.files || !fileInput.files[0]) return;
-            var file = fileInput.files[0];
-            var params = new URLSearchParams({
-              listingId: 'activity-' + a.id,
-              kind: 'image',
-              label: 'activity',
-              fileName: file.name
-            });
+            if(!fileInput.files || !fileInput.files.length) return;
+            var files = Array.prototype.slice.call(fileInput.files);
             actStatusEl.textContent = 'Uploading photo\u2026';
             actStatusEl.className = 'status show';
-            fetch('/api/property-file?' + params.toString(), {
-              method: 'POST',
-              headers: { 'content-type': file.type || 'application/octet-stream' },
-              body: file
-            }).then(function(r){ return r.json(); }).then(function(res){
-              if(res && res.ok){
-                return mapAdminPost('updateActivity', { id: a.id, photoKey: res.key });
+            function uploadNext(){
+              if(!files.length){
+                actStatusEl.textContent = 'Photos saved.';
+                loadActivities();
+                return;
               }
-              throw new Error((res && res.error) || 'Upload failed.');
-            }).then(function(){
-              actStatusEl.textContent = 'Photo saved.';
-              loadActivities();
-            }).catch(function(err){
-              actStatusEl.textContent = err.message || 'Could not upload photo.';
-              actStatusEl.className = 'status show';
-            });
+              var file = files.shift();
+              var params = new URLSearchParams({
+                listingId: 'activity-' + a.id,
+                kind: 'image',
+                label: 'activity',
+                fileName: file.name
+              });
+              fetch('/api/property-file?' + params.toString(), {
+                method: 'POST',
+                headers: { 'content-type': file.type || 'application/octet-stream' },
+                body: file
+              }).then(function(r){ return r.json(); }).then(function(res){
+                if(res && res.ok){
+                  return mapAdminPost('addActivityPhoto', { id: a.id, photoKey: res.key });
+                }
+                throw new Error((res && res.error) || 'Upload failed.');
+              }).then(function(){ uploadNext(); }).catch(function(err){
+                actStatusEl.textContent = err.message || 'Could not upload photo.';
+                actStatusEl.className = 'status show';
+              });
+            }
+            uploadNext();
           });
           tdPhoto.appendChild(fileInput);
           tr.appendChild(tdPhoto);

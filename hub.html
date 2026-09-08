@@ -3804,33 +3804,92 @@
       var markers = []; // { marker, kind, area }
       var loaded = false;
 
-      function escapeHtml(s){
-        return String(s == null ? '' : s)
-          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-      }
+      function popupContent(item){
+        var wrap = document.createElement('div');
 
-      function popupHtml(item){
-        var parts = [];
-        if(item.photo){
-          parts.push('<img class="map-popup-photo" src="' + escapeHtml(item.photo) + '" alt="">');
+        var photos = item.kind === 'activity' && Array.isArray(item.photos) && item.photos.length
+          ? item.photos
+          : (item.photo ? [item.photo] : []);
+
+        if(photos.length){
+          var photoWrap = document.createElement('div');
+          photoWrap.style.position = 'relative';
+          var img = document.createElement('img');
+          img.className = 'map-popup-photo';
+          img.src = photos[0];
+          photoWrap.appendChild(img);
+
+          if(photos.length > 1){
+            var idx = 0;
+            var counter = document.createElement('div');
+            counter.style.cssText = 'position:absolute; bottom:6px; right:6px; background:rgba(0,0,0,.55); color:#fff; font-size:11px; padding:1px 6px; border-radius:10px;';
+            counter.textContent = '1 / ' + photos.length;
+            photoWrap.appendChild(counter);
+
+            function navBtn(dir, label){
+              var b = document.createElement('button');
+              b.type = 'button';
+              b.textContent = label;
+              b.style.cssText = 'position:absolute; top:50%; transform:translateY(-50%); ' + dir + ':2px; background:rgba(0,0,0,.45); color:#fff; border:none; width:22px; height:22px; border-radius:50%; cursor:pointer; font-size:12px; line-height:1;';
+              b.addEventListener('click', function(e){
+                e.stopPropagation();
+                idx = (idx + (label === '\u2039' ? -1 : 1) + photos.length) % photos.length;
+                img.src = photos[idx];
+                counter.textContent = (idx + 1) + ' / ' + photos.length;
+              });
+              return b;
+            }
+            photoWrap.appendChild(navBtn('left', '\u2039'));
+            photoWrap.appendChild(navBtn('right', '\u203a'));
+          }
+          wrap.appendChild(photoWrap);
         }
-        parts.push('<div class="map-popup-title">' + escapeHtml(item.name || 'Untitled') + '</div>');
+
+        var title = document.createElement('div');
+        title.className = 'map-popup-title';
+        title.textContent = item.name || 'Untitled';
+        wrap.appendChild(title);
+
         var subtitle = item.kind === 'property'
           ? [item.city, item.country].filter(Boolean).join(', ')
           : item.area;
-        if(subtitle) parts.push('<div class="map-popup-desc" style="color:#777;">' + escapeHtml(subtitle) + '</div>');
+        if(subtitle){
+          var subEl = document.createElement('div');
+          subEl.className = 'map-popup-desc';
+          subEl.style.color = '#777';
+          subEl.textContent = subtitle;
+          wrap.appendChild(subEl);
+        }
+
         if(item.kind === 'activity' && item.price){
-          parts.push('<div class="map-popup-desc"><strong>' + escapeHtml(item.price) + '</strong></div>');
+          var priceEl = document.createElement('div');
+          priceEl.className = 'map-popup-desc';
+          var strong = document.createElement('strong');
+          strong.textContent = item.price;
+          priceEl.appendChild(strong);
+          wrap.appendChild(priceEl);
         }
+
         if(item.description){
-          parts.push('<div class="map-popup-desc">' + escapeHtml(item.description) + '</div>');
+          var descEl = document.createElement('div');
+          descEl.className = 'map-popup-desc';
+          descEl.textContent = item.description;
+          wrap.appendChild(descEl);
         }
+
         var linkUrl = item.kind === 'property' ? (item.bookingLink || item.infoLink) : item.contactLink;
         if(linkUrl){
-          var label = item.kind === 'property' ? 'Visit / book' : 'Book / contact';
-          parts.push('<a href="' + escapeHtml(linkUrl) + '" target="_blank" rel="noopener" class="btn-secondary" style="display:inline-block; margin-top:4px; text-decoration:none; padding:6px 12px; border-radius:6px;">' + label + '</a>');
+          var a = document.createElement('a');
+          a.href = linkUrl;
+          a.target = '_blank';
+          a.rel = 'noopener';
+          a.className = 'btn-secondary';
+          a.style.cssText = 'display:inline-block; margin-top:4px; text-decoration:none; padding:6px 12px; border-radius:6px;';
+          a.textContent = item.kind === 'property' ? 'Visit / book' : 'Book / contact';
+          wrap.appendChild(a);
         }
-        return parts.join('');
+
+        return wrap;
       }
 
       function applyFilters(){
@@ -3901,7 +3960,7 @@
               ? L.divIcon({ className: '', html: '<div style="background:#0e7c66; width:14px; height:14px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 2px rgba(0,0,0,.4);"></div>', iconSize: [14,14] })
               : L.divIcon({ className: '', html: '<div style="background:#1a4d7a; width:14px; height:14px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 2px rgba(0,0,0,.4);"></div>', iconSize: [14,14] });
             var marker = L.marker([item.latitude, item.longitude], { icon: icon });
-            marker.bindPopup(popupHtml(item), { maxWidth: 260 });
+            marker.bindPopup(popupContent(item), { maxWidth: 260 });
             markers.push({ marker: marker, kind: item.kind, area: item.kind === 'property' ? (item.area || item.city) : item.area });
           });
 
