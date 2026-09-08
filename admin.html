@@ -394,6 +394,13 @@
   .linkbuilder-generate-btn{ width:100%; margin-top:10px; padding:9px; font-size:13px; }
   .linkbuilder-status{ font-size:12px; color:var(--muted); margin-top:8px; min-height:16px; }
 
+  /* ---- Landing Page Link Builder (fills in this hook's own Full Details page) ---- */
+  .landinglink-btn{
+    width:100%; margin-top:10px; background:#fff; color:var(--navy);
+    border:1.5px dashed var(--navy);
+  }
+  .landinglink-status{ font-size:12px; color:var(--muted); margin-top:6px; margin-bottom:10px; min-height:16px; }
+
   /* ---- Share Kit (per-platform sized image + caption, ready to paste) ---- */
   .sharekit-btn{ width:100%; margin-top:10px; }
   .modal-card.sharekit-card{ max-width:660px; text-align:left; }
@@ -2883,6 +2890,8 @@
             '<input id="dh' + i + '-booking" placeholder="Default booking link for this hook slot">' +
             '<label for="dh' + i + '-landing">Landing page link</label>' +
             '<input id="dh' + i + '-landing" placeholder="Default landing page link for this hook slot">' +
+            '<button type="button" class="btn-outline landinglink-btn" data-landinglink-build="' + i + '">🔗 Build landing page link</button>' +
+            '<div class="landinglink-status" id="dh' + i + '-landinglinkStatus"></div>' +
             '<label for="dh' + i + '-caption">Caption</label>' +
             '<textarea id="dh' + i + '-caption" placeholder="Ready-to-paste caption affiliates will get with this ad"></textarea>' +
             '<button class="primary" data-hook-save="' + i + '">Save default</button>' +
@@ -2940,6 +2949,22 @@
 
         document.getElementById('dh' + n + '-booking').value = link;
         statusEl.textContent = 'Booking link filled in below — remember to click "Save default".';
+      }
+
+      // Fills this hook's Landing page link with our own "Full Details"
+      // page for this exact hook — the same URL useAutobuildDraft() already
+      // fills in automatically when Auto-build runs and nothing custom is
+      // set (see there). Exposed here as a one-click action for admins who
+      // just want a landing link without running the full Auto-build flow
+      // (which also scrapes photos and drafts a caption). No area or dates
+      // to pick — hook-landing.html reads whatever this hook has saved
+      // (name/description/attractions/room type) whenever it's opened, so
+      // the same URL works before or after the hook's content changes.
+      function buildAdminLandingLink(n){
+        var statusEl = document.getElementById('dh' + n + '-landinglinkStatus');
+        var link = window.location.origin + '/hook-landing.html?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(n);
+        document.getElementById('dh' + n + '-landing').value = link;
+        statusEl.textContent = 'Landing page link filled in below — remember to click "Save default".';
       }
 
       function setImageSrc(n){
@@ -3149,6 +3174,12 @@
         var linkGenN = e.target.getAttribute('data-linkbuilder-generate');
         if(linkGenN){
           buildAdminBookingLink(linkGenN);
+          return;
+        }
+
+        var landingBuildN = e.target.getAttribute('data-landinglink-build');
+        if(landingBuildN){
+          buildAdminLandingLink(landingBuildN);
           return;
         }
 
