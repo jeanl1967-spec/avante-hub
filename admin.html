@@ -429,6 +429,8 @@
   .sharekit-actions button{ flex:1; }
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
 </head>
 <body>
 
@@ -1053,6 +1055,17 @@
           <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#b7b7ae; display:inline-block;"></span> Hidden</label>
         </div>
         <div id="adminMapEl" style="width:100%; height:460px; border-radius:10px;"></div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h3 style="margin-top:0;">StockNetwork resort list</h3>
+        <p style="margin-top:0;">The full StockNetwork inventory (used by the Accommodation Link Builder in the Hub too). Add <code>Latitude</code>/<code>Longitude</code> columns to your usual export and re-upload it here to also get those resorts pinned on the map — everything else about how this list is used stays the same.</p>
+        <div class="btn-row" style="margin-top:0;">
+          <button class="btn-outline" id="resortListUploadBtn">Upload resort list CSV</button>
+          <input type="file" id="resortListFileInput" accept=".csv" style="display:none;">
+        </div>
+        <div class="status" id="resortListUploadStatus"></div>
+        <p id="resortListStatusText" style="margin:10px 0 0; font-size:13px; color:var(--muted);"></p>
       </div>
 
       <div class="card" style="margin-top:20px;">
@@ -3475,6 +3488,7 @@
   -->
   <script src="share-kit.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
   <script>
     // ---------- Property Listings (admin review of submitted properties) ----------
     (function(){
@@ -3844,12 +3858,13 @@
         });
       }
 
+      var adminClusterGroup = null;
+
       function renderAdminMap(properties, activities){
         initAdminMap();
         if(!adminLeafletMap) return;
-        adminLeafletMap.eachLayer(function(layer){
-          if(layer instanceof L.Marker) adminLeafletMap.removeLayer(layer);
-        });
+        if(adminClusterGroup) adminLeafletMap.removeLayer(adminClusterGroup);
+        adminClusterGroup = L.markerClusterGroup({ maxClusterRadius: 50 });
 
         var allMarkers = [];
 
@@ -3862,6 +3877,12 @@
           title.style.fontWeight = '600';
           title.textContent = p.name || 'Untitled';
           content.appendChild(title);
+          if(p.area){
+            var sub = document.createElement('div');
+            sub.style.cssText = 'font-size:12px; color:#777;';
+            sub.textContent = p.area + (p.source === 'resort-list' ? ' \u00b7 StockNetwork' : '');
+            content.appendChild(sub);
+          }
           var toggleBtn = document.createElement('button');
           toggleBtn.type = 'button';
           toggleBtn.className = 'btn-outline btn-small';
@@ -3874,7 +3895,7 @@
           });
           content.appendChild(toggleBtn);
           marker.bindPopup(content);
-          marker.addTo(adminLeafletMap);
+          adminClusterGroup.addLayer(marker);
           allMarkers.push(marker);
         });
 
@@ -3902,9 +3923,11 @@
           });
           content.appendChild(toggleBtn);
           marker.bindPopup(content);
-          marker.addTo(adminLeafletMap);
+          adminClusterGroup.addLayer(marker);
           allMarkers.push(marker);
         });
+
+        adminLeafletMap.addLayer(adminClusterGroup);
 
         if(allMarkers.length){
           var group = L.featureGroup(allMarkers);
@@ -4178,11 +4201,13 @@
           actStatusEl.textContent = '';
           actStatusEl.className = 'status';
           if(res.data && res.data.ok){
+            var onboardedProps = (res.data.properties || []).filter(function(p){ return p.source !== 'resort-list'; });
             renderActivitiesTable(res.data.activities || []);
-            renderMapPropertiesTable(res.data.properties || []);
+            renderMapPropertiesTable(onboardedProps);
             renderAdminMap(res.data.properties || [], res.data.activities || []);
             renderMissingCoordsTable(res.data.missingCoordinates || []);
             renderMissingCoordsSummary(res.data.missingCoordinates || [], res.data.activities || []);
+            renderResortListStatus(res.data.resortStats || null);
           } else {
             actStatusEl.textContent = (res.data && res.data.error) || 'Could not load map data.';
             actStatusEl.className = 'status show';
@@ -4232,6 +4257,56 @@
 
       document.getElementById('refreshActivitiesBtn').addEventListener('click', function(){
         loadActivities();
+      });
+
+      function renderResortListStatus(stats){
+        var el = document.getElementById('resortListStatusText');
+        if(!stats){ el.textContent = ''; return; }
+        if(!stats.total){
+          el.textContent = 'No resort list uploaded yet.';
+          return;
+        }
+        var updated = stats.updatedAt ? new Date(stats.updatedAt).toLocaleDateString() : '';
+        el.textContent = stats.withCoordinates + ' of ' + stats.total + ' resorts have coordinates and are pinned on the map' +
+          (updated ? ' \u2014 list last updated ' + updated + '.' : '.');
+      }
+
+      var resortUploadBtn = document.getElementById('resortListUploadBtn');
+      var resortFileInput = document.getElementById('resortListFileInput');
+      var resortUploadStatusEl = document.getElementById('resortListUploadStatus');
+      resortUploadBtn.addEventListener('click', function(){ resortFileInput.click(); });
+      resortFileInput.addEventListener('change', function(){
+        var file = resortFileInput.files && resortFileInput.files[0];
+        resortFileInput.value = '';
+        if(!file) return;
+        resortUploadBtn.disabled = true;
+        resortUploadBtn.textContent = 'Uploading\u2026';
+        resortUploadStatusEl.textContent = '';
+        resortUploadStatusEl.className = 'status';
+        file.text().then(function(csvText){
+          return fetch('/api/resorts', {
+            method: 'POST',
+            headers: { 'content-type': 'text/csv' },
+            body: csvText
+          });
+        }).then(function(r){ return r.json().then(function(data){ return { status: r.status, data: data }; }); })
+          .then(function(res){
+            resortUploadBtn.disabled = false;
+            resortUploadBtn.textContent = 'Upload resort list CSV';
+            if(res.data && res.data.ok){
+              resortUploadStatusEl.textContent = 'Resort list updated (' + res.data.count + ' resorts).';
+              resortUploadStatusEl.className = 'status show';
+              loadActivities();
+            } else {
+              resortUploadStatusEl.textContent = (res.data && res.data.error) || 'Could not update the resort list.';
+              resortUploadStatusEl.className = 'status show';
+            }
+          }).catch(function(){
+            resortUploadBtn.disabled = false;
+            resortUploadBtn.textContent = 'Upload resort list CSV';
+            resortUploadStatusEl.textContent = 'Could not update the resort list.';
+            resortUploadStatusEl.className = 'status show';
+          });
       });
 
       var importCoordsBtn = document.getElementById('importCoordsBtn');

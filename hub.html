@@ -826,6 +826,8 @@
   .map-popup-desc{ font-size:13px; margin-bottom:6px; }
 </style>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
 </head>
 <body>
 
@@ -3434,6 +3436,7 @@
   -->
   <script src="share-kit.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
   <script>
 
     // ---------- Link shortener (shared across every link the Hub builds) ----------
@@ -3809,7 +3812,8 @@
       if(!document.getElementById(mapElId)) return;
 
       var leafletMap = null;
-      var markers = []; // { marker, kind, area }
+      var clusterGroup = null;
+      var markers = []; // { marker, kind, zone }
       var loaded = false;
 
       function popupContent(item){
@@ -3908,9 +3912,9 @@
           var kindOk = (m.kind === 'property' && showProps) || (m.kind === 'activity' && showActs);
           var zoneOk = !zone || m.zone === zone;
           if(kindOk && zoneOk){
-            if(!leafletMap.hasLayer(m.marker)) m.marker.addTo(leafletMap);
+            if(!clusterGroup.hasLayer(m.marker)) clusterGroup.addLayer(m.marker);
           } else {
-            if(leafletMap.hasLayer(m.marker)) leafletMap.removeLayer(m.marker);
+            if(clusterGroup.hasLayer(m.marker)) clusterGroup.removeLayer(m.marker);
           }
         });
       }
@@ -3941,6 +3945,8 @@
           maxZoom: 18,
           attribution: '&copy; OpenStreetMap contributors'
         }).addTo(leafletMap);
+        clusterGroup = L.markerClusterGroup({ maxClusterRadius: 50 });
+        leafletMap.addLayer(clusterGroup);
 
         Promise.all([
           fetch('/api/map').then(function(r){ return r.json(); }),
