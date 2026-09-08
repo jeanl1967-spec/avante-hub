@@ -176,6 +176,7 @@ export default async (request, context) => {
             email: (dirRecord && dirRecord.email) || "",
             phone: (dirRecord && dirRecord.phone) || "",
             siteNr: (dirRecord && dirRecord.siteNr) || "",
+            zone: (dirRecord && dirRecord.zone) || "",
             bank: bank,
             revenueShare: revenueShare,
           },

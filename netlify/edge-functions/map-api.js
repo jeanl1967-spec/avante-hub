@@ -1,4 +1,5 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
+import { ZONES, provinceToZone } from "./lib/zones.js";
 
 // Backs the new "Map & Activities" admin tab and the new "Explore Map" hub
 // tab. Two data sources feed one shared response:
@@ -21,6 +22,9 @@ import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 // property-onboarding-api.js) and cover activity CRUD plus the property
 // visibility toggle, and an "adminList" action that returns everything
 // (including hidden) for the admin tab's own view.
+//
+// Zones (ZONES / provinceToZone) live in lib/zones.js, shared with
+// admin-api.js's affiliate Zone field — see that file for details.
 
 function clean(v, max) {
   return typeof v === "string" ? v.trim().slice(0, max || 500) : "";
@@ -57,6 +61,7 @@ function toPropertyPin(record, hidden) {
     area: record.area || record.district || "",
     city: record.city || "",
     country: record.country || "",
+    zone: provinceToZone(record.stateProvince),
     description: (record.description || "").slice(0, 400),
     latitude: lat,
     longitude: lng,
@@ -75,6 +80,9 @@ function sanitizeActivity(body, existing) {
       record[f] = clean(body[f], f === "description" ? 2000 : 300);
     }
   });
+  if (typeof body.zone === "string") {
+    record.zone = ZONES.includes(body.zone) ? body.zone : "";
+  }
   if (typeof body.latitude === "string" || typeof body.latitude === "number") {
     const lat = parseFloat(body.latitude);
     record.latitude = isFinite(lat) ? String(lat) : "";
@@ -98,6 +106,7 @@ function toActivityPin(record) {
     id: record.id,
     name: record.name || "",
     area: record.area || "",
+    zone: record.zone || "",
     description: (record.description || "").slice(0, 400),
     price: record.price || "",
     contactLink: record.contactLink || "",

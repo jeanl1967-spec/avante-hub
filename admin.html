@@ -473,6 +473,19 @@
       <label for="affSiteNrInput">StockNetwork Site Nr (optional)</label>
       <input id="affSiteNrInput" placeholder="e.g. 12345">
       <p class="modal-sub" style="margin:-2px 0 8px;">The StockNetwork site number this affiliate's accommodation bookings are linked to. Shown read-only in their Hub.</p>
+      <label for="affZoneInput">Zone (optional)</label>
+      <select id="affZoneInput">
+        <option value="">— No zone assigned —</option>
+        <option value="Western Cape (Cape Town &amp; Winelands)">Western Cape (Cape Town &amp; Winelands)</option>
+        <option value="Eastern Cape &amp; Garden Route">Eastern Cape &amp; Garden Route</option>
+        <option value="Northern Cape">Northern Cape</option>
+        <option value="Free State">Free State</option>
+        <option value="KwaZulu-Natal">KwaZulu-Natal</option>
+        <option value="Gauteng &amp; North West">Gauteng &amp; North West</option>
+        <option value="Mpumalanga">Mpumalanga</option>
+        <option value="Limpopo">Limpopo</option>
+      </select>
+      <p class="modal-sub" style="margin:-2px 0 8px;">When set, this affiliate's Explore Map tab in the Hub auto-filters to this zone by default (they can still switch to another area from the dropdown there).</p>
       <label>Revenue share — by channel</label>
       <p class="modal-sub" style="margin:-2px 0 8px;">Each channel matches a tab in this affiliate's Hub. For each one, choose <strong>%</strong> for a percentage of revenue, or <strong>R flat</strong> for a fixed Rand amount paid per entry regardless of revenue. Leave at 0 if they don't get a cut of that channel.</p>
       <div class="row" id="affShareFields" style="flex-wrap:wrap; gap:10px 12px;"></div>
@@ -663,6 +676,7 @@
                   <th>Affiliate</th>
                   <th>ID</th>
                   <th>Site Nr</th>
+                  <th>Zone</th>
                   <th>Share</th>
                   <th>Status</th>
                   <th>Outstanding</th>
@@ -1034,6 +1048,19 @@
         <div class="btn-row" style="flex-wrap:wrap; gap:10px;">
           <div><label for="activityNameInput">Name</label><input id="activityNameInput" placeholder="e.g. Bloukrans Bungy"></div>
           <div><label for="activityAreaInput">Area</label><input id="activityAreaInput" placeholder="e.g. Plettenberg Bay"></div>
+          <div><label for="activityZoneInput">Zone (optional)</label>
+            <select id="activityZoneInput">
+              <option value="">— No zone —</option>
+              <option value="Western Cape (Cape Town &amp; Winelands)">Western Cape (Cape Town &amp; Winelands)</option>
+              <option value="Eastern Cape &amp; Garden Route">Eastern Cape &amp; Garden Route</option>
+              <option value="Northern Cape">Northern Cape</option>
+              <option value="Free State">Free State</option>
+              <option value="KwaZulu-Natal">KwaZulu-Natal</option>
+              <option value="Gauteng &amp; North West">Gauteng &amp; North West</option>
+              <option value="Mpumalanga">Mpumalanga</option>
+              <option value="Limpopo">Limpopo</option>
+            </select>
+          </div>
           <div><label for="activityPriceInput">Price</label><input id="activityPriceInput" placeholder="e.g. R2,800 pp"></div>
         </div>
         <div class="btn-row" style="flex-wrap:wrap; gap:10px; margin-top:10px;">
@@ -1585,6 +1612,10 @@
         tdSiteNr.textContent = a.siteNr ? ('Affiliate ' + a.siteNr) : '\u2014';
         tdSiteNr.style.fontSize = '12px';
         tdSiteNr.style.color = a.siteNr ? 'inherit' : 'var(--muted)';
+        var tdZone = document.createElement('td');
+        tdZone.textContent = a.zone || '\u2014';
+        tdZone.style.fontSize = '12px';
+        tdZone.style.color = a.zone ? 'inherit' : 'var(--muted)';
         var tdShare = document.createElement('td');
         tdShare.textContent = formatShareSummary(a.revenueShare);
         tdShare.style.fontSize = '12px';
@@ -1685,6 +1716,7 @@
         tr.appendChild(tdName);
         tr.appendChild(tdId);
         tr.appendChild(tdSiteNr);
+        tr.appendChild(tdZone);
         tr.appendChild(tdShare);
         tr.appendChild(tdStatus);
         tr.appendChild(tdOutstanding);
@@ -1893,6 +1925,7 @@
       document.getElementById('affNameInput').value = existing ? (existing.name || '') : '';
       document.getElementById('affEmailInput').value = existing ? (existing.email || '') : '';
       document.getElementById('affSiteNrInput').value = existing ? (existing.siteNr || '') : '';
+      document.getElementById('affZoneInput').value = existing ? (existing.zone || '') : '';
       buildAffShareFields(existing ? existing.revenueShare : null);
       var bank = (existing && existing.bank) || {};
       document.getElementById('affBankNameInput').value = bank.bankName || '';
@@ -1920,6 +1953,7 @@
       var name = document.getElementById('affNameInput').value.trim();
       var email = document.getElementById('affEmailInput').value.trim();
       var siteNr = document.getElementById('affSiteNrInput').value.trim();
+      var zone = document.getElementById('affZoneInput').value;
       var revenueShare = readAffShareFields();
       var bank = {
         bankName: document.getElementById('affBankNameInput').value.trim(),
@@ -1940,7 +1974,7 @@
       btn.disabled = true;
       btn.textContent = 'Saving…';
       adminPost('upsertAffiliate', {
-        affId: affId, name: name, email: email, siteNr: siteNr,
+        affId: affId, name: name, email: email, siteNr: siteNr, zone: zone,
         revenueShare: revenueShare, bank: bank, status: status, notes: notes
       }).then(function(res){
         btn.disabled = false;
@@ -3729,6 +3763,7 @@
       var idInput = document.getElementById('activityIdInput');
       var nameInput = document.getElementById('activityNameInput');
       var areaInput = document.getElementById('activityAreaInput');
+      var zoneInput = document.getElementById('activityZoneInput');
       var priceInput = document.getElementById('activityPriceInput');
       var latInput = document.getElementById('activityLatInput');
       var lngInput = document.getElementById('activityLngInput');
@@ -3743,6 +3778,7 @@
         idInput.value = '';
         nameInput.value = '';
         areaInput.value = '';
+        zoneInput.value = '';
         priceInput.value = '';
         latInput.value = '';
         lngInput.value = '';
@@ -3870,6 +3906,7 @@
             idInput.value = a.id;
             nameInput.value = a.name || '';
             areaInput.value = a.area || '';
+            zoneInput.value = a.zone || '';
             priceInput.value = a.price || '';
             latInput.value = a.latitude || '';
             lngInput.value = a.longitude || '';
@@ -3964,6 +4001,7 @@
         var payload = {
           name: name,
           area: areaInput.value.trim(),
+          zone: zoneInput.value,
           price: priceInput.value.trim(),
           latitude: latInput.value.trim(),
           longitude: lngInput.value.trim(),

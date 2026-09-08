@@ -1185,9 +1185,17 @@
       </div>
       <div class="card">
         <div class="map-filter-row">
-          <label for="em-areaFilter" style="margin:0;">Filter by area</label>
+          <label for="em-areaFilter" style="margin:0;">Filter by zone</label>
           <select id="em-areaFilter">
-            <option value="">All areas</option>
+            <option value="">All zones</option>
+            <option value="Western Cape (Cape Town &amp; Winelands)">Western Cape (Cape Town &amp; Winelands)</option>
+            <option value="Eastern Cape &amp; Garden Route">Eastern Cape &amp; Garden Route</option>
+            <option value="Northern Cape">Northern Cape</option>
+            <option value="Free State">Free State</option>
+            <option value="KwaZulu-Natal">KwaZulu-Natal</option>
+            <option value="Gauteng &amp; North West">Gauteng &amp; North West</option>
+            <option value="Mpumalanga">Mpumalanga</option>
+            <option value="Limpopo">Limpopo</option>
           </select>
           <label style="margin:0;"><input type="checkbox" id="em-showProperties" checked> Properties</label>
           <label style="margin:0;"><input type="checkbox" id="em-showActivities" checked> Activities</label>
@@ -3893,13 +3901,13 @@
       }
 
       function applyFilters(){
-        var area = areaFilterEl.value;
+        var zone = areaFilterEl.value;
         var showProps = showPropsEl.checked;
         var showActs = showActsEl.checked;
         markers.forEach(function(m){
           var kindOk = (m.kind === 'property' && showProps) || (m.kind === 'activity' && showActs);
-          var areaOk = !area || m.area === area;
-          if(kindOk && areaOk){
+          var zoneOk = !zone || m.zone === zone;
+          if(kindOk && zoneOk){
             if(!leafletMap.hasLayer(m.marker)) m.marker.addTo(leafletMap);
           } else {
             if(leafletMap.hasLayer(m.marker)) leafletMap.removeLayer(m.marker);
@@ -3907,20 +3915,19 @@
         });
       }
 
-      function populateAreaFilter(items){
-        var areas = [];
-        items.forEach(function(it){
-          var a = it.kind === 'property' ? (it.area || it.city) : it.area;
-          if(a && areas.indexOf(a) === -1) areas.push(a);
-        });
-        areas.sort();
-        areaFilterEl.innerHTML = '<option value="">All areas</option>';
-        areas.forEach(function(a){
-          var opt = document.createElement('option');
-          opt.value = a;
-          opt.textContent = a;
-          areaFilterEl.appendChild(opt);
-        });
+      // Fetches the current affiliate's assigned zone (set by admin in the
+      // Affiliates tab) so the filter can default to it. Resolves to '' if
+      // there's no AFF_ID, no zone assigned, or the request fails — the map
+      // just falls back to showing every zone, same as before this existed.
+      function fetchAffiliateZone(){
+        if(!AFF_ID) return Promise.resolve('');
+        return fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'getProfile', aff: AFF_ID })
+        }).then(function(r){ return r.json(); }).then(function(data){
+          return (data && data.ok && data.profile && data.profile.zone) || '';
+        }).catch(function(){ return ''; });
       }
 
       function loadMap(){
@@ -3935,7 +3942,12 @@
           attribution: '&copy; OpenStreetMap contributors'
         }).addTo(leafletMap);
 
-        fetch('/api/map').then(function(r){ return r.json(); }).then(function(res){
+        Promise.all([
+          fetch('/api/map').then(function(r){ return r.json(); }),
+          fetchAffiliateZone()
+        ]).then(function(results){
+          var res = results[0];
+          var affiliateZone = results[1];
           statusEl.textContent = '';
           statusEl.className = 'status';
           if(!res || !res.ok){
@@ -3952,8 +3964,6 @@
             statusEl.className = 'status show';
           }
 
-          populateAreaFilter(all);
-
           all.forEach(function(item){
             if(typeof item.latitude !== 'number' || typeof item.longitude !== 'number') return;
             var icon = item.kind === 'activity'
@@ -3961,8 +3971,14 @@
               : L.divIcon({ className: '', html: '<div style="background:#1a4d7a; width:14px; height:14px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 2px rgba(0,0,0,.4);"></div>', iconSize: [14,14] });
             var marker = L.marker([item.latitude, item.longitude], { icon: icon });
             marker.bindPopup(popupContent(item), { maxWidth: 260 });
-            markers.push({ marker: marker, kind: item.kind, area: item.kind === 'property' ? (item.area || item.city) : item.area });
+            markers.push({ marker: marker, kind: item.kind, zone: item.zone || '' });
           });
+
+          if(affiliateZone && markers.some(function(m){ return m.zone === affiliateZone; })){
+            areaFilterEl.value = affiliateZone;
+            statusEl.textContent = 'Showing your zone (' + affiliateZone + ') \u2014 switch to "All zones" to see everything.';
+            statusEl.className = 'status show';
+          }
 
           applyFilters();
 
