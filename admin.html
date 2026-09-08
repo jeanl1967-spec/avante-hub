@@ -1055,6 +1055,32 @@
       </div>
 
       <div class="card" style="margin-top:20px;">
+        <h3 style="margin-top:0;">Bulk-fill property coordinates from CSV</h3>
+        <p style="margin-top:0;">Only touches <code>latitude</code>/<code>longitude</code> on existing "Listed" properties — nothing else about the listing changes. Columns: <code>id</code> (the listingId, e.g. P-123456) or <code>propertyName</code>, plus <code>latitude, longitude</code>. Prefer <code>id</code> when two properties share a name.</p>
+        <div class="btn-row" style="margin-top:0;">
+          <button class="btn-outline" id="importCoordsBtn">Upload CSV</button>
+          <input type="file" id="importCoordsFileInput" accept=".csv" style="display:none;">
+        </div>
+        <div class="status" id="importCoordsStatus"></div>
+        <div style="margin-top:14px;">
+          <p style="margin:0 0 6px; font-weight:600; font-size:13px;">Listed properties still missing coordinates</p>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Property</th>
+                  <th>Location</th>
+                </tr>
+              </thead>
+              <tbody id="missingCoordsTableBody"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="missingCoordsEmpty" style="display:none;">Every "Listed" property has coordinates.</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
         <h3 style="margin-top:0;">Bulk import activities from CSV</h3>
         <p style="margin-top:0;">Columns: <code>name, area, zone, price, contactLink, description, latitude, longitude</code>. Matches existing activities by name (case-insensitive) and updates them; anything new is added. An optional <code>id</code> column forces an exact match instead.</p>
         <div class="btn-row" style="margin-top:0;">
@@ -4082,6 +4108,32 @@
         });
       }
 
+      function renderMissingCoordsTable(rows){
+        var body = document.getElementById('missingCoordsTableBody');
+        var empty = document.getElementById('missingCoordsEmpty');
+        body.innerHTML = '';
+        if(!rows.length){
+          empty.style.display = 'block';
+          return;
+        }
+        empty.style.display = 'none';
+        rows.forEach(function(r){
+          var tr = document.createElement('tr');
+          var tdId = document.createElement('td');
+          tdId.textContent = r.listingId;
+          tdId.style.fontSize = '11px';
+          tdId.style.color = 'var(--muted)';
+          var tdName = document.createElement('td');
+          tdName.textContent = r.propertyName || '\u2014';
+          var tdLoc = document.createElement('td');
+          tdLoc.textContent = [r.city, r.country].filter(Boolean).join(', ') || '\u2014';
+          tr.appendChild(tdId);
+          tr.appendChild(tdName);
+          tr.appendChild(tdLoc);
+          body.appendChild(tr);
+        });
+      }
+
       function loadActivities(){
         actStatusEl.textContent = 'Loading\u2026';
         actStatusEl.className = 'status show';
@@ -4092,6 +4144,7 @@
             renderActivitiesTable(res.data.activities || []);
             renderMapPropertiesTable(res.data.properties || []);
             renderAdminMap(res.data.properties || [], res.data.activities || []);
+            renderMissingCoordsTable(res.data.missingCoordinates || []);
           } else {
             actStatusEl.textContent = (res.data && res.data.error) || 'Could not load map data.';
             actStatusEl.className = 'status show';
@@ -4141,6 +4194,35 @@
 
       document.getElementById('refreshActivitiesBtn').addEventListener('click', function(){
         loadActivities();
+      });
+
+      var importCoordsBtn = document.getElementById('importCoordsBtn');
+      var importCoordsFileInput = document.getElementById('importCoordsFileInput');
+      var importCoordsStatusEl = document.getElementById('importCoordsStatus');
+      importCoordsBtn.addEventListener('click', function(){ importCoordsFileInput.click(); });
+      importCoordsFileInput.addEventListener('change', function(){
+        if(!importCoordsFileInput.files || !importCoordsFileInput.files[0]) return;
+        var file = importCoordsFileInput.files[0];
+        var reader = new FileReader();
+        reader.onload = function(){
+          importCoordsStatusEl.textContent = 'Importing\u2026';
+          importCoordsStatusEl.className = 'status show';
+          mapAdminPost('importPropertyCoordinatesCsv', { csv: reader.result }).then(function(res){
+            if(res.data && res.data.ok){
+              importCoordsStatusEl.textContent = 'Updated ' + res.data.updated + ' propert' + (res.data.updated === 1 ? 'y' : 'ies') +
+                '. Skipped ' + res.data.skippedNoMatch + ' with no match, ' + res.data.skippedAmbiguous + ' with an ambiguous name match.';
+              loadActivities();
+            } else {
+              importCoordsStatusEl.textContent = (res.data && res.data.error) || 'Could not import CSV.';
+            }
+            importCoordsStatusEl.className = 'status show';
+          }).catch(function(){
+            importCoordsStatusEl.textContent = 'Could not import CSV.';
+            importCoordsStatusEl.className = 'status show';
+          });
+        };
+        reader.readAsText(file);
+        importCoordsFileInput.value = '';
       });
 
       var importBtn = document.getElementById('importActivitiesBtn');

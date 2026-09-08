@@ -182,6 +182,32 @@ function toActivityPin(record) {
   };
 }
 
+function parseCoordinatesCsv(text) {
+  const lines = text.split(/\r\n|\r|\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return [];
+  const header = parseCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+  const idx = (name) => header.indexOf(name);
+  const cols = {
+    id: idx("id"),
+    propertyName: idx("propertyname"),
+    latitude: idx("latitude"),
+    longitude: idx("longitude"),
+  };
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const fields = parseCsvLine(lines[i]);
+    const get = (key) => (cols[key] > -1 ? (fields[cols[key]] || "").trim() : "");
+    const id = get("id");
+    const propertyName = get("propertyName");
+    const latitude = get("latitude");
+    const longitude = get("longitude");
+    if (!id && !propertyName) continue;
+    if (!latitude || !longitude) continue;
+    rows.push({ id, propertyName, latitude, longitude });
+  }
+  return rows;
+}
+
 export default async (request, context) => {
   const cors = {
     "access-control-allow-origin": "*",
@@ -250,15 +276,73 @@ export default async (request, context) => {
       const visRecords = await Promise.all(visBlobs.map((b) => visibilityStore.get(b.key, { type: "json" })));
       const hiddenIds = new Set(visBlobs.filter((b, i) => visRecords[i] && visRecords[i].hidden).map((b) => b.key));
 
-      const properties = listings
-        .filter((r) => r && r.status === "Listed")
-        .map((r) => toPropertyPin(r, hiddenIds.has(r.listingId)))
-        .filter(Boolean);
+      const listedListings = listings.filter((r) => r && r.status === "Listed");
+      const properties = listedListings.map((r) => toPropertyPin(r, hiddenIds.has(r.listingId))).filter(Boolean);
+
+      // Listed properties with no usable coordinates never become a pin, so
+      // they're surfaced here separately — the admin tab uses this to show
+      // which ones still need a latitude/longitude, e.g. via the
+      // importPropertyCoordinatesCsv action below.
+      const missingCoordinates = listedListings
+        .filter((r) => {
+          const lat = parseFloat(r.latitude);
+          const lng = parseFloat(r.longitude);
+          return !isFinite(lat) || !isFinite(lng);
+        })
+        .map((r) => ({
+          listingId: r.listingId,
+          propertyName: r.propertyName || "",
+          city: r.city || "",
+          country: r.country || "",
+        }));
 
       const { blobs: actBlobs } = await activitiesStore.list();
       const activities = await Promise.all(actBlobs.map((b) => activitiesStore.get(b.key, { type: "json" })));
 
-      return json({ ok: true, properties, activities: activities.filter(Boolean) });
+      return json({ ok: true, properties, activities: activities.filter(Boolean), missingCoordinates });
+    }
+
+    if (action === "importPropertyCoordinatesCsv") {
+      // The only place this file ever writes to property-listings, and only
+      // ever these two fields — everything else about a listing (status,
+      // agreement, owner details, etc.) stays exactly as
+      // property-onboarding-api.js / the Property Listings tab left it.
+      const csvText = typeof body.csv === "string" ? body.csv : "";
+      if (!csvText.trim()) return json({ error: "Uploaded file was empty." }, 400);
+      const rows = parseCoordinatesCsv(csvText);
+      if (!rows.length) {
+        return json({ error: "Could not find any usable rows (need an id or propertyName column, plus latitude and longitude)." }, 400);
+      }
+
+      const { blobs } = await listingsStore.list();
+      const listings = await Promise.all(blobs.map((b) => listingsStore.get(b.key, { type: "json" })));
+      const listed = listings.filter((r) => r && r.status === "Listed");
+      const byId = new Map(listed.map((r) => [r.listingId, r]));
+
+      let updated = 0;
+      let skippedNoMatch = 0;
+      let skippedAmbiguous = 0;
+      for (const row of rows) {
+        const lat = parseFloat(row.latitude);
+        const lng = parseFloat(row.longitude);
+        if (!isFinite(lat) || !isFinite(lng)) { skippedNoMatch++; continue; }
+
+        let match = row.id ? byId.get(row.id) : null;
+        if (!match && row.propertyName) {
+          const nameMatches = listed.filter((r) => (r.propertyName || "").toLowerCase() === row.propertyName.toLowerCase());
+          if (nameMatches.length === 1) match = nameMatches[0];
+          else if (nameMatches.length > 1) { skippedAmbiguous++; continue; }
+        }
+        if (!match) { skippedNoMatch++; continue; }
+
+        match.latitude = String(lat);
+        match.longitude = String(lng);
+        match.dateUpdated = new Date().toISOString();
+        await listingsStore.setJSON(match.listingId, match);
+        updated++;
+      }
+
+      return json({ ok: true, updated, skippedNoMatch, skippedAmbiguous });
     }
 
     if (action === "importActivitiesCsv") {
