@@ -2981,7 +2981,7 @@
       // affiliates already use from their own Hub. Only replaces the field
       // shown here in the form; still has to be saved via "Save default"
       // like any other edit.
-      function shortenAdminHookField(n, field){
+      function shortenAdminHookField(n, field, btn){
         var input = document.getElementById('dh' + n + '-' + field);
         var statusEl = document.getElementById('dh' + n + '-' + field + 'ShortenStatus');
         var longUrl = input.value.trim();
@@ -2999,9 +2999,19 @@
           return;
         }
         statusEl.textContent = 'Shortening…';
+        if(btn) btn.disabled = true;
         shortenLink(longUrl, ADMIN_AFF).then(function(shortUrl){
+          if(btn) btn.disabled = false;
           if(shortUrl === longUrl){
             statusEl.textContent = 'Could not shorten that link — please try again.';
+            return;
+          }
+          // The admin may have edited (or cleared) this field while the
+          // request was in flight — only write the shortened result back if
+          // it's still the same URL we sent, so a slow response can't
+          // silently clobber a correction made in the meantime.
+          if(input.value.trim() !== longUrl){
+            statusEl.textContent = 'The link changed before shortening finished — click "Shorten this link" again if you still want to.';
             return;
           }
           input.value = shortUrl;
@@ -3227,7 +3237,7 @@
 
         var shortenField = e.target.getAttribute('data-shorten-field');
         if(shortenField){
-          shortenAdminHookField(e.target.getAttribute('data-shorten-hook'), shortenField);
+          shortenAdminHookField(e.target.getAttribute('data-shorten-hook'), shortenField, e.target);
           return;
         }
 
