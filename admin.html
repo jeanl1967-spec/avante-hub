@@ -401,6 +401,10 @@
   }
   .landinglink-status{ font-size:12px; color:var(--muted); margin-top:6px; margin-bottom:10px; min-height:16px; }
 
+  /* ---- Shorten (replaces a Booking/Landing link with a go.avantetravel.co.za short link) ---- */
+  .shorten-btn{ width:100%; margin-top:6px; padding:7px; font-size:12.5px; }
+  .shorten-status{ font-size:12px; color:var(--muted); margin-top:6px; margin-bottom:10px; min-height:16px; }
+
   /* ---- Share Kit (per-platform sized image + caption, ready to paste) ---- */
   .sharekit-btn{ width:100%; margin-top:10px; }
   .modal-card.sharekit-card{ max-width:660px; text-align:left; }
@@ -2888,10 +2892,14 @@
             '</div>' +
             '<label for="dh' + i + '-booking">Booking link</label>' +
             '<input id="dh' + i + '-booking" placeholder="Default booking link for this hook slot">' +
+            '<button type="button" class="btn-outline shorten-btn" data-shorten-field="booking" data-shorten-hook="' + i + '">Shorten this link</button>' +
+            '<div class="shorten-status" id="dh' + i + '-bookingShortenStatus"></div>' +
             '<label for="dh' + i + '-landing">Landing page link</label>' +
             '<input id="dh' + i + '-landing" placeholder="Default landing page link for this hook slot">' +
             '<button type="button" class="btn-outline landinglink-btn" data-landinglink-build="' + i + '">🔗 Build landing page link</button>' +
             '<div class="landinglink-status" id="dh' + i + '-landinglinkStatus"></div>' +
+            '<button type="button" class="btn-outline shorten-btn" data-shorten-field="landing" data-shorten-hook="' + i + '">Shorten this link</button>' +
+            '<div class="shorten-status" id="dh' + i + '-landingShortenStatus"></div>' +
             '<label for="dh' + i + '-caption">Caption</label>' +
             '<textarea id="dh' + i + '-caption" placeholder="Ready-to-paste caption affiliates will get with this ad"></textarea>' +
             '<button class="primary" data-hook-save="' + i + '">Save default</button>' +
@@ -2965,6 +2973,50 @@
         var link = window.location.origin + '/hook-landing.html?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(n);
         document.getElementById('dh' + n + '-landing').value = link;
         statusEl.textContent = 'Landing page link filled in below — remember to click "Save default".';
+      }
+
+      // Replaces this hook's Booking link or Landing page link (field is
+      // 'booking' or 'landing') with a go.avantetravel.co.za short link, via
+      // the shared shortenLink() helper above — the same shortener
+      // affiliates already use from their own Hub. Only replaces the field
+      // shown here in the form; still has to be saved via "Save default"
+      // like any other edit.
+      function shortenAdminHookField(n, field, btn){
+        var input = document.getElementById('dh' + n + '-' + field);
+        var statusEl = document.getElementById('dh' + n + '-' + field + 'ShortenStatus');
+        var longUrl = input.value.trim();
+        if(!longUrl){
+          statusEl.textContent = 'Nothing to shorten yet — fill in a link first.';
+          return;
+        }
+        try{
+          if(new URL(longUrl).hostname === 'go.avantetravel.co.za'){
+            statusEl.textContent = 'This is already a short link.';
+            return;
+          }
+        }catch(e){
+          statusEl.textContent = 'That doesn\'t look like a valid link.';
+          return;
+        }
+        statusEl.textContent = 'Shortening…';
+        if(btn) btn.disabled = true;
+        shortenLink(longUrl, ADMIN_AFF).then(function(shortUrl){
+          if(btn) btn.disabled = false;
+          if(shortUrl === longUrl){
+            statusEl.textContent = 'Could not shorten that link — please try again.';
+            return;
+          }
+          // The admin may have edited (or cleared) this field while the
+          // request was in flight — only write the shortened result back if
+          // it's still the same URL we sent, so a slow response can't
+          // silently clobber a correction made in the meantime.
+          if(input.value.trim() !== longUrl){
+            statusEl.textContent = 'The link changed before shortening finished — click "Shorten this link" again if you still want to.';
+            return;
+          }
+          input.value = shortUrl;
+          statusEl.textContent = 'Shortened — remember to click "Save default".';
+        });
       }
 
       function setImageSrc(n){
@@ -3180,6 +3232,12 @@
         var landingBuildN = e.target.getAttribute('data-landinglink-build');
         if(landingBuildN){
           buildAdminLandingLink(landingBuildN);
+          return;
+        }
+
+        var shortenField = e.target.getAttribute('data-shorten-field');
+        if(shortenField){
+          shortenAdminHookField(e.target.getAttribute('data-shorten-hook'), shortenField, e.target);
           return;
         }
 
