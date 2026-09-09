@@ -765,7 +765,13 @@ export default async (request, context) => {
       const name = typeof body.name === "string" ? body.name.trim() : "";
       const email = typeof body.email === "string" ? body.email.trim() : "";
       const siteNr = typeof body.siteNr === "string" ? body.siteNr.trim() : "";
-      const zone = typeof body.zone === "string" && ZONES.includes(body.zone) ? body.zone : "";
+      const zones = Array.isArray(body.zones)
+        ? [...new Set(body.zones.filter((z) => typeof z === "string" && ZONES.includes(z)))]
+        : [];
+      const ALLOWED_TYPES = ["franchise", "property", "agent"];
+      const types = Array.isArray(body.types)
+        ? [...new Set(body.types.filter((t) => ALLOWED_TYPES.includes(t)))]
+        : [];
       const revenueShare = sanitizeRevenueShare(body.revenueShare, 0);
       const bank = sanitizeBankDetails(body.bank);
       const notes = typeof body.notes === "string" ? body.notes.trim() : "";
@@ -780,7 +786,12 @@ export default async (request, context) => {
         // booking link is tied to. Admin-set only — shown read-only in the
         // affiliate's own Hub (Account Details tab).
         siteNr: siteNr,
-        zone: zone,
+        zones: zones,
+        // Kept in sync with zones[0] so anything still reading the old
+        // singular field (e.g. a stale cached client) degrades gracefully
+        // rather than breaking outright.
+        zone: zones[0] || "",
+        types: types,
         // Not editable from this admin form (yet) — preserve whatever the
         // affiliate has set for themselves via their Hub's Account Details
         // tab, rather than silently wiping it out on every admin save.
