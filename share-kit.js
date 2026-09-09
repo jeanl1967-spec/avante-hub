@@ -52,12 +52,19 @@
     canvas.height = h;
     var ctx = canvas.getContext('2d');
     if(img){
+      // Fit the whole flyer inside the platform frame (like CSS
+      // object-fit:contain) rather than center-cropping it to fill the
+      // frame — our source images are flyers with price/detail text right
+      // up to the edges, and a hard crop was cutting that text off instead
+      // of just resizing it in. Any leftover strip (the source and target
+      // aspect ratios rarely match exactly) is filled with white behind it.
       var sw = img.naturalWidth, sh = img.naturalHeight;
-      var srcRatio = sw / sh, targetRatio = w / h;
-      var sx, sy, cw, ch;
-      if(srcRatio > targetRatio){ ch = sh; cw = sh * targetRatio; sx = (sw - cw) / 2; sy = 0; }
-      else{ cw = sw; ch = sw / targetRatio; sx = 0; sy = (sh - ch) / 2; }
-      ctx.drawImage(img, sx, sy, cw, ch, 0, 0, w, h);
+      var scale = Math.min(w / sw, h / sh);
+      var dw = sw * scale, dh = sh * scale;
+      var dx = (w - dw) / 2, dy = (h - dh) / 2;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, sw, sh, dx, dy, dw, dh);
     }else{
       ctx.fillStyle = '#f4fbfa';
       ctx.fillRect(0, 0, w, h);

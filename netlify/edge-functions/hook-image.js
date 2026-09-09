@@ -5,7 +5,7 @@ const MAX_BYTES = 5 * 1024 * 1024;
 export default async (request, context) => {
   const cors = {
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
     "access-control-allow-headers": "content-type",
 };
 
@@ -34,11 +34,42 @@ export default async (request, context) => {
 }
 
   const store = getStore({ name: "promo-hook-images", consistency: "strong" });
-  // Only read for GET rotation below — never written here.
+  // Read for GET rotation below; also read+written by DELETE, which clears
+  // a hook's galleryCount back to 0 once its photos are gone (see below).
   const hookStore = getStore({ name: "promo-hooks", consistency: "strong" });
   let key = slot && slot !== "0" ? aff + ":" + hook + ":" + slot : aff + ":" + hook;
 
   try {
+    if (request.method === "DELETE") {
+      // Removes this hook's current image entirely (cover photo plus any
+      // extra gallery slots Auto-build's photo picker saved alongside it —
+      // otherwise the cover key would be gone but the GET rotation above
+      // would still occasionally serve one of the now-orphaned gallery
+      // slots at random, making "delete image" look like it didn't work).
+      let galleryCount = 0;
+      let record = null;
+      try {
+        record = await hookStore.get(aff + ":" + hook, { type: "json" });
+        galleryCount = (record && record.galleryCount) || 0;
+      } catch (e) {
+        // best-effort — if this lookup fails we still delete the cover key below
+      }
+
+      const keysToDelete = [aff + ":" + hook];
+      for (let s = 1; s <= galleryCount; s++) keysToDelete.push(aff + ":" + hook + ":" + s);
+      await Promise.all(keysToDelete.map((k) => store.delete(k).catch(() => {})));
+
+      if (record && galleryCount > 0) {
+        record.galleryCount = 0;
+        record.updatedAt = new Date().toISOString();
+        await hookStore.setJSON(aff + ":" + hook, record).catch(() => {});
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json", ...cors },
+});
+}
+
     if (request.method === "POST") {
       const contentType = request.headers.get("content-type") || "";
       if (!contentType.startsWith("image/")) {

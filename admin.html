@@ -3039,6 +3039,7 @@
             '<input type="file" accept="image/*" id="dh' + i + '-imageInput" style="display:none;">' +
             '<div class="btn-row" style="margin-top:0;">' +
               '<button type="button" class="btn-outline" data-upload-image="' + i + '">Upload image</button>' +
+              '<button type="button" class="btn-outline" data-delete-image="' + i + '">Delete image</button>' +
             '</div>' +
             '<div class="status" id="dh' + i + '-imageStatus"></div>' +
             '<div class="hook-updated" id="dh' + i + '-galleryNote" style="display:none;"></div>' +
@@ -3304,6 +3305,39 @@
         });
       }
 
+      // Removes this hook's current image (cover photo, plus any extra
+      // Auto-build gallery photos saved alongside it — see hook-image.js's
+      // DELETE handler) and resets the card back to the placeholder.
+      function deleteImage(n){
+        var statusEl = document.getElementById('dh' + n + '-imageStatus');
+        statusEl.className = 'status';
+        statusEl.textContent = '';
+
+        if(!window.confirm('Delete this hook\'s image? This can\'t be undone.')) return;
+
+        var apiUrl = '/api/hook-image?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(n);
+        statusEl.textContent = 'Deleting image…';
+        statusEl.className = 'status show';
+
+        fetch(apiUrl, { method: 'DELETE' }).then(function(res){
+          if(!res.ok) throw new Error('delete failed');
+          var img = document.getElementById('dh' + n + '-image');
+          var placeholder = document.getElementById('dh' + n + '-placeholder');
+          img.onerror = null;
+          img.classList.remove('show');
+          img.removeAttribute('src');
+          placeholder.style.display = 'flex';
+          var galleryNote = document.getElementById('dh' + n + '-galleryNote');
+          if(galleryNote) galleryNote.style.display = 'none';
+          statusEl.textContent = '';
+          statusEl.className = 'status';
+          showToast('Image deleted');
+        }).catch(function(){
+          statusEl.textContent = 'We couldn\'t delete this image — please check your connection and try again.';
+          statusEl.className = 'status show';
+        });
+      }
+
       function saveHook(n){
         var p = 'dh' + n + '-';
         var booking = document.getElementById(p + 'booking').value.trim();
@@ -3371,6 +3405,11 @@
         var uploadN = e.target.getAttribute('data-upload-image');
         if(uploadN){
           document.getElementById('dh' + uploadN + '-imageInput').click();
+          return;
+        }
+        var deleteN = e.target.getAttribute('data-delete-image');
+        if(deleteN){
+          deleteImage(deleteN);
           return;
         }
         var shareN = e.target.getAttribute('data-sharekit');
