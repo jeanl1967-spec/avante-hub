@@ -476,19 +476,25 @@
       <label for="affSiteNrInput">StockNetwork Site Nr (optional)</label>
       <input id="affSiteNrInput" placeholder="e.g. 12345">
       <p class="modal-sub" style="margin:-2px 0 8px;">The StockNetwork site number this affiliate's accommodation bookings are linked to. Shown read-only in their Hub.</p>
-      <label for="affZoneInput">Zone (optional)</label>
-      <select id="affZoneInput">
-        <option value="">— No zone assigned —</option>
-        <option value="Western Cape (Cape Town &amp; Winelands)">Western Cape (Cape Town &amp; Winelands)</option>
-        <option value="Eastern Cape &amp; Garden Route">Eastern Cape &amp; Garden Route</option>
-        <option value="Northern Cape">Northern Cape</option>
-        <option value="Free State">Free State</option>
-        <option value="KwaZulu-Natal">KwaZulu-Natal</option>
-        <option value="Gauteng &amp; North West">Gauteng &amp; North West</option>
-        <option value="Mpumalanga">Mpumalanga</option>
-        <option value="Limpopo">Limpopo</option>
-      </select>
-      <p class="modal-sub" style="margin:-2px 0 8px;">When set, this affiliate's Explore Map tab in the Hub auto-filters to this zone by default (they can still switch to another area from the dropdown there).</p>
+      <label>Zones (optional — select all that apply)</label>
+      <div class="row" id="affZoneCheckboxes" style="flex-wrap:wrap; gap:8px 16px; margin-bottom:8px;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Western Cape (Cape Town &amp; Winelands)" class="aff-zone-cb"> Western Cape (Cape Town &amp; Winelands)</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Eastern Cape &amp; Garden Route" class="aff-zone-cb"> Eastern Cape &amp; Garden Route</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Northern Cape" class="aff-zone-cb"> Northern Cape</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Free State" class="aff-zone-cb"> Free State</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="KwaZulu-Natal" class="aff-zone-cb"> KwaZulu-Natal</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Gauteng &amp; North West" class="aff-zone-cb"> Gauteng &amp; North West</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Mpumalanga" class="aff-zone-cb"> Mpumalanga</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Limpopo" class="aff-zone-cb"> Limpopo</label>
+      </div>
+      <p class="modal-sub" style="margin:-2px 0 8px;">This affiliate's Explore Map tab in the Hub auto-filters to their first assigned zone by default (they can still switch to another area from the dropdown there).</p>
+      <label>Affiliate type (optional — select all that apply)</label>
+      <div class="row" id="affTypeCheckboxes" style="flex-wrap:wrap; gap:8px 16px; margin-bottom:8px;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="franchise" id="affTypeFranchise"> Franchise Affiliate</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="property" id="affTypeProperty"> Property Affiliate</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="agent" id="affTypeAgent"> Agent Affiliate</label>
+      </div>
+      <p class="modal-sub" style="margin:-2px 0 8px;">An affiliate can be more than one type. Not used to control access yet — just a label for now.</p>
       <label>Revenue share — by channel</label>
       <p class="modal-sub" style="margin:-2px 0 8px;">Each channel matches a tab in this affiliate's Hub. For each one, choose <strong>%</strong> for a percentage of revenue, or <strong>R flat</strong> for a fixed Rand amount paid per entry regardless of revenue. Leave at 0 if they don't get a cut of that channel.</p>
       <div class="row" id="affShareFields" style="flex-wrap:wrap; gap:10px 12px;"></div>
@@ -679,7 +685,8 @@
                   <th>Affiliate</th>
                   <th>ID</th>
                   <th>Site Nr</th>
-                  <th>Zone</th>
+                  <th>Zones</th>
+                  <th>Type</th>
                   <th>Share</th>
                   <th>Status</th>
                   <th>Outstanding</th>
@@ -1677,9 +1684,16 @@
         tdSiteNr.style.fontSize = '12px';
         tdSiteNr.style.color = a.siteNr ? 'inherit' : 'var(--muted)';
         var tdZone = document.createElement('td');
-        tdZone.textContent = a.zone || '\u2014';
+        var affZones = (a.zones && a.zones.length) ? a.zones : (a.zone ? [a.zone] : []);
+        tdZone.textContent = affZones.length ? affZones.join(', ') : '\u2014';
         tdZone.style.fontSize = '12px';
-        tdZone.style.color = a.zone ? 'inherit' : 'var(--muted)';
+        tdZone.style.color = affZones.length ? 'inherit' : 'var(--muted)';
+        var tdType = document.createElement('td');
+        var typeLabels = { franchise: 'Franchise', property: 'Property', agent: 'Agent' };
+        var affTypes = Array.isArray(a.types) ? a.types : [];
+        tdType.textContent = affTypes.length ? affTypes.map(function(t){ return typeLabels[t] || t; }).join(', ') : '\u2014';
+        tdType.style.fontSize = '12px';
+        tdType.style.color = affTypes.length ? 'inherit' : 'var(--muted)';
         var tdShare = document.createElement('td');
         tdShare.textContent = formatShareSummary(a.revenueShare);
         tdShare.style.fontSize = '12px';
@@ -1781,6 +1795,7 @@
         tr.appendChild(tdId);
         tr.appendChild(tdSiteNr);
         tr.appendChild(tdZone);
+        tr.appendChild(tdType);
         tr.appendChild(tdShare);
         tr.appendChild(tdStatus);
         tr.appendChild(tdOutstanding);
@@ -1989,7 +2004,14 @@
       document.getElementById('affNameInput').value = existing ? (existing.name || '') : '';
       document.getElementById('affEmailInput').value = existing ? (existing.email || '') : '';
       document.getElementById('affSiteNrInput').value = existing ? (existing.siteNr || '') : '';
-      document.getElementById('affZoneInput').value = existing ? (existing.zone || '') : '';
+      var existingZones = existing ? ((existing.zones && existing.zones.length) ? existing.zones : (existing.zone ? [existing.zone] : [])) : [];
+      document.querySelectorAll('.aff-zone-cb').forEach(function(cb){
+        cb.checked = existingZones.indexOf(cb.value) > -1;
+      });
+      var existingTypes = existing && Array.isArray(existing.types) ? existing.types : [];
+      document.getElementById('affTypeFranchise').checked = existingTypes.indexOf('franchise') > -1;
+      document.getElementById('affTypeProperty').checked = existingTypes.indexOf('property') > -1;
+      document.getElementById('affTypeAgent').checked = existingTypes.indexOf('agent') > -1;
       buildAffShareFields(existing ? existing.revenueShare : null);
       var bank = (existing && existing.bank) || {};
       document.getElementById('affBankNameInput').value = bank.bankName || '';
@@ -2017,7 +2039,11 @@
       var name = document.getElementById('affNameInput').value.trim();
       var email = document.getElementById('affEmailInput').value.trim();
       var siteNr = document.getElementById('affSiteNrInput').value.trim();
-      var zone = document.getElementById('affZoneInput').value;
+      var zones = Array.prototype.slice.call(document.querySelectorAll('.aff-zone-cb:checked')).map(function(cb){ return cb.value; });
+      var types = [];
+      if(document.getElementById('affTypeFranchise').checked) types.push('franchise');
+      if(document.getElementById('affTypeProperty').checked) types.push('property');
+      if(document.getElementById('affTypeAgent').checked) types.push('agent');
       var revenueShare = readAffShareFields();
       var bank = {
         bankName: document.getElementById('affBankNameInput').value.trim(),
@@ -2038,7 +2064,7 @@
       btn.disabled = true;
       btn.textContent = 'Saving…';
       adminPost('upsertAffiliate', {
-        affId: affId, name: name, email: email, siteNr: siteNr, zone: zone,
+        affId: affId, name: name, email: email, siteNr: siteNr, zones: zones, types: types,
         revenueShare: revenueShare, bank: bank, status: status, notes: notes
       }).then(function(res){
         btn.disabled = false;
