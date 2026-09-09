@@ -99,6 +99,28 @@ function genActivityId() {
   return "A-" + n;
 }
 
+// Runs `fn` over `items` with at most `limit` calls in flight at once.
+// Needed anywhere we touch a growing number of blobs at once (e.g.
+// re-reading every existing activity during a bulk import) — firing them
+// all off via a single unbounded Promise.all() works fine while the store
+// is small, but as the activity count grows into the hundreds, blasting
+// that many concurrent blob reads/writes from one function invocation
+// risks exhausting connections and crashing with a 502, well before any
+// per-request time limit would ever be hit.
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let idx = 0;
+  async function worker() {
+    while (idx < items.length) {
+      const i = idx++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
 async function verifyAdminToken(token) {
   if (!token) return false;
   const sessionStore = getStore({ name: "admin-sessions", consistency: "strong" });
@@ -277,9 +299,9 @@ export default async (request, context) => {
   try {
     if (request.method === "GET") {
       const { blobs } = await listingsStore.list();
-      const listings = await Promise.all(blobs.map((b) => listingsStore.get(b.key, { type: "json" })));
+      const listings = await mapWithConcurrency(blobs, 25, (b) => listingsStore.get(b.key, { type: "json" }));
       const { blobs: visBlobs } = await visibilityStore.list();
-      const visFlags = await Promise.all(visBlobs.map((b) => visibilityStore.get(b.key, { type: "json" })));
+      const visFlags = await mapWithConcurrency(visBlobs, 25, (b) => visibilityStore.get(b.key, { type: "json" }));
       const hiddenIds = new Set(
         visBlobs.filter((b, i) => visFlags[i] && visFlags[i].hidden).map((b) => b.key)
       );
@@ -300,7 +322,7 @@ export default async (request, context) => {
       const properties = onboardedProperties.concat(resortProperties);
 
       const { blobs: actBlobs } = await activitiesStore.list();
-      const activities = (await Promise.all(actBlobs.map((b) => activitiesStore.get(b.key, { type: "json" }))))
+      const activities = (await mapWithConcurrency(actBlobs, 25, (b) => activitiesStore.get(b.key, { type: "json" })))
         .filter((r) => r && r.visible !== false)
         .map(toActivityPin);
 
@@ -325,9 +347,9 @@ export default async (request, context) => {
 
     if (action === "adminList") {
       const { blobs } = await listingsStore.list();
-      const listings = await Promise.all(blobs.map((b) => listingsStore.get(b.key, { type: "json" })));
+      const listings = await mapWithConcurrency(blobs, 25, (b) => listingsStore.get(b.key, { type: "json" }));
       const { blobs: visBlobs } = await visibilityStore.list();
-      const visRecords = await Promise.all(visBlobs.map((b) => visibilityStore.get(b.key, { type: "json" })));
+      const visRecords = await mapWithConcurrency(visBlobs, 25, (b) => visibilityStore.get(b.key, { type: "json" }));
       const hiddenIds = new Set(visBlobs.filter((b, i) => visRecords[i] && visRecords[i].hidden).map((b) => b.key));
 
       const listedListings = listings.filter((r) => r && r.status === "Listed");
@@ -364,7 +386,7 @@ export default async (request, context) => {
       const properties = onboardedProperties.concat(resortProperties);
 
       const { blobs: actBlobs } = await activitiesStore.list();
-      const activities = await Promise.all(actBlobs.map((b) => activitiesStore.get(b.key, { type: "json" })));
+      const activities = await mapWithConcurrency(actBlobs, 25, (b) => activitiesStore.get(b.key, { type: "json" }));
 
       return json({ ok: true, properties, activities: activities.filter(Boolean), missingCoordinates, resortStats });
     }
@@ -382,7 +404,7 @@ export default async (request, context) => {
       }
 
       const { blobs } = await listingsStore.list();
-      const listings = await Promise.all(blobs.map((b) => listingsStore.get(b.key, { type: "json" })));
+      const listings = await mapWithConcurrency(blobs, 25, (b) => listingsStore.get(b.key, { type: "json" }));
       const listed = listings.filter((r) => r && r.status === "Listed");
       const byId = new Map(listed.map((r) => [r.listingId, r]));
 
@@ -418,14 +440,18 @@ export default async (request, context) => {
       const rows = parseActivitiesCsv(csvText);
       if (!rows.length) return json({ error: "Could not find any activity rows (need at least a 'name' column)." }, 400);
 
+      // Bounded to 25 concurrent reads — see mapWithConcurrency above for
+      // why this can't be a plain Promise.all once the store has grown.
       const { blobs: existingBlobs } = await activitiesStore.list();
-      const existingRecords = await Promise.all(existingBlobs.map((b) => activitiesStore.get(b.key, { type: "json" })));
+      const existingRecords = await mapWithConcurrency(existingBlobs, 25, (b) =>
+        activitiesStore.get(b.key, { type: "json" })
+      );
       const byId = new Map(existingRecords.filter(Boolean).map((r) => [r.id, r]));
       const byName = new Map(existingRecords.filter(Boolean).map((r) => [(r.name || "").toLowerCase(), r]));
 
       let created = 0;
       let updated = 0;
-      for (const row of rows) {
+      await mapWithConcurrency(rows, 10, async (row) => {
         const matchExisting = (row.id && byId.get(row.id)) || byName.get(row.name.toLowerCase());
         const record = sanitizeActivity(row, matchExisting || {});
         if (matchExisting) {
@@ -439,7 +465,7 @@ export default async (request, context) => {
           created++;
         }
         await activitiesStore.setJSON(record.id, record);
-      }
+      });
 
       return json({ ok: true, created: created, updated: updated });
     }
