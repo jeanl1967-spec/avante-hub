@@ -88,6 +88,31 @@ export default async (request, context) => {
 }
 
       await store.set(key, buf, { metadata: { contentType } });
+
+      // A plain manual upload (no ?slot=) always replaces this hook's
+      // *whole* image, not just its cover frame — so any leftover
+      // Auto-build gallery photos from before must go too. Without this,
+      // they'd sit around referenced by galleryCount and the GET rotation
+      // above would keep occasionally serving one of them at random,
+      // instead of the image just uploaded. An explicit ?slot= POST (no
+      // current caller sends one, but defensively) is a single-slot
+      // write, not a full replace, so it skips this.
+      if (key === aff + ":" + hook) {
+        try {
+          const record = await hookStore.get(key, { type: "json" });
+          const galleryCount = (record && record.galleryCount) || 0;
+          if (galleryCount > 0) {
+            const staleSlots = [];
+            for (let s = 1; s <= galleryCount; s++) staleSlots.push(key + ":" + s);
+            await Promise.all(staleSlots.map((k) => store.delete(k).catch(() => {})));
+            record.galleryCount = 0;
+            await hookStore.setJSON(key, record).catch(() => {});
+          }
+        } catch (e) {
+          // best-effort — the cover upload above already succeeded either way
+        }
+      }
+
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "content-type": "application/json", ...cors },
 });
