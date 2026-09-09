@@ -1081,6 +1081,7 @@
         <div class="btn-row" style="margin-top:0;">
           <button class="btn-outline" id="importCoordsBtn">Upload CSV</button>
           <input type="file" id="importCoordsFileInput" accept=".csv" style="display:none;">
+          <button class="btn-outline" id="templateCoordsBtn">Download blank template</button>
         </div>
         <div class="status" id="importCoordsStatus"></div>
         <div style="margin-top:14px;">
@@ -1108,6 +1109,7 @@
           <button class="btn-outline" id="importActivitiesBtn">Upload CSV</button>
           <input type="file" id="importActivitiesFileInput" accept=".csv" style="display:none;">
           <button class="btn-outline" id="exportActivitiesBtn">Download current activities as CSV</button>
+          <button class="btn-outline" id="templateActivitiesBtn">Download blank template</button>
         </div>
         <div class="status" id="importActivitiesStatus"></div>
       </div>
@@ -1140,6 +1142,10 @@
         </div>
         <label for="activityDescInput" style="margin-top:10px; display:block;">Description</label>
         <textarea id="activityDescInput" rows="3" style="width:100%;" placeholder="Short blurb for the map popup"></textarea>
+        <label style="margin-top:14px; display:block;">Photos (up to 12)</label>
+        <div id="activityFormPhotos" style="display:flex; flex-wrap:wrap; gap:8px; margin:6px 0;"></div>
+        <input type="file" id="activityPhotoInput" accept="image/*" multiple style="display:block;">
+        <p id="activityPhotoHint" style="margin:6px 0 0; font-size:12px; color:var(--muted);">For a new activity, save it first — photos then upload automatically right after.</p>
         <div class="btn-row" style="margin-top:10px;">
           <button class="primary" id="saveActivityBtn">Save activity</button>
           <button class="btn-outline" id="cancelActivityEditBtn" style="display:none;">Cancel edit</button>
@@ -3065,7 +3071,6 @@
             '<input type="file" accept="image/*" id="dh' + i + '-imageInput" style="display:none;">' +
             '<div class="btn-row" style="margin-top:0;">' +
               '<button type="button" class="btn-outline" data-upload-image="' + i + '">Upload image</button>' +
-              '<button type="button" class="btn-outline" data-delete-image="' + i + '">Delete image</button>' +
             '</div>' +
             '<div class="status" id="dh' + i + '-imageStatus"></div>' +
             '<div class="hook-updated" id="dh' + i + '-galleryNote" style="display:none;"></div>' +
@@ -3331,39 +3336,6 @@
         });
       }
 
-      // Removes this hook's current image (cover photo, plus any extra
-      // Auto-build gallery photos saved alongside it — see hook-image.js's
-      // DELETE handler) and resets the card back to the placeholder.
-      function deleteImage(n){
-        var statusEl = document.getElementById('dh' + n + '-imageStatus');
-        statusEl.className = 'status';
-        statusEl.textContent = '';
-
-        if(!window.confirm('Delete this hook\'s image? This can\'t be undone.')) return;
-
-        var apiUrl = '/api/hook-image?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(n);
-        statusEl.textContent = 'Deleting image…';
-        statusEl.className = 'status show';
-
-        fetch(apiUrl, { method: 'DELETE' }).then(function(res){
-          if(!res.ok) throw new Error('delete failed');
-          var img = document.getElementById('dh' + n + '-image');
-          var placeholder = document.getElementById('dh' + n + '-placeholder');
-          img.onerror = null;
-          img.classList.remove('show');
-          img.removeAttribute('src');
-          placeholder.style.display = 'flex';
-          var galleryNote = document.getElementById('dh' + n + '-galleryNote');
-          if(galleryNote) galleryNote.style.display = 'none';
-          statusEl.textContent = '';
-          statusEl.className = 'status';
-          showToast('Image deleted');
-        }).catch(function(){
-          statusEl.textContent = 'We couldn\'t delete this image — please check your connection and try again.';
-          statusEl.className = 'status show';
-        });
-      }
-
       function saveHook(n){
         var p = 'dh' + n + '-';
         var booking = document.getElementById(p + 'booking').value.trim();
@@ -3431,11 +3403,6 @@
         var uploadN = e.target.getAttribute('data-upload-image');
         if(uploadN){
           document.getElementById('dh' + uploadN + '-imageInput').click();
-          return;
-        }
-        var deleteN = e.target.getAttribute('data-delete-image');
-        if(deleteN){
-          deleteImage(deleteN);
           return;
         }
         var shareN = e.target.getAttribute('data-sharekit');
@@ -3901,6 +3868,129 @@
       var contactInput = document.getElementById('activityContactInput');
       var descInput = document.getElementById('activityDescInput');
       var cancelEditBtn = document.getElementById('cancelActivityEditBtn');
+      var formPhotosEl = document.getElementById('activityFormPhotos');
+      var photoInput = document.getElementById('activityPhotoInput');
+      var photoHintEl = document.getElementById('activityPhotoHint');
+      var currentFormPhotoKeys = [];
+      var pendingPhotoFiles = []; // { file, objectUrl } — only used before a new activity has an id
+
+      function renderFormPhotoThumbs(){
+        formPhotosEl.innerHTML = '';
+        currentFormPhotoKeys.forEach(function(key){
+          var wrap = document.createElement('div');
+          wrap.style.position = 'relative';
+          var img = document.createElement('img');
+          img.src = '/api/property-file?key=' + encodeURIComponent(key);
+          img.style.cssText = 'width:56px; height:56px; object-fit:cover; border-radius:4px;';
+          wrap.appendChild(img);
+          var rm = document.createElement('button');
+          rm.type = 'button';
+          rm.textContent = '\u00d7';
+          rm.title = 'Remove photo';
+          rm.style.cssText = 'position:absolute; top:-6px; right:-6px; width:18px; height:18px; line-height:16px; padding:0; border-radius:50%; border:none; background:#b42318; color:#fff; font-size:12px; cursor:pointer;';
+          rm.addEventListener('click', function(){
+            var id = idInput.value.trim();
+            if(!id) return;
+            mapAdminPost('removeActivityPhoto', { id: id, photoKey: key }).then(function(){
+              currentFormPhotoKeys = currentFormPhotoKeys.filter(function(k){ return k !== key; });
+              renderFormPhotoThumbs();
+              loadActivities();
+            });
+          });
+          wrap.appendChild(rm);
+          formPhotosEl.appendChild(wrap);
+        });
+        pendingPhotoFiles.forEach(function(p, i){
+          var wrap = document.createElement('div');
+          wrap.style.position = 'relative';
+          var img = document.createElement('img');
+          img.src = p.objectUrl;
+          img.style.cssText = 'width:56px; height:56px; object-fit:cover; border-radius:4px; opacity:0.6;';
+          wrap.appendChild(img);
+          var badge = document.createElement('span');
+          badge.textContent = 'pending';
+          badge.style.cssText = 'position:absolute; bottom:2px; left:2px; right:2px; font-size:9px; text-align:center; background:rgba(0,0,0,.6); color:#fff; border-radius:3px;';
+          wrap.appendChild(badge);
+          var rm = document.createElement('button');
+          rm.type = 'button';
+          rm.textContent = '\u00d7';
+          rm.title = 'Remove';
+          rm.style.cssText = 'position:absolute; top:-6px; right:-6px; width:18px; height:18px; line-height:16px; padding:0; border-radius:50%; border:none; background:#b42318; color:#fff; font-size:12px; cursor:pointer;';
+          rm.addEventListener('click', function(){
+            URL.revokeObjectURL(p.objectUrl);
+            pendingPhotoFiles.splice(i, 1);
+            renderFormPhotoThumbs();
+          });
+          wrap.appendChild(rm);
+          formPhotosEl.appendChild(wrap);
+        });
+      }
+
+      function uploadOnePhoto(activityId, file){
+        var params = new URLSearchParams({
+          listingId: 'activity-' + activityId,
+          kind: 'image',
+          label: 'activity',
+          fileName: file.name
+        });
+        return fetch('/api/property-file?' + params.toString(), {
+          method: 'POST',
+          headers: { 'content-type': file.type || 'application/octet-stream' },
+          body: file
+        }).then(function(r){ return r.json(); }).then(function(res){
+          if(!res || !res.ok) throw new Error((res && res.error) || 'Upload failed.');
+          return mapAdminPost('addActivityPhoto', { id: activityId, photoKey: res.key });
+        });
+      }
+
+      function uploadPhotosSequentially(activityId, files, onEach){
+        var queue = files.slice();
+        function next(){
+          if(!queue.length) return Promise.resolve();
+          var file = queue.shift();
+          return uploadOnePhoto(activityId, file).then(function(){
+            if(onEach) onEach();
+            return next();
+          });
+        }
+        return next();
+      }
+
+      photoInput.addEventListener('change', function(){
+        if(!photoInput.files || !photoInput.files.length) return;
+        var newFiles = Array.prototype.slice.call(photoInput.files);
+        var totalAfter = currentFormPhotoKeys.length + pendingPhotoFiles.length + newFiles.length;
+        if(totalAfter > 12){
+          formStatusEl.textContent = 'Maximum 12 photos per activity.';
+          formStatusEl.className = 'status show';
+          photoInput.value = '';
+          return;
+        }
+        var id = idInput.value.trim();
+        if(id){
+          formStatusEl.textContent = 'Uploading photo\u2026';
+          formStatusEl.className = 'status show';
+          uploadPhotosSequentially(id, newFiles).then(function(){
+            return mapAdminPost('adminList');
+          }).then(function(res){
+            var match = res.data && res.data.ok && (res.data.activities || []).find(function(a){ return a.id === id; });
+            currentFormPhotoKeys = match ? (match.photoKeys || (match.photoKey ? [match.photoKey] : [])) : currentFormPhotoKeys;
+            renderFormPhotoThumbs();
+            formStatusEl.textContent = 'Photos saved.';
+            loadActivities();
+          }).catch(function(err){
+            formStatusEl.textContent = err.message || 'Could not upload photo.';
+            formStatusEl.className = 'status show';
+          });
+        } else {
+          newFiles.forEach(function(file){
+            pendingPhotoFiles.push({ file: file, objectUrl: URL.createObjectURL(file) });
+          });
+          renderFormPhotoThumbs();
+        }
+        photoInput.value = '';
+      });
+
       var propTableBody = document.getElementById('mapPropertiesTableBody');
       var propEmptyEl = document.getElementById('mapPropertiesEmpty');
       var loadedMapAdmin = false;
@@ -4012,6 +4102,12 @@
         descInput.value = '';
         formTitleEl.textContent = 'Add an activity';
         cancelEditBtn.style.display = 'none';
+        currentFormPhotoKeys = [];
+        pendingPhotoFiles.forEach(function(p){ URL.revokeObjectURL(p.objectUrl); });
+        pendingPhotoFiles = [];
+        photoInput.value = '';
+        photoHintEl.textContent = 'For a new activity, save it first — photos then upload automatically right after.';
+        renderFormPhotoThumbs();
       }
 
       cancelEditBtn.addEventListener('click', resetActivityForm);
@@ -4152,6 +4248,11 @@
             descInput.value = a.description || '';
             formTitleEl.textContent = 'Edit activity';
             cancelEditBtn.style.display = 'inline-block';
+            currentFormPhotoKeys = (a.photoKeys || (a.photoKey ? [a.photoKey] : [])).slice();
+            pendingPhotoFiles.forEach(function(p){ URL.revokeObjectURL(p.objectUrl); });
+            pendingPhotoFiles = [];
+            photoHintEl.textContent = 'Add more photos below \u2014 they upload immediately.';
+            renderFormPhotoThumbs();
             window.scrollTo({ top: document.getElementById('activityFormTitle').offsetTop - 20, behavior: 'smooth' });
           });
           tdActions.appendChild(editBtn);
@@ -4307,9 +4408,27 @@
         if(id) payload.id = id;
         mapAdminPost(action, payload).then(function(res){
           if(res.data && res.data.ok){
-            formStatusEl.textContent = 'Saved.';
-            resetActivityForm();
-            loadActivities();
+            var newId = res.data.activity && res.data.activity.id;
+            if(newId && pendingPhotoFiles.length){
+              formStatusEl.textContent = 'Saved. Uploading photos\u2026';
+              var files = pendingPhotoFiles.map(function(p){ return p.file; });
+              pendingPhotoFiles.forEach(function(p){ URL.revokeObjectURL(p.objectUrl); });
+              pendingPhotoFiles = [];
+              uploadPhotosSequentially(newId, files).then(function(){
+                formStatusEl.textContent = 'Saved.';
+                resetActivityForm();
+                loadActivities();
+              }).catch(function(err){
+                formStatusEl.textContent = 'Activity saved, but a photo failed to upload: ' + (err.message || err);
+                formStatusEl.className = 'status show';
+                resetActivityForm();
+                loadActivities();
+              });
+            } else {
+              formStatusEl.textContent = 'Saved.';
+              resetActivityForm();
+              loadActivities();
+            }
           } else {
             formStatusEl.textContent = (res.data && res.data.error) || 'Could not save activity.';
             formStatusEl.className = 'status show';
@@ -4374,6 +4493,29 @@
           });
       });
 
+      function downloadCsv(filename, cols, exampleRow){
+        var lines = [cols.join(',')];
+        if(exampleRow) lines.push(cols.map(function(c){ return csvEscape(exampleRow[c] || ''); }).join(','));
+        var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+
+      document.getElementById('templateCoordsBtn').addEventListener('click', function(){
+        downloadCsv('avante-property-coordinates-template.csv', ['id', 'propertyName', 'latitude', 'longitude'], {
+          id: 'P-123456',
+          propertyName: 'e.g. Forest View 12',
+          latitude: '-34.0033',
+          longitude: '23.3833'
+        });
+      });
+
       var importCoordsBtn = document.getElementById('importCoordsBtn');
       var importCoordsFileInput = document.getElementById('importCoordsFileInput');
       var importCoordsStatusEl = document.getElementById('importCoordsStatus');
@@ -4435,6 +4577,19 @@
         v = String(v == null ? '' : v);
         return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
       }
+
+      document.getElementById('templateActivitiesBtn').addEventListener('click', function(){
+        downloadCsv('avante-activities-template.csv', ['name', 'area', 'zone', 'price', 'contactLink', 'description', 'latitude', 'longitude'], {
+          name: 'e.g. Bloukrans Bungy',
+          area: 'e.g. Plettenberg Bay',
+          zone: 'Eastern Cape & Garden Route',
+          price: 'e.g. R2,800 pp',
+          contactLink: 'https://example.com/book',
+          description: 'Short blurb for the map popup',
+          latitude: '-34.0033',
+          longitude: '23.3833'
+        });
+      });
 
       document.getElementById('exportActivitiesBtn').addEventListener('click', function(){
         mapAdminPost('adminList').then(function(res){
