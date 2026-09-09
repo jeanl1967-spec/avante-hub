@@ -3,6 +3,7 @@ import { generateHashtags } from "./lib/hashtag-helper.js";
 import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
 import { isShortLink, resolveShortLink, findExistingShortLink, createShortLink } from "./lib/short-link.js";
 import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-link.js";
+import { resolveHookMode } from "./lib/hook-mode.js";
 import {
   parseStockNetworkCsv,
   normalizeStockNetworkStatus,
@@ -1429,18 +1430,22 @@ export default async (request, context) => {
       await mapWithConcurrency(affIds, async (affId) => {
         await ensureOne(affId, "hub", origin + "/hub.html?aff=" + encodeURIComponent(affId));
         for (let n = 1; n <= DEFAULT_HOOK_COUNT; n++) {
-          // Same mode resolution hook-api.js's GET uses: an affiliate who
-          // has explicitly switched this hook to "Manage my own" gets their
-          // own booking/landing checked instead of the shared admin
-          // default — otherwise a self-managed hook with real content
-          // never gets a Full Details short code just because the admin's
-          // own default for that slot happens to be empty, and (the
-          // opposite mistake) an admin default that does have content
-          // wouldn't wrongly get shortened for someone who's managing that
-          // exact hook themselves.
+          // Same mode/expiry resolution hook-api.js's GET uses (see
+          // resolveHookMode): an affiliate who's explicitly switched this
+          // hook to "Manage my own" gets their own booking/landing checked
+          // instead of the shared admin default — unless their self-managed
+          // booking's dates have passed, in which case hook-api.js falls
+          // back to the admin default too, same as here. Otherwise a
+          // self-managed hook with real content never gets a Full Details
+          // short code just because the admin's own default for that slot
+          // happens to be empty, an expired self-managed hook doesn't get a
+          // short code pointing at content that's no longer actually shown,
+          // and (the opposite mistake) an admin default that does have
+          // content doesn't wrongly get shortened for someone who's
+          // managing that exact hook themselves right now.
           const ownRec = await hookStore.get(affId + ":" + n, { type: "json" });
-          const mode = ownRec && ownRec.mode === "self" ? "self" : "admin";
-          const hasContent = mode === "self" ? !!(ownRec && (ownRec.booking || ownRec.landing)) : adminHasContent[n];
+          const { source } = resolveHookMode(ownRec);
+          const hasContent = source === "self" ? !!(ownRec && (ownRec.booking || ownRec.landing)) : adminHasContent[n];
           if (!hasContent) continue;
           await ensureOne(affId, "hook" + n, origin + "/hook-landing.html?aff=" + encodeURIComponent(affId) + "&hook=" + n);
         }

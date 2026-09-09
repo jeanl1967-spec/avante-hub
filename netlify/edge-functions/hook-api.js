@@ -2,34 +2,12 @@ import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
 import { resolveShortLink as resolveShortLinkShared, isShortLink } from "./lib/short-link.js";
 import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-link.js";
+import { resolveHookMode } from "./lib/hook-mode.js";
 
 // Special affiliate key reserved for admin-managed default hook content.
 // Chosen so it can never collide with a real affiliate ID (StockNetwork
 // GUIDs / affiliate numbers never contain double underscores).
 const ADMIN_KEY = "__admin__";
-
-// Pull the CheckInDT=YYYY-MM-DD date off a booking link built by the
-// Accommodation Link Builder, if present. Links pasted in by hand (or built
-// from other tools) may not have one at all — that's fine, it just means
-// there's nothing to expire.
-function parseCheckInDate(bookingUrl) {
-  if (!bookingUrl) return null;
-  try {
-    const u = new URL(bookingUrl);
-    const raw = u.searchParams.get("CheckInDT");
-    if (!raw) return null;
-    const d = new Date(raw + "T00:00:00Z");
-    if (isNaN(d.getTime())) return null;
-    return d;
-  } catch (e) {
-    return null;
-  }
-}
-
-function todayUTCDateOnly() {
-  const now = new Date();
-  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-}
 
 // StockNetwork's "/ui/<id>" booking links carry the site identifier as the
 // last path segment. Self-managed hooks put the affiliate's own Hub ID
@@ -172,18 +150,7 @@ export default async (request, context) => {
 
     // GET — resolve what should actually be shown for this hook.
     const affRecord = await store.get(key, { type: "json" });
-    const mode = (affRecord && affRecord.mode) === "self" ? "self" : "admin";
-
-    let source = mode;
-    let expired = false;
-
-    if (mode === "self") {
-      const checkIn = parseCheckInDate(affRecord && affRecord.booking);
-      if (checkIn && todayUTCDateOnly() >= checkIn) {
-        source = "admin";
-        expired = true;
-      }
-    }
+    const { mode, source, expired } = resolveHookMode(affRecord);
 
     if (aff === ADMIN_KEY) {
       // The admin's own default record — no resolution needed, just return

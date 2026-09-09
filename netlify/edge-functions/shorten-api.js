@@ -1,5 +1,5 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
-import { SHORT_LINK_HOST, randomSlug, affIndexKey, MAX_LINKS_PER_AFFILIATE } from "./lib/short-link.js";
+import { SHORT_LINK_HOST, randomSlug, affIndexKey, addToAffIndex } from "./lib/short-link.js";
 
 const MAX_ALIAS_LEN = 40;
 
@@ -138,13 +138,7 @@ export default async (request, context) => {
       // Keep a per-affiliate index of slugs so an affiliate's own short links
       // can be listed later (GET /api/shorten?aff=...) without having to scan
       // every short link in the store.
-      if (record.aff) {
-        const indexKey = affIndexKey(record.aff);
-        const existingSlugs = (await store.get(indexKey, { type: "json" })) || [];
-        const withoutThisSlug = existingSlugs.filter((s) => s !== slug);
-        const updatedSlugs = [slug, ...withoutThisSlug].slice(0, MAX_LINKS_PER_AFFILIATE);
-        await store.setJSON(indexKey, updatedSlugs);
-      }
+      await addToAffIndex(store, record.aff, slug);
 
       return new Response(
         JSON.stringify({ ok: true, slug, shortUrl: "https://" + SHORT_LINK_HOST + "/" + slug, ...record }),

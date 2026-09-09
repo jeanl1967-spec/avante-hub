@@ -55,6 +55,35 @@ export function affIndexKey(aff) {
   return "aff:" + aff;
 }
 
+// Adds `slug` to the front of `aff`'s short-link index (deduping any
+// existing entry for the same slug, capped at MAX_LINKS_PER_AFFILIATE), so
+// it shows up in that affiliate's own short-link listing (GET
+// /api/shorten?aff=...). Shared by shorten-api.js's POST handler and
+// createShortLink below, so the two write the index the same way.
+//
+// This read-modify-write isn't atomic (no compare-and-swap in Netlify
+// Blobs) — two callers updating the same affiliate's index at the same
+// time (e.g. a bulk generateShortCodes run overlapping the affiliate's own
+// "Shorten this link" click) can still race, with one write silently
+// overwritten by the other's. Mitigated, not fully eliminated, by
+// re-reading after the write and retrying if our slug isn't there —
+// narrows the lost-update window without a real atomic primitive to close
+// it completely. A slug that still isn't recorded after all attempts still
+// works (its own record exists and resolves fine); it just may not appear
+// in this affiliate's listing until touched again.
+export async function addToAffIndex(shortLinksStore, aff, slug) {
+  if (!aff) return;
+  const indexKey = affIndexKey(aff);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const existingSlugs = (await shortLinksStore.get(indexKey, { type: "json" })) || [];
+    const updatedSlugs = [slug, ...existingSlugs.filter((s) => s !== slug)].slice(0, MAX_LINKS_PER_AFFILIATE);
+    await shortLinksStore.setJSON(indexKey, updatedSlugs);
+
+    const verify = (await shortLinksStore.get(indexKey, { type: "json" })) || [];
+    if (verify.includes(slug)) return;
+  }
+}
+
 // The two functions below are used by admin-api.js's bulk short-code
 // generator (generateShortCodes) — a separate, deliberately independent
 // code path from shorten-api.js's own POST /api/shorten handler, which has
@@ -105,12 +134,7 @@ export async function createShortLink(shortLinksStore, longUrl, aff) {
     const verify = await shortLinksStore.get(candidate, { type: "json" });
     if (!verify || verify.url !== record.url || verify.aff !== record.aff) continue; // lost the race — try another slug
 
-    if (aff) {
-      const indexKey = affIndexKey(aff);
-      const existingSlugs = (await shortLinksStore.get(indexKey, { type: "json" })) || [];
-      const updatedSlugs = [candidate, ...existingSlugs.filter((s) => s !== candidate)].slice(0, MAX_LINKS_PER_AFFILIATE);
-      await shortLinksStore.setJSON(indexKey, updatedSlugs);
-    }
+    await addToAffIndex(shortLinksStore, aff, candidate);
 
     return { slug: candidate, shortUrl: "https://" + SHORT_LINK_HOST + "/" + candidate, ...record };
   }
