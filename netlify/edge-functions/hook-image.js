@@ -5,7 +5,7 @@ const MAX_BYTES = 5 * 1024 * 1024;
 export default async (request, context) => {
   const cors = {
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
     "access-control-allow-headers": "content-type",
 };
 
@@ -34,11 +34,42 @@ export default async (request, context) => {
 }
 
   const store = getStore({ name: "promo-hook-images", consistency: "strong" });
-  // Only read for GET rotation below — never written here.
+  // Read for GET rotation below; also read+written by DELETE, which clears
+  // a hook's galleryCount back to 0 once its photos are gone (see below).
   const hookStore = getStore({ name: "promo-hooks", consistency: "strong" });
   let key = slot && slot !== "0" ? aff + ":" + hook + ":" + slot : aff + ":" + hook;
 
   try {
+    if (request.method === "DELETE") {
+      // Removes this hook's current image entirely (cover photo plus any
+      // extra gallery slots Auto-build's photo picker saved alongside it —
+      // otherwise the cover key would be gone but the GET rotation above
+      // would still occasionally serve one of the now-orphaned gallery
+      // slots at random, making "delete image" look like it didn't work).
+      let galleryCount = 0;
+      let record = null;
+      try {
+        record = await hookStore.get(aff + ":" + hook, { type: "json" });
+        galleryCount = (record && record.galleryCount) || 0;
+      } catch (e) {
+        // best-effort — if this lookup fails we still delete the cover key below
+      }
+
+      const keysToDelete = [aff + ":" + hook];
+      for (let s = 1; s <= galleryCount; s++) keysToDelete.push(aff + ":" + hook + ":" + s);
+      await Promise.all(keysToDelete.map((k) => store.delete(k).catch(() => {})));
+
+      if (record && galleryCount > 0) {
+        record.galleryCount = 0;
+        record.updatedAt = new Date().toISOString();
+        await hookStore.setJSON(aff + ":" + hook, record).catch(() => {});
+      }
+
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json", ...cors },
+});
+}
+
     if (request.method === "POST") {
       const contentType = request.headers.get("content-type") || "";
       if (!contentType.startsWith("image/")) {
@@ -57,6 +88,31 @@ export default async (request, context) => {
 }
 
       await store.set(key, buf, { metadata: { contentType } });
+
+      // A plain manual upload (no ?slot=) always replaces this hook's
+      // *whole* image, not just its cover frame — so any leftover
+      // Auto-build gallery photos from before must go too. Without this,
+      // they'd sit around referenced by galleryCount and the GET rotation
+      // above would keep occasionally serving one of them at random,
+      // instead of the image just uploaded. An explicit ?slot= POST (no
+      // current caller sends one, but defensively) is a single-slot
+      // write, not a full replace, so it skips this.
+      if (key === aff + ":" + hook) {
+        try {
+          const record = await hookStore.get(key, { type: "json" });
+          const galleryCount = (record && record.galleryCount) || 0;
+          if (galleryCount > 0) {
+            const staleSlots = [];
+            for (let s = 1; s <= galleryCount; s++) staleSlots.push(key + ":" + s);
+            await Promise.all(staleSlots.map((k) => store.delete(k).catch(() => {})));
+            record.galleryCount = 0;
+            await hookStore.setJSON(key, record).catch(() => {});
+          }
+        } catch (e) {
+          // best-effort — the cover upload above already succeeded either way
+        }
+      }
+
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "content-type": "application/json", ...cors },
 });
