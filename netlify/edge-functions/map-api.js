@@ -99,14 +99,39 @@ function genActivityId() {
   return "A-" + n;
 }
 
+// Netlify Edge Functions have a very small (documented: 50ms) CPU-time
+// budget per request, and — critically — Netlify Blobs' list() only ever
+// returns keys, never the stored value, so reading N activities always
+// costs N separate get() calls no matter how those calls are scheduled.
+// Storing every activity as its own blob meant that cost grew with the
+// total activity count forever, and eventually blew the CPU budget even
+// for actions that only touch one activity. Storing the whole collection
+// as a single JSON blob under one fixed key turns every read into exactly
+// one get() and every write into exactly one setJSON(), regardless of how
+// many activities exist.
+const ACTIVITIES_KEY = "all";
+
+async function loadActivities(activitiesStore) {
+  const data = await activitiesStore.get(ACTIVITIES_KEY, { type: "json" });
+  return Array.isArray(data) ? data : [];
+}
+
+async function saveActivities(activitiesStore, list) {
+  await activitiesStore.setJSON(ACTIVITIES_KEY, list);
+}
+
+function genUniqueActivityId(existingIds) {
+  let id = genActivityId();
+  while (existingIds.has(id)) {
+    id = genActivityId();
+  }
+  return id;
+}
+
 // Runs `fn` over `items` with at most `limit` calls in flight at once.
-// Needed anywhere we touch a growing number of blobs at once (e.g.
-// re-reading every existing activity during a bulk import) — firing them
-// all off via a single unbounded Promise.all() works fine while the store
-// is small, but as the activity count grows into the hundreds, blasting
-// that many concurrent blob reads/writes from one function invocation
-// risks exhausting connections and crashing with a 502, well before any
-// per-request time limit would ever be hit.
+// Still used for the (small, not expected to grow into the hundreds)
+// property-listings and map-visibility stores — see loadActivities above
+// for why activities themselves no longer use this pattern.
 async function mapWithConcurrency(items, limit, fn) {
   const results = new Array(items.length);
   let idx = 0;
@@ -321,8 +346,7 @@ export default async (request, context) => {
 
       const properties = onboardedProperties.concat(resortProperties);
 
-      const { blobs: actBlobs } = await activitiesStore.list();
-      const activities = (await mapWithConcurrency(actBlobs, 25, (b) => activitiesStore.get(b.key, { type: "json" })))
+      const activities = (await loadActivities(activitiesStore))
         .filter((r) => r && r.visible !== false)
         .map(toActivityPin);
 
@@ -385,8 +409,7 @@ export default async (request, context) => {
 
       const properties = onboardedProperties.concat(resortProperties);
 
-      const { blobs: actBlobs } = await activitiesStore.list();
-      const activities = await mapWithConcurrency(actBlobs, 25, (b) => activitiesStore.get(b.key, { type: "json" }));
+      const activities = await loadActivities(activitiesStore);
 
       return json({ ok: true, properties, activities: activities.filter(Boolean), missingCoordinates, resortStats });
     }
@@ -440,18 +463,15 @@ export default async (request, context) => {
       const rows = parseActivitiesCsv(csvText);
       if (!rows.length) return json({ error: "Could not find any activity rows (need at least a 'name' column)." }, 400);
 
-      // Bounded to 25 concurrent reads — see mapWithConcurrency above for
-      // why this can't be a plain Promise.all once the store has grown.
-      const { blobs: existingBlobs } = await activitiesStore.list();
-      const existingRecords = await mapWithConcurrency(existingBlobs, 25, (b) =>
-        activitiesStore.get(b.key, { type: "json" })
-      );
-      const byId = new Map(existingRecords.filter(Boolean).map((r) => [r.id, r]));
-      const byName = new Map(existingRecords.filter(Boolean).map((r) => [(r.name || "").toLowerCase(), r]));
+      // One read, no matter how many activities already exist.
+      const existingRecords = await loadActivities(activitiesStore);
+      const byId = new Map(existingRecords.map((r) => [r.id, r]));
+      const byName = new Map(existingRecords.map((r) => [(r.name || "").toLowerCase(), r]));
+      const existingIds = new Set(byId.keys());
 
       let created = 0;
       let updated = 0;
-      await mapWithConcurrency(rows, 10, async (row) => {
+      for (const row of rows) {
         const matchExisting = (row.id && byId.get(row.id)) || byName.get(row.name.toLowerCase());
         const record = sanitizeActivity(row, matchExisting || {});
         if (matchExisting) {
@@ -459,43 +479,54 @@ export default async (request, context) => {
           record.updatedAt = new Date().toISOString();
           updated++;
         } else {
-          record.id = genActivityId();
+          record.id = genUniqueActivityId(existingIds);
+          existingIds.add(record.id);
           record.createdAt = new Date().toISOString();
           record.updatedAt = record.createdAt;
           created++;
         }
-        await activitiesStore.setJSON(record.id, record);
-      });
+        byId.set(record.id, record);
+        byName.set((record.name || "").toLowerCase(), record);
+      }
+
+      // One write, whatever the batch size — byId still holds every
+      // untouched existing record too, since nothing is ever deleted from it.
+      await saveActivities(activitiesStore, Array.from(byId.values()));
 
       return json({ ok: true, created: created, updated: updated });
     }
 
     if (action === "addActivity") {
-      const id = genActivityId();
+      const all = await loadActivities(activitiesStore);
+      const id = genUniqueActivityId(new Set(all.map((r) => r.id)));
       const record = sanitizeActivity(body, {});
       record.id = id;
       record.createdAt = new Date().toISOString();
       record.updatedAt = record.createdAt;
       if (!record.name) return json({ error: "Activity name is required." }, 400);
-      await activitiesStore.setJSON(id, record);
+      all.push(record);
+      await saveActivities(activitiesStore, all);
       return json({ ok: true, activity: record });
     }
 
     if (action === "updateActivity") {
       const id = clean(body.id, 20);
       if (!id) return json({ error: "missing id" }, 400);
-      const existing = await activitiesStore.get(id, { type: "json" });
-      if (!existing) return json({ error: "not found" }, 404);
-      const record = sanitizeActivity(body, existing);
+      const all = await loadActivities(activitiesStore);
+      const idx = all.findIndex((r) => r.id === id);
+      if (idx === -1) return json({ error: "not found" }, 404);
+      const record = sanitizeActivity(body, all[idx]);
       record.updatedAt = new Date().toISOString();
-      await activitiesStore.setJSON(id, record);
+      all[idx] = record;
+      await saveActivities(activitiesStore, all);
       return json({ ok: true, activity: record });
     }
 
     if (action === "deleteActivity") {
       const id = clean(body.id, 20);
       if (!id) return json({ error: "missing id" }, 400);
-      await activitiesStore.delete(id);
+      const all = await loadActivities(activitiesStore);
+      await saveActivities(activitiesStore, all.filter((r) => r.id !== id));
       return json({ ok: true });
     }
 
@@ -503,15 +534,18 @@ export default async (request, context) => {
       const id = clean(body.id, 20);
       const photoKey = clean(body.photoKey, 300);
       if (!id || !photoKey) return json({ error: "missing id or photoKey" }, 400);
-      const existing = await activitiesStore.get(id, { type: "json" });
-      if (!existing) return json({ error: "not found" }, 404);
+      const all = await loadActivities(activitiesStore);
+      const idx = all.findIndex((r) => r.id === id);
+      if (idx === -1) return json({ error: "not found" }, 404);
+      const existing = all[idx];
       const keys = Array.isArray(existing.photoKeys) ? existing.photoKeys.slice() : existing.photoKey ? [existing.photoKey] : [];
       if (keys.length >= 12) return json({ error: "Maximum 12 photos per activity." }, 400);
       keys.push(photoKey);
       existing.photoKeys = keys;
       delete existing.photoKey;
       existing.updatedAt = new Date().toISOString();
-      await activitiesStore.setJSON(id, existing);
+      all[idx] = existing;
+      await saveActivities(activitiesStore, all);
       return json({ ok: true, activity: existing });
     }
 
@@ -519,13 +553,16 @@ export default async (request, context) => {
       const id = clean(body.id, 20);
       const photoKey = clean(body.photoKey, 300);
       if (!id || !photoKey) return json({ error: "missing id or photoKey" }, 400);
-      const existing = await activitiesStore.get(id, { type: "json" });
-      if (!existing) return json({ error: "not found" }, 404);
+      const all = await loadActivities(activitiesStore);
+      const idx = all.findIndex((r) => r.id === id);
+      if (idx === -1) return json({ error: "not found" }, 404);
+      const existing = all[idx];
       const keys = Array.isArray(existing.photoKeys) ? existing.photoKeys.slice() : existing.photoKey ? [existing.photoKey] : [];
       existing.photoKeys = keys.filter((k) => k !== photoKey);
       delete existing.photoKey;
       existing.updatedAt = new Date().toISOString();
-      await activitiesStore.setJSON(id, existing);
+      all[idx] = existing;
+      await saveActivities(activitiesStore, all);
       return json({ ok: true, activity: existing });
     }
 
