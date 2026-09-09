@@ -1,7 +1,7 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
 import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
-import { isShortLink, resolveShortLink } from "./lib/short-link.js";
+import { isShortLink, resolveShortLink, findExistingShortLink, createShortLink } from "./lib/short-link.js";
 import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-link.js";
 import {
   parseStockNetworkCsv,
@@ -1347,6 +1347,102 @@ export default async (request, context) => {
       });
 
       return json({ ok: true, dryRun: dryRun, count: changes.length, changes: changes, writeErrors: writeErrors }, 200, cors);
+    }
+
+    if (action === "generateShortCodes") {
+      // "Should have all their short codes in their hub and frontstore set
+      // up" (Stage 4): gives every affiliate a permanent go.avantetravel.co.za
+      // short code for their own Hub link, plus one for each admin-managed
+      // hook's "Full Details" page (hook-landing.html) that actually has
+      // content worth linking to.
+      //
+      // Deliberately does NOT generate a short code for a hook's live
+      // booking link itself: that link is a personalized *snapshot* of
+      // whatever the admin default currently has (today's dates, today's
+      // promoted property). A pre-baked short code for it would keep
+      // resolving to today's snapshot forever, even after the admin
+      // rebuilds that hook with new dates or a new property — silently
+      // going stale. The Hub link and the Full Details page are both
+      // permanent URLs that fetch and personalize their own content live
+      // on every visit, so a short code for either never goes stale. An
+      // affiliate or admin who wants a short code for a specific live
+      // booking link can already build a fresh one anytime via "Shorten
+      // this link" (hub.html, or here on a Default Hook card) — built
+      // fresh each time, so it's never stale by construction.
+      //
+      // Idempotent: re-running this after adding a new affiliate, or after
+      // a hook gains content it didn't have before, only creates short
+      // codes for what's actually new — an affiliate/hook combination that
+      // already has a short code pointing at the exact same URL is left
+      // alone (see findExistingShortLink) rather than piling up
+      // duplicates every time this is run.
+      //
+      // dryRun (default true unless explicitly false) only reports what
+      // would be created — nothing is written.
+      const dryRun = body.dryRun !== false;
+      const origin = typeof body.origin === "string" ? body.origin.replace(/\/+$/, "") : "";
+      if (!origin) return json({ ok: false, error: "missing origin" }, 400, cors);
+
+      const shortLinksStore = getStore({ name: "short-links", consistency: "strong" });
+
+      const hooksWithContent = [];
+      for (let n = 1; n <= DEFAULT_HOOK_COUNT; n++) {
+        const rec = await hookStore.get("__admin__:" + n, { type: "json" });
+        if (rec && (rec.booking || rec.landing || rec.caption)) hooksWithContent.push(n);
+      }
+
+      const { blobs } = await directoryStore.list();
+      const affIds = blobs.map((b) => b.key);
+
+      const results = [];
+      let writeErrors = 0;
+
+      async function ensureOne(affId, kind, longUrl) {
+        try {
+          const existing = await findExistingShortLink(shortLinksStore, affId, longUrl);
+          if (existing) {
+            results.push({ affId: affId, kind: kind, url: longUrl, shortUrl: existing.shortUrl, created: false });
+            return;
+          }
+          if (dryRun) {
+            results.push({ affId: affId, kind: kind, url: longUrl, shortUrl: null, created: true });
+            return;
+          }
+          const made = await createShortLink(shortLinksStore, longUrl, affId);
+          if (!made) {
+            writeErrors++;
+            return;
+          }
+          results.push({ affId: affId, kind: kind, url: longUrl, shortUrl: made.shortUrl, created: true });
+        } catch (e) {
+          writeErrors++;
+        }
+      }
+
+      await mapWithConcurrency(affIds, async (affId) => {
+        await ensureOne(affId, "hub", origin + "/hub.html?aff=" + encodeURIComponent(affId));
+        for (const n of hooksWithContent) {
+          await ensureOne(affId, "hook" + n, origin + "/hook-landing.html?aff=" + encodeURIComponent(affId) + "&hook=" + n);
+        }
+      });
+
+      const createdCount = results.filter((r) => r.created).length;
+      const existingCount = results.length - createdCount;
+
+      return json(
+        {
+          ok: true,
+          dryRun: dryRun,
+          affiliateCount: affIds.length,
+          hooksWithContent: hooksWithContent,
+          createdCount: createdCount,
+          existingCount: existingCount,
+          results: results,
+          writeErrors: writeErrors,
+        },
+        200,
+        cors
+      );
     }
 
     if (action === "deleteAffiliate") {
