@@ -699,6 +699,21 @@
           <div class="empty-state" id="affiliatesEmpty" style="display:none;">No affiliates added yet — click "+ Add Affiliate" to add your first one.</div>
         </div>
       </div>
+      <div class="card" style="margin-top:20px;">
+        <h3 style="margin-top:0;">Generate short codes for every affiliate</h3>
+        <p class="modal-sub" style="margin:-4px 0 10px;">Creates a permanent go.avantetravel.co.za short code for each affiliate's own Hub link, plus one for each hook that currently has content on it (their personalized "Full Details" page) — so every affiliate has clean, shareable short links set up in their Hub and on their storefront. Deliberately does not shorten a hook's live booking link itself, since that's a snapshot that goes stale the next time the admin rebuilds it — use the "Shorten this link" button for that, built fresh each time it's needed. Safe to re-run anytime: an affiliate/hook combination that already has a short code is left alone, never duplicated.</p>
+        <button type="button" class="btn-outline" id="shortCodesCheckBtn">Check now</button>
+        <div class="status" id="shortCodesStatus"></div>
+        <div id="shortCodesResults" style="display:none; margin-top:12px;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Affiliate</th><th>Link</th><th>Short code</th></tr></thead>
+              <tbody id="shortCodesBody"></tbody>
+            </table>
+          </div>
+          <button type="button" class="primary" id="shortCodesApplyBtn" style="margin-top:10px;">Generate short codes</button>
+        </div>
+      </div>
     </section>
 
     <!-- ===================== DEFAULT HOOKS ===================== -->
@@ -724,7 +739,7 @@
       </div>
       <div class="card" style="margin-bottom:20px;">
         <h3 style="margin-top:0;">Check for misattributed booking links</h3>
-        <p class="modal-sub" style="margin:-4px 0 10px;">Scans every affiliate's own self-managed hooks (not these defaults, which are meant to carry the shared "Affiliate 36" placeholder) for a StockNetwork booking link whose site identifier belongs to a different affiliate — or no affiliate at all. That mistake sends every booking through that hook to someone else's account instead of the affiliate who actually owns it. When found, corrects just that one part of the link back to the affiliate's own ID — check-in/check-out dates and area filter are left exactly as set.</p>
+        <p class="modal-sub" style="margin:-4px 0 10px;">Scans every affiliate's own self-managed hooks (not these defaults, which are meant to carry the shared master-site placeholder) for a StockNetwork booking link whose site identifier belongs to a different affiliate — or no affiliate at all. That mistake sends every booking through that hook to someone else's account instead of the affiliate who actually owns it. When found, corrects just that one part of the link back to the affiliate's own ID — check-in/check-out dates and area filter are left exactly as set.</p>
         <button type="button" class="btn-outline" id="misattributedLinksCheckBtn">Check now</button>
         <div class="status" id="misattributedLinksStatus"></div>
         <div id="misattributedLinksResults" style="display:none; margin-top:12px;">
@@ -1812,6 +1827,95 @@
 
     document.getElementById('refreshAffiliatesBtn').addEventListener('click', loadAffiliates);
     document.getElementById('missingSiteNrFilterToggle').addEventListener('change', renderAffiliatesTable);
+
+    // ---------- Generate short codes for every affiliate (Stage 4) ----------
+    // See generateShortCodes in admin-api.js for the full story: one
+    // permanent short code per affiliate for their Hub link, plus one per
+    // hook that currently has content, on the Full Details page — never
+    // the live booking link itself (that's a snapshot that goes stale the
+    // next time the admin rebuilds the hook).
+    (function(){
+      var checkBtn = document.getElementById('shortCodesCheckBtn');
+      var statusEl = document.getElementById('shortCodesStatus');
+      var resultsEl = document.getElementById('shortCodesResults');
+      var bodyEl = document.getElementById('shortCodesBody');
+      var applyBtn = document.getElementById('shortCodesApplyBtn');
+      if(!checkBtn) return;
+
+      function kindLabel(kind){
+        if(kind === 'hub') return 'Hub link';
+        var m = /^hook(\d+)$/.exec(kind);
+        return m ? ('Hook ' + m[1] + ' — Full Details page') : kind;
+      }
+
+      function renderRows(results){
+        bodyEl.innerHTML = results.map(function(r){
+          return '<tr>' +
+            '<td>' + escapeHtml(r.affId) + '</td>' +
+            '<td>' + escapeHtml(kindLabel(r.kind)) + '</td>' +
+            '<td>' + (r.shortUrl ? escapeHtml(r.shortUrl) : (r.created ? '(will be created)' : '')) + '</td>' +
+          '</tr>';
+        }).join('');
+      }
+
+      checkBtn.addEventListener('click', function(){
+        statusEl.className = 'status show';
+        statusEl.textContent = 'Checking every affiliate…';
+        resultsEl.style.display = 'none';
+        checkBtn.disabled = true;
+
+        adminPost('generateShortCodes', { dryRun: true, origin: window.location.origin }).then(function(res){
+          checkBtn.disabled = false;
+          if(!res.data || !res.data.ok){
+            statusEl.textContent = (res.data && res.data.error) || 'Could not run the check.';
+            return;
+          }
+          var toCreate = res.data.results.filter(function(r){ return r.created; });
+          var writeErrorNote = res.data.writeErrors ?
+            (' (' + res.data.writeErrors + ' affiliate/hook pair' + (res.data.writeErrors === 1 ? '' : 's') + ' could not be checked — click "Check now" again to retry.)') : '';
+          if(!toCreate.length){
+            statusEl.textContent = 'Every affiliate already has short codes set up — nothing to create.' + writeErrorNote;
+            return;
+          }
+          // Affiliates actually affected, not res.data.affiliateCount (every
+          // affiliate scanned) — a single new affiliate showing "will be
+          // created across 50 affiliates" (the whole affiliate base) would
+          // be misleading when the work is really confined to just them.
+          var affectedCount = {};
+          toCreate.forEach(function(r){ affectedCount[r.affId] = true; });
+          var affectedAffiliates = Object.keys(affectedCount).length;
+          statusEl.textContent = toCreate.length + ' short code' + (toCreate.length === 1 ? '' : 's') +
+            ' will be created across ' + affectedAffiliates + ' affiliate' + (affectedAffiliates === 1 ? '' : 's') + ':' + writeErrorNote;
+          renderRows(toCreate);
+          resultsEl.style.display = 'block';
+        }).catch(function(){
+          checkBtn.disabled = false;
+          statusEl.textContent = 'Could not reach the server — please try again.';
+        });
+      });
+
+      applyBtn.addEventListener('click', function(){
+        applyBtn.disabled = true;
+        applyBtn.textContent = 'Generating…';
+        adminPost('generateShortCodes', { dryRun: false, origin: window.location.origin }).then(function(res){
+          applyBtn.disabled = false;
+          applyBtn.textContent = 'Generate short codes';
+          if(!res.data || !res.data.ok){
+            statusEl.textContent = (res.data && res.data.error) || 'Could not generate short codes.';
+            return;
+          }
+          statusEl.textContent = 'Created ' + res.data.createdCount + ' new short code' + (res.data.createdCount === 1 ? '' : 's') +
+            ' (' + res.data.existingCount + ' already existed).' +
+            (res.data.writeErrors ? ' ' + res.data.writeErrors + ' failed — click "Check now" again to retry just those.' : '');
+          resultsEl.style.display = 'none';
+          showToast('Short codes generated');
+        }).catch(function(){
+          applyBtn.disabled = false;
+          applyBtn.textContent = 'Generate short codes';
+          statusEl.textContent = 'Could not reach the server — please try again.';
+        });
+      });
+    })();
 
     // ---------- Leaderboard ----------
     (function(){

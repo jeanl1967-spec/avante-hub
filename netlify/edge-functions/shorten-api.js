@@ -1,18 +1,7 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
-import { SHORT_LINK_HOST } from "./lib/short-link.js";
+import { SHORT_LINK_HOST, randomSlug, affIndexKey, addToAffIndex } from "./lib/short-link.js";
 
-const ALPHABET = "23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ"; // no 0/O/1/l/I
-const RANDOM_SLUG_LEN = 6;
 const MAX_ALIAS_LEN = 40;
-const MAX_LINKS_PER_AFFILIATE = 300; // cap the per-affiliate index so it can't grow unbounded
-
-function randomSlug() {
-  let out = "";
-  for (let i = 0; i < RANDOM_SLUG_LEN; i++) {
-    out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
-  }
-  return out;
-}
 
 function isSafeUrl(u) {
   try {
@@ -25,10 +14,6 @@ function isSafeUrl(u) {
 
 function isValidAlias(a) {
   return /^[a-zA-Z0-9-]{2,40}$/.test(a);
-}
-
-function affIndexKey(aff) {
-  return "aff:" + aff;
 }
 
 export default async (request, context) => {
@@ -153,13 +138,7 @@ export default async (request, context) => {
       // Keep a per-affiliate index of slugs so an affiliate's own short links
       // can be listed later (GET /api/shorten?aff=...) without having to scan
       // every short link in the store.
-      if (record.aff) {
-        const indexKey = affIndexKey(record.aff);
-        const existingSlugs = (await store.get(indexKey, { type: "json" })) || [];
-        const withoutThisSlug = existingSlugs.filter((s) => s !== slug);
-        const updatedSlugs = [slug, ...withoutThisSlug].slice(0, MAX_LINKS_PER_AFFILIATE);
-        await store.setJSON(indexKey, updatedSlugs);
-      }
+      await addToAffIndex(store, record.aff, slug);
 
       return new Response(
         JSON.stringify({ ok: true, slug, shortUrl: "https://" + SHORT_LINK_HOST + "/" + slug, ...record }),

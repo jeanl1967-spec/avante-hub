@@ -1,8 +1,9 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
 import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
-import { isShortLink, resolveShortLink } from "./lib/short-link.js";
+import { isShortLink, resolveShortLink, findExistingShortLink, createShortLink } from "./lib/short-link.js";
 import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-link.js";
+import { resolveHookMode } from "./lib/hook-mode.js";
 import { ZONES } from "./lib/zones.js";
 import {
   parseStockNetworkCsv,
@@ -1361,6 +1362,149 @@ export default async (request, context) => {
       });
 
       return json({ ok: true, dryRun: dryRun, count: changes.length, changes: changes, writeErrors: writeErrors }, 200, cors);
+    }
+
+    if (action === "generateShortCodes") {
+      // "Should have all their short codes in their hub and frontstore set
+      // up" (Stage 4): gives every affiliate a permanent go.avantetravel.co.za
+      // short code for their own Hub link, plus one for each hook's "Full
+      // Details" page (hook-landing.html) that actually has content worth
+      // linking to for THAT affiliate — whether that content comes from
+      // the shared admin default or from a hook they've switched to
+      // "Manage my own" (see the mode check below, matching hook-api.js's
+      // own GET exactly).
+      //
+      // Deliberately does NOT generate a short code for a hook's live
+      // booking link itself: that link is a personalized *snapshot* of
+      // whatever the admin default currently has (today's dates, today's
+      // promoted property). A pre-baked short code for it would keep
+      // resolving to today's snapshot forever, even after the admin
+      // rebuilds that hook with new dates or a new property — silently
+      // going stale. The Hub link and the Full Details page are both
+      // permanent URLs that fetch and personalize their own content live
+      // on every visit, so a short code for either never goes stale. An
+      // affiliate or admin who wants a short code for a specific live
+      // booking link can already build a fresh one anytime via "Shorten
+      // this link" (hub.html, or here on a Default Hook card) — built
+      // fresh each time, so it's never stale by construction.
+      //
+      // Idempotent: re-running this after adding a new affiliate, or after
+      // a hook gains content it didn't have before, only creates short
+      // codes for what's actually new — an affiliate/hook combination that
+      // already has a short code pointing at the exact same URL is left
+      // alone (see findExistingShortLink) rather than piling up
+      // duplicates every time this is run.
+      //
+      // dryRun (default true unless explicitly false) only reports what
+      // would be created — nothing is written.
+      const dryRun = body.dryRun !== false;
+      const origin = typeof body.origin === "string" ? body.origin.replace(/\/+$/, "") : "";
+      if (!origin) return json({ ok: false, error: "missing origin" }, 400, cors);
+
+      const shortLinksStore = getStore({ name: "short-links", consistency: "strong" });
+
+      // hook-landing.html's own renderDetails only ever shows the "Book
+      // Now" button — the entire point of that page — when isSafeUrl(data.
+      // booking) is true (typeof booking === "string" &&
+      // /^https?:\/\//i.test(booking)); it never reads `landing` at all.
+      // So "worth a Full Details short code" has to match that exact
+      // gate, not hook-api.js's own (broader, different-purpose)
+      // hasContent test of booking||landing — a hook with only a Landing
+      // page link set (e.g. via "Build landing page link" without ever
+      // running "Build booking link") would otherwise get a short code
+      // pointing at a page that renders "This offer isn't available right
+      // now" forever.
+      function hasBookingLink(rec) {
+        return !!(rec && typeof rec.booking === "string" && /^https?:\/\//i.test(rec.booking));
+      }
+
+      // Read once up front since it's the same 6 admin records for every
+      // affiliate.
+      const adminHasContent = {};
+      for (let n = 1; n <= DEFAULT_HOOK_COUNT; n++) {
+        const rec = await hookStore.get("__admin__:" + n, { type: "json" });
+        adminHasContent[n] = hasBookingLink(rec);
+      }
+
+      const { blobs } = await directoryStore.list();
+      const affIds = blobs.map((b) => b.key);
+
+      const results = [];
+      let writeErrors = 0;
+
+      async function ensureOne(affId, kind, longUrl) {
+        try {
+          const existing = await findExistingShortLink(shortLinksStore, affId, longUrl);
+          if (existing) {
+            results.push({ affId: affId, kind: kind, url: longUrl, shortUrl: existing.shortUrl, created: false });
+            return;
+          }
+          if (dryRun) {
+            results.push({ affId: affId, kind: kind, url: longUrl, shortUrl: null, created: true });
+            return;
+          }
+          const made = await createShortLink(shortLinksStore, longUrl, affId);
+          if (!made) {
+            writeErrors++;
+            return;
+          }
+          results.push({ affId: affId, kind: kind, url: longUrl, shortUrl: made.shortUrl, created: true });
+        } catch (e) {
+          writeErrors++;
+        }
+      }
+
+      await mapWithConcurrency(affIds, async (affId) => {
+        await ensureOne(affId, "hub", origin + "/hub.html?aff=" + encodeURIComponent(affId));
+        for (let n = 1; n <= DEFAULT_HOOK_COUNT; n++) {
+          // Same mode/expiry resolution hook-api.js's GET uses (see
+          // resolveHookMode): an affiliate who's explicitly switched this
+          // hook to "Manage my own" gets their own booking/landing checked
+          // instead of the shared admin default — unless their self-managed
+          // booking's dates have passed, in which case hook-api.js falls
+          // back to the admin default too, same as here. Otherwise a
+          // self-managed hook with real content never gets a Full Details
+          // short code just because the admin's own default for that slot
+          // happens to be empty, an expired self-managed hook doesn't get a
+          // short code pointing at content that's no longer actually shown,
+          // and (the opposite mistake) an admin default that does have
+          // content doesn't wrongly get shortened for someone who's
+          // managing that exact hook themselves right now.
+          let hasContent;
+          try {
+            const ownRec = await hookStore.get(affId + ":" + n, { type: "json" });
+            const { source } = resolveHookMode(ownRec);
+            hasContent = source === "self" ? hasBookingLink(ownRec) : adminHasContent[n];
+          } catch (e) {
+            // A transient read failure here shouldn't abort the whole bulk
+            // run (mapWithConcurrency has no per-item error isolation of
+            // its own — a rejection here would reject the entire
+            // Promise.all) — record it and move on to the next hook/
+            // affiliate, same as ensureOne already does for its own steps.
+            writeErrors++;
+            continue;
+          }
+          if (!hasContent) continue;
+          await ensureOne(affId, "hook" + n, origin + "/hook-landing.html?aff=" + encodeURIComponent(affId) + "&hook=" + n);
+        }
+      });
+
+      const createdCount = results.filter((r) => r.created).length;
+      const existingCount = results.length - createdCount;
+
+      return json(
+        {
+          ok: true,
+          dryRun: dryRun,
+          affiliateCount: affIds.length,
+          createdCount: createdCount,
+          existingCount: existingCount,
+          results: results,
+          writeErrors: writeErrors,
+        },
+        200,
+        cors
+      );
     }
 
     if (action === "deleteAffiliate") {
