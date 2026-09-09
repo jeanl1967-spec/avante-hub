@@ -428,6 +428,9 @@
   .sharekit-actions{ display:flex; gap:10px; margin-top:12px; }
   .sharekit-actions button{ flex:1; }
 </style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
 </head>
 <body>
 
@@ -473,6 +476,25 @@
       <label for="affSiteNrInput">StockNetwork Site Nr (optional)</label>
       <input id="affSiteNrInput" placeholder="e.g. 12345">
       <p class="modal-sub" style="margin:-2px 0 8px;">The StockNetwork site number this affiliate's accommodation bookings are linked to. Shown read-only in their Hub.</p>
+      <label>Zones (optional — select all that apply)</label>
+      <div class="row" id="affZoneCheckboxes" style="flex-wrap:wrap; gap:8px 16px; margin-bottom:8px;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Western Cape (Cape Town &amp; Winelands)" class="aff-zone-cb"> Western Cape (Cape Town &amp; Winelands)</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Eastern Cape &amp; Garden Route" class="aff-zone-cb"> Eastern Cape &amp; Garden Route</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Northern Cape" class="aff-zone-cb"> Northern Cape</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Free State" class="aff-zone-cb"> Free State</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="KwaZulu-Natal" class="aff-zone-cb"> KwaZulu-Natal</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Gauteng &amp; North West" class="aff-zone-cb"> Gauteng &amp; North West</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Mpumalanga" class="aff-zone-cb"> Mpumalanga</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Limpopo" class="aff-zone-cb"> Limpopo</label>
+      </div>
+      <p class="modal-sub" style="margin:-2px 0 8px;">This affiliate's Explore Map tab in the Hub auto-filters to their first assigned zone by default (they can still switch to another area from the dropdown there).</p>
+      <label>Affiliate type (optional — select all that apply)</label>
+      <div class="row" id="affTypeCheckboxes" style="flex-wrap:wrap; gap:8px 16px; margin-bottom:8px;">
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="franchise" id="affTypeFranchise"> Franchise Affiliate</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="property" id="affTypeProperty"> Property Affiliate</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="agent" id="affTypeAgent"> Agent Affiliate</label>
+      </div>
+      <p class="modal-sub" style="margin:-2px 0 8px;">An affiliate can be more than one type. Not used to control access yet — just a label for now.</p>
       <label>Revenue share — by channel</label>
       <p class="modal-sub" style="margin:-2px 0 8px;">Each channel matches a tab in this affiliate's Hub. For each one, choose <strong>%</strong> for a percentage of revenue, or <strong>R flat</strong> for a fixed Rand amount paid per entry regardless of revenue. Leave at 0 if they don't get a cut of that channel.</p>
       <div class="row" id="affShareFields" style="flex-wrap:wrap; gap:10px 12px;"></div>
@@ -631,6 +653,7 @@
       <button class="tab" data-panel="bookings">Bookings</button>
       <button class="tab" data-panel="whatsapp">WhatsApp Messaging</button>
       <button class="tab" data-panel="propertyListings">Property Listings</button>
+      <button class="tab" data-panel="mapActivities">Map &amp; Activities</button>
       <button class="tab" data-panel="tutorial">How Payouts Work</button>
     </nav>
   </header>
@@ -662,6 +685,8 @@
                   <th>Affiliate</th>
                   <th>ID</th>
                   <th>Site Nr</th>
+                  <th>Zones</th>
+                  <th>Type</th>
                   <th>Share</th>
                   <th>Status</th>
                   <th>Outstanding</th>
@@ -1032,6 +1057,160 @@
           </div>
           <div class="empty-state" id="propertyListingsEmpty" style="display:none;">No property listings submitted yet.</div>
         </div>
+      </div>
+    </section>
+
+    <!-- ===================== MAP & ACTIVITIES ===================== -->
+    <section class="panel" id="panel-mapActivities">
+      <div class="hero">
+        <h1>Map &amp; Activities</h1>
+        <p>Manage what shows up as a pin on the affiliate hub's Explore Map — add local activities/experiences, and choose which listed properties appear.</p>
+      </div>
+
+      <div class="card">
+        <h3 style="margin-top:0;">Master map</h3>
+        <p style="margin-top:0;">Every property and activity, including hidden ones (shown dimmed). Click a pin to show/hide it on the affiliate-facing map.</p>
+        <div class="status" id="missingCoordsSummary" style="margin-top:0;"></div>
+        <div class="map-filter-row" style="display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin-bottom:12px;">
+          <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#1a4d7a; display:inline-block;"></span> Property (shown)</label>
+          <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#0e7c66; display:inline-block;"></span> Activity (shown)</label>
+          <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#b7b7ae; display:inline-block;"></span> Hidden</label>
+        </div>
+        <div id="adminMapEl" style="width:100%; height:460px; border-radius:10px;"></div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h3 style="margin-top:0;">StockNetwork resort list</h3>
+        <p style="margin-top:0;">The full StockNetwork inventory (used by the Accommodation Link Builder in the Hub too). Add <code>Latitude</code>/<code>Longitude</code> columns to your usual export and re-upload it here to also get those resorts pinned on the map — everything else about how this list is used stays the same.</p>
+        <div class="btn-row" style="margin-top:0;">
+          <button class="btn-outline" id="resortListUploadBtn">Upload resort list CSV</button>
+          <input type="file" id="resortListFileInput" accept=".csv" style="display:none;">
+        </div>
+        <div class="status" id="resortListUploadStatus"></div>
+        <p id="resortListStatusText" style="margin:10px 0 0; font-size:13px; color:var(--muted);"></p>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h3 style="margin-top:0;">Bulk-fill property coordinates from CSV</h3>
+        <p style="margin-top:0;">Only touches <code>latitude</code>/<code>longitude</code> on existing "Listed" properties — nothing else about the listing changes. Columns: <code>id</code> (the listingId, e.g. P-123456) or <code>propertyName</code>, plus <code>latitude, longitude</code>. Prefer <code>id</code> when two properties share a name.</p>
+        <div class="btn-row" style="margin-top:0;">
+          <button class="btn-outline" id="importCoordsBtn">Upload CSV</button>
+          <input type="file" id="importCoordsFileInput" accept=".csv" style="display:none;">
+          <button class="btn-outline" id="templateCoordsBtn">Download blank template</button>
+        </div>
+        <div class="status" id="importCoordsStatus"></div>
+        <div style="margin-top:14px;">
+          <p style="margin:0 0 6px; font-weight:600; font-size:13px;">Listed properties still missing coordinates</p>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Property</th>
+                  <th>Location</th>
+                </tr>
+              </thead>
+              <tbody id="missingCoordsTableBody"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="missingCoordsEmpty" style="display:none;">Every "Listed" property has coordinates.</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h3 style="margin-top:0;">Bulk import activities from CSV</h3>
+        <p style="margin-top:0;">Columns: <code>name, area, zone, price, contactLink, description, latitude, longitude</code>. Matches existing activities by name (case-insensitive) and updates them; anything new is added. An optional <code>id</code> column forces an exact match instead.</p>
+        <div class="btn-row" style="margin-top:0;">
+          <button class="btn-outline" id="importActivitiesBtn">Upload CSV</button>
+          <input type="file" id="importActivitiesFileInput" accept=".csv" style="display:none;">
+          <button class="btn-outline" id="exportActivitiesBtn">Download current activities as CSV</button>
+          <button class="btn-outline" id="templateActivitiesBtn">Download blank template</button>
+        </div>
+        <div class="status" id="importActivitiesStatus"></div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h3 id="activityFormTitle" style="margin-top:0;">Add an activity</h3>
+        <input type="hidden" id="activityIdInput">
+        <div class="btn-row" style="flex-wrap:wrap; gap:10px;">
+          <div><label for="activityNameInput">Name</label><input id="activityNameInput" placeholder="e.g. Bloukrans Bungy"></div>
+          <div><label for="activityAreaInput">Area</label><input id="activityAreaInput" placeholder="e.g. Plettenberg Bay"></div>
+          <div><label for="activityZoneInput">Zone (optional)</label>
+            <select id="activityZoneInput">
+              <option value="">— No zone —</option>
+              <option value="Western Cape (Cape Town &amp; Winelands)">Western Cape (Cape Town &amp; Winelands)</option>
+              <option value="Eastern Cape &amp; Garden Route">Eastern Cape &amp; Garden Route</option>
+              <option value="Northern Cape">Northern Cape</option>
+              <option value="Free State">Free State</option>
+              <option value="KwaZulu-Natal">KwaZulu-Natal</option>
+              <option value="Gauteng &amp; North West">Gauteng &amp; North West</option>
+              <option value="Mpumalanga">Mpumalanga</option>
+              <option value="Limpopo">Limpopo</option>
+            </select>
+          </div>
+          <div><label for="activityPriceInput">Price</label><input id="activityPriceInput" placeholder="e.g. R2,800 pp"></div>
+        </div>
+        <div class="btn-row" style="flex-wrap:wrap; gap:10px; margin-top:10px;">
+          <div><label for="activityLatInput">Latitude</label><input id="activityLatInput" placeholder="e.g. -34.0033"></div>
+          <div><label for="activityLngInput">Longitude</label><input id="activityLngInput" placeholder="e.g. 23.3833"></div>
+          <div><label for="activityContactInput">Booking / contact link</label><input id="activityContactInput" placeholder="WhatsApp, website, or email link"></div>
+        </div>
+        <label for="activityDescInput" style="margin-top:10px; display:block;">Description</label>
+        <textarea id="activityDescInput" rows="3" style="width:100%;" placeholder="Short blurb for the map popup"></textarea>
+        <label style="margin-top:14px; display:block;">Photos (up to 12)</label>
+        <div id="activityFormPhotos" style="display:flex; flex-wrap:wrap; gap:8px; margin:6px 0;"></div>
+        <input type="file" id="activityPhotoInput" accept="image/*" multiple style="display:block;">
+        <p id="activityPhotoHint" style="margin:6px 0 0; font-size:12px; color:var(--muted);">For a new activity, save it first — photos then upload automatically right after.</p>
+        <div class="btn-row" style="margin-top:10px;">
+          <button class="primary" id="saveActivityBtn">Save activity</button>
+          <button class="btn-outline" id="cancelActivityEditBtn" style="display:none;">Cancel edit</button>
+        </div>
+        <div class="status" id="activityFormStatus"></div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="btn-row" style="margin-top:0;">
+          <button class="btn-outline" id="refreshActivitiesBtn">Refresh</button>
+        </div>
+        <div class="status" id="activitiesStatus"></div>
+        <div style="margin-top:18px;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Area</th>
+                  <th>Coordinates</th>
+                  <th>Price</th>
+                  <th>Photo</th>
+                  <th>Visible</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="activitiesTableBody"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="activitiesEmpty" style="display:none;">No activities added yet.</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h3 style="margin-top:0;">Properties on the map</h3>
+        <p style="margin-top:0;">Every "Listed" property with a latitude/longitude on file appears on the Explore Map by default. Untick to hide a specific one.</p>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Property</th>
+                <th>Location</th>
+                <th>Has coordinates</th>
+                <th>Show on map</th>
+              </tr>
+            </thead>
+            <tbody id="mapPropertiesTableBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="mapPropertiesEmpty" style="display:none;">No listed properties yet.</div>
       </div>
     </section>
 
@@ -1525,6 +1704,17 @@
         tdSiteNr.textContent = a.siteNr ? ('Affiliate ' + a.siteNr) : '\u2014';
         tdSiteNr.style.fontSize = '12px';
         tdSiteNr.style.color = a.siteNr ? 'inherit' : 'var(--muted)';
+        var tdZone = document.createElement('td');
+        var affZones = (a.zones && a.zones.length) ? a.zones : (a.zone ? [a.zone] : []);
+        tdZone.textContent = affZones.length ? affZones.join(', ') : '\u2014';
+        tdZone.style.fontSize = '12px';
+        tdZone.style.color = affZones.length ? 'inherit' : 'var(--muted)';
+        var tdType = document.createElement('td');
+        var typeLabels = { franchise: 'Franchise', property: 'Property', agent: 'Agent' };
+        var affTypes = Array.isArray(a.types) ? a.types : [];
+        tdType.textContent = affTypes.length ? affTypes.map(function(t){ return typeLabels[t] || t; }).join(', ') : '\u2014';
+        tdType.style.fontSize = '12px';
+        tdType.style.color = affTypes.length ? 'inherit' : 'var(--muted)';
         var tdShare = document.createElement('td');
         tdShare.textContent = formatShareSummary(a.revenueShare);
         tdShare.style.fontSize = '12px';
@@ -1625,6 +1815,8 @@
         tr.appendChild(tdName);
         tr.appendChild(tdId);
         tr.appendChild(tdSiteNr);
+        tr.appendChild(tdZone);
+        tr.appendChild(tdType);
         tr.appendChild(tdShare);
         tr.appendChild(tdStatus);
         tr.appendChild(tdOutstanding);
@@ -1922,6 +2114,14 @@
       document.getElementById('affNameInput').value = existing ? (existing.name || '') : '';
       document.getElementById('affEmailInput').value = existing ? (existing.email || '') : '';
       document.getElementById('affSiteNrInput').value = existing ? (existing.siteNr || '') : '';
+      var existingZones = existing ? ((existing.zones && existing.zones.length) ? existing.zones : (existing.zone ? [existing.zone] : [])) : [];
+      document.querySelectorAll('.aff-zone-cb').forEach(function(cb){
+        cb.checked = existingZones.indexOf(cb.value) > -1;
+      });
+      var existingTypes = existing && Array.isArray(existing.types) ? existing.types : [];
+      document.getElementById('affTypeFranchise').checked = existingTypes.indexOf('franchise') > -1;
+      document.getElementById('affTypeProperty').checked = existingTypes.indexOf('property') > -1;
+      document.getElementById('affTypeAgent').checked = existingTypes.indexOf('agent') > -1;
       buildAffShareFields(existing ? existing.revenueShare : null);
       var bank = (existing && existing.bank) || {};
       document.getElementById('affBankNameInput').value = bank.bankName || '';
@@ -1949,6 +2149,11 @@
       var name = document.getElementById('affNameInput').value.trim();
       var email = document.getElementById('affEmailInput').value.trim();
       var siteNr = document.getElementById('affSiteNrInput').value.trim();
+      var zones = Array.prototype.slice.call(document.querySelectorAll('.aff-zone-cb:checked')).map(function(cb){ return cb.value; });
+      var types = [];
+      if(document.getElementById('affTypeFranchise').checked) types.push('franchise');
+      if(document.getElementById('affTypeProperty').checked) types.push('property');
+      if(document.getElementById('affTypeAgent').checked) types.push('agent');
       var revenueShare = readAffShareFields();
       var bank = {
         bankName: document.getElementById('affBankNameInput').value.trim(),
@@ -1969,7 +2174,7 @@
       btn.disabled = true;
       btn.textContent = 'Saving…';
       adminPost('upsertAffiliate', {
-        affId: affId, name: name, email: email, siteNr: siteNr,
+        affId: affId, name: name, email: email, siteNr: siteNr, zones: zones, types: types,
         revenueShare: revenueShare, bank: bank, status: status, notes: notes
       }).then(function(res){
         btn.disabled = false;
@@ -3418,6 +3623,8 @@
     explicitly.
   -->
   <script src="share-kit.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
   <script>
     // ---------- Property Listings (admin review of submitted properties) ----------
     (function(){
@@ -3731,6 +3938,792 @@
           btn.addEventListener('click', function(){
             loadPropertyListings();
             if(!loadedSettings) loadPropertySettings();
+          });
+        }
+      });
+    })();
+
+    // ---------- Map & Activities ----------
+    (function(){
+      function mapAdminPost(action, extraBody){
+        var body = Object.assign({ action: action, token: ADMIN_TOKEN }, extraBody || {});
+        return fetch('/api/map', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body)
+        }).then(function(r){
+          if(r.status === 401){ goToLogin(); return Promise.reject(new Error('unauthenticated')); }
+          return r.json().then(function(data){ return { status: r.status, data: data }; });
+        });
+      }
+
+      var actTableBody = document.getElementById('activitiesTableBody');
+      var actEmptyEl = document.getElementById('activitiesEmpty');
+      var actStatusEl = document.getElementById('activitiesStatus');
+      var formStatusEl = document.getElementById('activityFormStatus');
+      var formTitleEl = document.getElementById('activityFormTitle');
+      var idInput = document.getElementById('activityIdInput');
+      var nameInput = document.getElementById('activityNameInput');
+      var areaInput = document.getElementById('activityAreaInput');
+      var zoneInput = document.getElementById('activityZoneInput');
+      var priceInput = document.getElementById('activityPriceInput');
+      var latInput = document.getElementById('activityLatInput');
+      var lngInput = document.getElementById('activityLngInput');
+      var contactInput = document.getElementById('activityContactInput');
+      var descInput = document.getElementById('activityDescInput');
+      var cancelEditBtn = document.getElementById('cancelActivityEditBtn');
+      var formPhotosEl = document.getElementById('activityFormPhotos');
+      var photoInput = document.getElementById('activityPhotoInput');
+      var photoHintEl = document.getElementById('activityPhotoHint');
+      var currentFormPhotoKeys = [];
+      var pendingPhotoFiles = []; // { file, objectUrl } — only used before a new activity has an id
+
+      function renderFormPhotoThumbs(){
+        formPhotosEl.innerHTML = '';
+        currentFormPhotoKeys.forEach(function(key){
+          var wrap = document.createElement('div');
+          wrap.style.position = 'relative';
+          var img = document.createElement('img');
+          img.src = '/api/property-file?key=' + encodeURIComponent(key);
+          img.style.cssText = 'width:56px; height:56px; object-fit:cover; border-radius:4px;';
+          wrap.appendChild(img);
+          var rm = document.createElement('button');
+          rm.type = 'button';
+          rm.textContent = '\u00d7';
+          rm.title = 'Remove photo';
+          rm.style.cssText = 'position:absolute; top:-6px; right:-6px; width:18px; height:18px; line-height:16px; padding:0; border-radius:50%; border:none; background:#b42318; color:#fff; font-size:12px; cursor:pointer;';
+          rm.addEventListener('click', function(){
+            var id = idInput.value.trim();
+            if(!id) return;
+            mapAdminPost('removeActivityPhoto', { id: id, photoKey: key }).then(function(){
+              currentFormPhotoKeys = currentFormPhotoKeys.filter(function(k){ return k !== key; });
+              renderFormPhotoThumbs();
+              loadActivities();
+            });
+          });
+          wrap.appendChild(rm);
+          formPhotosEl.appendChild(wrap);
+        });
+        pendingPhotoFiles.forEach(function(p, i){
+          var wrap = document.createElement('div');
+          wrap.style.position = 'relative';
+          var img = document.createElement('img');
+          img.src = p.objectUrl;
+          img.style.cssText = 'width:56px; height:56px; object-fit:cover; border-radius:4px; opacity:0.6;';
+          wrap.appendChild(img);
+          var badge = document.createElement('span');
+          badge.textContent = 'pending';
+          badge.style.cssText = 'position:absolute; bottom:2px; left:2px; right:2px; font-size:9px; text-align:center; background:rgba(0,0,0,.6); color:#fff; border-radius:3px;';
+          wrap.appendChild(badge);
+          var rm = document.createElement('button');
+          rm.type = 'button';
+          rm.textContent = '\u00d7';
+          rm.title = 'Remove';
+          rm.style.cssText = 'position:absolute; top:-6px; right:-6px; width:18px; height:18px; line-height:16px; padding:0; border-radius:50%; border:none; background:#b42318; color:#fff; font-size:12px; cursor:pointer;';
+          rm.addEventListener('click', function(){
+            URL.revokeObjectURL(p.objectUrl);
+            pendingPhotoFiles.splice(i, 1);
+            renderFormPhotoThumbs();
+          });
+          wrap.appendChild(rm);
+          formPhotosEl.appendChild(wrap);
+        });
+      }
+
+      function uploadOnePhoto(activityId, file){
+        var params = new URLSearchParams({
+          listingId: 'activity-' + activityId,
+          kind: 'image',
+          label: 'activity',
+          fileName: file.name
+        });
+        return fetch('/api/property-file?' + params.toString(), {
+          method: 'POST',
+          headers: { 'content-type': file.type || 'application/octet-stream' },
+          body: file
+        }).then(function(r){ return r.json(); }).then(function(res){
+          if(!res || !res.ok) throw new Error((res && res.error) || 'Upload failed.');
+          return mapAdminPost('addActivityPhoto', { id: activityId, photoKey: res.key });
+        });
+      }
+
+      function uploadPhotosSequentially(activityId, files, onEach){
+        var queue = files.slice();
+        function next(){
+          if(!queue.length) return Promise.resolve();
+          var file = queue.shift();
+          return uploadOnePhoto(activityId, file).then(function(){
+            if(onEach) onEach();
+            return next();
+          });
+        }
+        return next();
+      }
+
+      photoInput.addEventListener('change', function(){
+        if(!photoInput.files || !photoInput.files.length) return;
+        var newFiles = Array.prototype.slice.call(photoInput.files);
+        var totalAfter = currentFormPhotoKeys.length + pendingPhotoFiles.length + newFiles.length;
+        if(totalAfter > 12){
+          formStatusEl.textContent = 'Maximum 12 photos per activity.';
+          formStatusEl.className = 'status show';
+          photoInput.value = '';
+          return;
+        }
+        var id = idInput.value.trim();
+        if(id){
+          formStatusEl.textContent = 'Uploading photo\u2026';
+          formStatusEl.className = 'status show';
+          uploadPhotosSequentially(id, newFiles).then(function(){
+            return mapAdminPost('adminList');
+          }).then(function(res){
+            var match = res.data && res.data.ok && (res.data.activities || []).find(function(a){ return a.id === id; });
+            currentFormPhotoKeys = match ? (match.photoKeys || (match.photoKey ? [match.photoKey] : [])) : currentFormPhotoKeys;
+            renderFormPhotoThumbs();
+            formStatusEl.textContent = 'Photos saved.';
+            loadActivities();
+          }).catch(function(err){
+            formStatusEl.textContent = err.message || 'Could not upload photo.';
+            formStatusEl.className = 'status show';
+          });
+        } else {
+          newFiles.forEach(function(file){
+            pendingPhotoFiles.push({ file: file, objectUrl: URL.createObjectURL(file) });
+          });
+          renderFormPhotoThumbs();
+        }
+        photoInput.value = '';
+      });
+
+      var propTableBody = document.getElementById('mapPropertiesTableBody');
+      var propEmptyEl = document.getElementById('mapPropertiesEmpty');
+      var loadedMapAdmin = false;
+      var adminLeafletMap = null;
+
+      function initAdminMap(){
+        if(adminLeafletMap || !document.getElementById('adminMapEl')) return;
+        adminLeafletMap = L.map('adminMapEl').setView([-30.5595, 22.9375], 6);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 18,
+          attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(adminLeafletMap);
+      }
+
+      function dotIcon(color){
+        return L.divIcon({
+          className: '',
+          html: '<div style="background:' + color + '; width:14px; height:14px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 2px rgba(0,0,0,.4);"></div>',
+          iconSize: [14, 14]
+        });
+      }
+
+      var adminClusterGroup = null;
+
+      function renderAdminMap(properties, activities){
+        initAdminMap();
+        if(!adminLeafletMap) return;
+        if(adminClusterGroup) adminLeafletMap.removeLayer(adminClusterGroup);
+        adminClusterGroup = L.markerClusterGroup({ maxClusterRadius: 50 });
+
+        var allMarkers = [];
+
+        properties.forEach(function(p){
+          if(typeof p.latitude !== 'number' || typeof p.longitude !== 'number') return;
+          var color = p.hidden ? '#b7b7ae' : '#1a4d7a';
+          var marker = L.marker([p.latitude, p.longitude], { icon: dotIcon(color) });
+          var content = document.createElement('div');
+          var title = document.createElement('div');
+          title.style.fontWeight = '600';
+          title.textContent = p.name || 'Untitled';
+          content.appendChild(title);
+          if(p.area){
+            var sub = document.createElement('div');
+            sub.style.cssText = 'font-size:12px; color:#777;';
+            sub.textContent = p.area + (p.source === 'resort-list' ? ' \u00b7 StockNetwork' : '');
+            content.appendChild(sub);
+          }
+          var toggleBtn = document.createElement('button');
+          toggleBtn.type = 'button';
+          toggleBtn.className = 'btn-outline btn-small';
+          toggleBtn.style.marginTop = '6px';
+          toggleBtn.textContent = p.hidden ? 'Show on map' : 'Hide from map';
+          toggleBtn.addEventListener('click', function(){
+            mapAdminPost('setPropertyVisibility', { listingId: p.listingId, hidden: !p.hidden }).then(function(){
+              loadActivities();
+            });
+          });
+          content.appendChild(toggleBtn);
+          marker.bindPopup(content);
+          adminClusterGroup.addLayer(marker);
+          allMarkers.push(marker);
+        });
+
+        activities.forEach(function(a){
+          var lat = parseFloat(a.latitude);
+          var lng = parseFloat(a.longitude);
+          if(!isFinite(lat) || !isFinite(lng)) return;
+          var hidden = a.visible === false;
+          var color = hidden ? '#b7b7ae' : '#0e7c66';
+          var marker = L.marker([lat, lng], { icon: dotIcon(color) });
+          var content = document.createElement('div');
+          var title = document.createElement('div');
+          title.style.fontWeight = '600';
+          title.textContent = a.name || 'Untitled';
+          content.appendChild(title);
+          var toggleBtn = document.createElement('button');
+          toggleBtn.type = 'button';
+          toggleBtn.className = 'btn-outline btn-small';
+          toggleBtn.style.marginTop = '6px';
+          toggleBtn.textContent = hidden ? 'Show on map' : 'Hide from map';
+          toggleBtn.addEventListener('click', function(){
+            mapAdminPost('updateActivity', { id: a.id, visible: hidden }).then(function(){
+              loadActivities();
+            });
+          });
+          content.appendChild(toggleBtn);
+          marker.bindPopup(content);
+          adminClusterGroup.addLayer(marker);
+          allMarkers.push(marker);
+        });
+
+        adminLeafletMap.addLayer(adminClusterGroup);
+
+        if(allMarkers.length){
+          var group = L.featureGroup(allMarkers);
+          adminLeafletMap.fitBounds(group.getBounds().pad(0.2));
+        }
+      }
+
+      function resetActivityForm(){
+        idInput.value = '';
+        nameInput.value = '';
+        areaInput.value = '';
+        zoneInput.value = '';
+        priceInput.value = '';
+        latInput.value = '';
+        lngInput.value = '';
+        contactInput.value = '';
+        descInput.value = '';
+        formTitleEl.textContent = 'Add an activity';
+        cancelEditBtn.style.display = 'none';
+        currentFormPhotoKeys = [];
+        pendingPhotoFiles.forEach(function(p){ URL.revokeObjectURL(p.objectUrl); });
+        pendingPhotoFiles = [];
+        photoInput.value = '';
+        photoHintEl.textContent = 'For a new activity, save it first — photos then upload automatically right after.';
+        renderFormPhotoThumbs();
+      }
+
+      cancelEditBtn.addEventListener('click', resetActivityForm);
+
+      function renderActivitiesTable(activities){
+        actTableBody.innerHTML = '';
+        if(!activities.length){
+          actEmptyEl.style.display = 'block';
+          return;
+        }
+        actEmptyEl.style.display = 'none';
+        activities.forEach(function(a){
+          var tr = document.createElement('tr');
+
+          var tdName = document.createElement('td');
+          tdName.textContent = a.name || '\u2014';
+          tr.appendChild(tdName);
+
+          var tdArea = document.createElement('td');
+          tdArea.textContent = a.area || '\u2014';
+          tr.appendChild(tdArea);
+
+          var lat = parseFloat(a.latitude);
+          var lng = parseFloat(a.longitude);
+          var hasCoords = isFinite(lat) && isFinite(lng);
+          var tdCoords = document.createElement('td');
+          tdCoords.textContent = hasCoords ? (lat.toFixed(4) + ', ' + lng.toFixed(4)) : 'Missing';
+          tdCoords.style.fontSize = '12px';
+          if(!hasCoords){
+            tdCoords.style.color = '#b42318';
+            tdCoords.style.fontWeight = '600';
+          }
+          tr.appendChild(tdCoords);
+
+          var tdPrice = document.createElement('td');
+          tdPrice.textContent = a.price || '\u2014';
+          tr.appendChild(tdPrice);
+
+          var tdPhoto = document.createElement('td');
+          var photoWrap = document.createElement('div');
+          photoWrap.style.display = 'flex';
+          photoWrap.style.flexWrap = 'wrap';
+          photoWrap.style.gap = '4px';
+          photoWrap.style.maxWidth = '180px';
+          (a.photoKeys || (a.photoKey ? [a.photoKey] : [])).forEach(function(key){
+            var thumbWrap = document.createElement('div');
+            thumbWrap.style.position = 'relative';
+            var thumb = document.createElement('img');
+            thumb.src = '/api/property-file?key=' + encodeURIComponent(key);
+            thumb.style.width = '40px';
+            thumb.style.height = '40px';
+            thumb.style.objectFit = 'cover';
+            thumb.style.borderRadius = '4px';
+            thumbWrap.appendChild(thumb);
+            var rmBtn = document.createElement('button');
+            rmBtn.type = 'button';
+            rmBtn.textContent = '\u00d7';
+            rmBtn.title = 'Remove photo';
+            rmBtn.style.cssText = 'position:absolute; top:-6px; right:-6px; width:16px; height:16px; line-height:14px; padding:0; border-radius:50%; border:none; background:#b42318; color:#fff; font-size:11px; cursor:pointer;';
+            rmBtn.addEventListener('click', function(){
+              mapAdminPost('removeActivityPhoto', { id: a.id, photoKey: key }).then(function(){ loadActivities(); });
+            });
+            thumbWrap.appendChild(rmBtn);
+            photoWrap.appendChild(thumbWrap);
+          });
+          tdPhoto.appendChild(photoWrap);
+
+          var fileInput = document.createElement('input');
+          fileInput.type = 'file';
+          fileInput.accept = 'image/*';
+          fileInput.multiple = true;
+          fileInput.style.maxWidth = '160px';
+          fileInput.style.marginTop = '6px';
+          fileInput.style.display = 'block';
+          fileInput.addEventListener('change', function(){
+            if(!fileInput.files || !fileInput.files.length) return;
+            var files = Array.prototype.slice.call(fileInput.files);
+            actStatusEl.textContent = 'Uploading photo\u2026';
+            actStatusEl.className = 'status show';
+            function uploadNext(){
+              if(!files.length){
+                actStatusEl.textContent = 'Photos saved.';
+                loadActivities();
+                return;
+              }
+              var file = files.shift();
+              var params = new URLSearchParams({
+                listingId: 'activity-' + a.id,
+                kind: 'image',
+                label: 'activity',
+                fileName: file.name
+              });
+              fetch('/api/property-file?' + params.toString(), {
+                method: 'POST',
+                headers: { 'content-type': file.type || 'application/octet-stream' },
+                body: file
+              }).then(function(r){ return r.json(); }).then(function(res){
+                if(res && res.ok){
+                  return mapAdminPost('addActivityPhoto', { id: a.id, photoKey: res.key });
+                }
+                throw new Error((res && res.error) || 'Upload failed.');
+              }).then(function(){ uploadNext(); }).catch(function(err){
+                actStatusEl.textContent = err.message || 'Could not upload photo.';
+                actStatusEl.className = 'status show';
+              });
+            }
+            uploadNext();
+          });
+          tdPhoto.appendChild(fileInput);
+          tr.appendChild(tdPhoto);
+
+          var tdVisible = document.createElement('td');
+          var visCheck = document.createElement('input');
+          visCheck.type = 'checkbox';
+          visCheck.checked = a.visible !== false;
+          visCheck.addEventListener('change', function(){
+            mapAdminPost('updateActivity', { id: a.id, visible: visCheck.checked }).then(function(res){
+              if(!res.data || !res.data.ok){ visCheck.checked = !visCheck.checked; }
+            });
+          });
+          tdVisible.appendChild(visCheck);
+          tr.appendChild(tdVisible);
+
+          var tdActions = document.createElement('td');
+          var editBtn = document.createElement('button');
+          editBtn.type = 'button';
+          editBtn.className = 'btn-outline btn-small';
+          editBtn.textContent = 'Edit';
+          editBtn.addEventListener('click', function(){
+            idInput.value = a.id;
+            nameInput.value = a.name || '';
+            areaInput.value = a.area || '';
+            zoneInput.value = a.zone || '';
+            priceInput.value = a.price || '';
+            latInput.value = a.latitude || '';
+            lngInput.value = a.longitude || '';
+            contactInput.value = a.contactLink || '';
+            descInput.value = a.description || '';
+            formTitleEl.textContent = 'Edit activity';
+            cancelEditBtn.style.display = 'inline-block';
+            currentFormPhotoKeys = (a.photoKeys || (a.photoKey ? [a.photoKey] : [])).slice();
+            pendingPhotoFiles.forEach(function(p){ URL.revokeObjectURL(p.objectUrl); });
+            pendingPhotoFiles = [];
+            photoHintEl.textContent = 'Add more photos below \u2014 they upload immediately.';
+            renderFormPhotoThumbs();
+            window.scrollTo({ top: document.getElementById('activityFormTitle').offsetTop - 20, behavior: 'smooth' });
+          });
+          tdActions.appendChild(editBtn);
+
+          var delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'btn-outline btn-small';
+          delBtn.style.marginLeft = '8px';
+          delBtn.textContent = 'Delete';
+          delBtn.addEventListener('click', function(){
+            if(!confirm('Delete "' + (a.name || 'this activity') + '"? This cannot be undone.')) return;
+            mapAdminPost('deleteActivity', { id: a.id }).then(function(){ loadActivities(); });
+          });
+          tdActions.appendChild(delBtn);
+
+          tr.appendChild(tdActions);
+          actTableBody.appendChild(tr);
+        });
+      }
+
+      function renderMapPropertiesTable(properties){
+        propTableBody.innerHTML = '';
+        if(!properties.length){
+          propEmptyEl.style.display = 'block';
+          return;
+        }
+        propEmptyEl.style.display = 'none';
+        properties.forEach(function(p){
+          var tr = document.createElement('tr');
+
+          var tdName = document.createElement('td');
+          tdName.textContent = p.name || '\u2014';
+          tr.appendChild(tdName);
+
+          var tdLoc = document.createElement('td');
+          tdLoc.textContent = [p.city, p.country].filter(Boolean).join(', ') || '\u2014';
+          tr.appendChild(tdLoc);
+
+          var tdHasCoords = document.createElement('td');
+          tdHasCoords.textContent = 'Yes';
+          tr.appendChild(tdHasCoords);
+
+          var tdShow = document.createElement('td');
+          var showCheck = document.createElement('input');
+          showCheck.type = 'checkbox';
+          showCheck.checked = !p.hidden;
+          showCheck.addEventListener('change', function(){
+            mapAdminPost('setPropertyVisibility', { listingId: p.listingId, hidden: !showCheck.checked }).then(function(res){
+              if(!res.data || !res.data.ok){ showCheck.checked = !showCheck.checked; }
+            });
+          });
+          tdShow.appendChild(showCheck);
+          tr.appendChild(tdShow);
+
+          propTableBody.appendChild(tr);
+        });
+      }
+
+      function renderMissingCoordsSummary(missingProperties, activities){
+        var el = document.getElementById('missingCoordsSummary');
+        var missingActivities = activities.filter(function(a){
+          var lat = parseFloat(a.latitude);
+          var lng = parseFloat(a.longitude);
+          return !isFinite(lat) || !isFinite(lng);
+        });
+        var propCount = missingProperties.length;
+        var actCount = missingActivities.length;
+        if(!propCount && !actCount){
+          el.textContent = 'Every property and activity has coordinates.';
+          el.className = 'status show';
+          el.style.color = '';
+          return;
+        }
+        var parts = [];
+        if(propCount) parts.push(propCount + ' propert' + (propCount === 1 ? 'y' : 'ies'));
+        if(actCount) parts.push(actCount + ' activit' + (actCount === 1 ? 'y' : 'ies'));
+        el.textContent = parts.join(' and ') + ' missing coordinates \u2014 see the tables below.';
+        el.className = 'status show';
+        el.style.color = '#b42318';
+      }
+
+      function renderMissingCoordsTable(rows){
+        var body = document.getElementById('missingCoordsTableBody');
+        var empty = document.getElementById('missingCoordsEmpty');
+        body.innerHTML = '';
+        if(!rows.length){
+          empty.style.display = 'block';
+          return;
+        }
+        empty.style.display = 'none';
+        rows.forEach(function(r){
+          var tr = document.createElement('tr');
+          var tdId = document.createElement('td');
+          tdId.textContent = r.listingId;
+          tdId.style.fontSize = '11px';
+          tdId.style.color = 'var(--muted)';
+          var tdName = document.createElement('td');
+          tdName.textContent = r.propertyName || '\u2014';
+          var tdLoc = document.createElement('td');
+          tdLoc.textContent = [r.city, r.country].filter(Boolean).join(', ') || '\u2014';
+          tr.appendChild(tdId);
+          tr.appendChild(tdName);
+          tr.appendChild(tdLoc);
+          body.appendChild(tr);
+        });
+      }
+
+      function loadActivities(){
+        actStatusEl.textContent = 'Loading\u2026';
+        actStatusEl.className = 'status show';
+        return mapAdminPost('adminList').then(function(res){
+          actStatusEl.textContent = '';
+          actStatusEl.className = 'status';
+          if(res.data && res.data.ok){
+            var onboardedProps = (res.data.properties || []).filter(function(p){ return p.source !== 'resort-list'; });
+            renderActivitiesTable(res.data.activities || []);
+            renderMapPropertiesTable(onboardedProps);
+            renderAdminMap(res.data.properties || [], res.data.activities || []);
+            renderMissingCoordsTable(res.data.missingCoordinates || []);
+            renderMissingCoordsSummary(res.data.missingCoordinates || [], res.data.activities || []);
+            renderResortListStatus(res.data.resortStats || null);
+          } else {
+            actStatusEl.textContent = (res.data && res.data.error) || 'Could not load map data.';
+            actStatusEl.className = 'status show';
+          }
+        }).catch(function(){
+          actStatusEl.textContent = 'Could not load map data.';
+          actStatusEl.className = 'status show';
+        });
+      }
+
+      document.getElementById('saveActivityBtn').addEventListener('click', function(){
+        var name = nameInput.value.trim();
+        if(!name){
+          formStatusEl.textContent = 'Activity name is required.';
+          formStatusEl.className = 'status show';
+          return;
+        }
+        var payload = {
+          name: name,
+          area: areaInput.value.trim(),
+          zone: zoneInput.value,
+          price: priceInput.value.trim(),
+          latitude: latInput.value.trim(),
+          longitude: lngInput.value.trim(),
+          contactLink: contactInput.value.trim(),
+          description: descInput.value.trim()
+        };
+        formStatusEl.textContent = 'Saving\u2026';
+        formStatusEl.className = 'status show';
+        var id = idInput.value.trim();
+        var action = id ? 'updateActivity' : 'addActivity';
+        if(id) payload.id = id;
+        mapAdminPost(action, payload).then(function(res){
+          if(res.data && res.data.ok){
+            var newId = res.data.activity && res.data.activity.id;
+            if(newId && pendingPhotoFiles.length){
+              formStatusEl.textContent = 'Saved. Uploading photos\u2026';
+              var files = pendingPhotoFiles.map(function(p){ return p.file; });
+              pendingPhotoFiles.forEach(function(p){ URL.revokeObjectURL(p.objectUrl); });
+              pendingPhotoFiles = [];
+              uploadPhotosSequentially(newId, files).then(function(){
+                formStatusEl.textContent = 'Saved.';
+                resetActivityForm();
+                loadActivities();
+              }).catch(function(err){
+                formStatusEl.textContent = 'Activity saved, but a photo failed to upload: ' + (err.message || err);
+                formStatusEl.className = 'status show';
+                resetActivityForm();
+                loadActivities();
+              });
+            } else {
+              formStatusEl.textContent = 'Saved.';
+              resetActivityForm();
+              loadActivities();
+            }
+          } else {
+            formStatusEl.textContent = (res.data && res.data.error) || 'Could not save activity.';
+            formStatusEl.className = 'status show';
+          }
+        }).catch(function(){
+          formStatusEl.textContent = 'Could not save activity.';
+          formStatusEl.className = 'status show';
+        });
+      });
+
+      document.getElementById('refreshActivitiesBtn').addEventListener('click', function(){
+        loadActivities();
+      });
+
+      function renderResortListStatus(stats){
+        var el = document.getElementById('resortListStatusText');
+        if(!stats){ el.textContent = ''; return; }
+        if(!stats.total){
+          el.textContent = 'No resort list uploaded yet.';
+          return;
+        }
+        var updated = stats.updatedAt ? new Date(stats.updatedAt).toLocaleDateString() : '';
+        el.textContent = stats.withCoordinates + ' of ' + stats.total + ' resorts have coordinates and are pinned on the map' +
+          (updated ? ' \u2014 list last updated ' + updated + '.' : '.');
+      }
+
+      var resortUploadBtn = document.getElementById('resortListUploadBtn');
+      var resortFileInput = document.getElementById('resortListFileInput');
+      var resortUploadStatusEl = document.getElementById('resortListUploadStatus');
+      resortUploadBtn.addEventListener('click', function(){ resortFileInput.click(); });
+      resortFileInput.addEventListener('change', function(){
+        var file = resortFileInput.files && resortFileInput.files[0];
+        resortFileInput.value = '';
+        if(!file) return;
+        resortUploadBtn.disabled = true;
+        resortUploadBtn.textContent = 'Uploading\u2026';
+        resortUploadStatusEl.textContent = '';
+        resortUploadStatusEl.className = 'status';
+        file.text().then(function(csvText){
+          return fetch('/api/resorts', {
+            method: 'POST',
+            headers: { 'content-type': 'text/csv' },
+            body: csvText
+          });
+        }).then(function(r){ return r.json().then(function(data){ return { status: r.status, data: data }; }); })
+          .then(function(res){
+            resortUploadBtn.disabled = false;
+            resortUploadBtn.textContent = 'Upload resort list CSV';
+            if(res.data && res.data.ok){
+              resortUploadStatusEl.textContent = 'Resort list updated (' + res.data.count + ' resorts).';
+              resortUploadStatusEl.className = 'status show';
+              loadActivities();
+            } else {
+              resortUploadStatusEl.textContent = (res.data && res.data.error) || 'Could not update the resort list.';
+              resortUploadStatusEl.className = 'status show';
+            }
+          }).catch(function(){
+            resortUploadBtn.disabled = false;
+            resortUploadBtn.textContent = 'Upload resort list CSV';
+            resortUploadStatusEl.textContent = 'Could not update the resort list.';
+            resortUploadStatusEl.className = 'status show';
+          });
+      });
+
+      function downloadCsv(filename, cols, exampleRow){
+        var lines = [cols.join(',')];
+        if(exampleRow) lines.push(cols.map(function(c){ return csvEscape(exampleRow[c] || ''); }).join(','));
+        var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+
+      document.getElementById('templateCoordsBtn').addEventListener('click', function(){
+        downloadCsv('avante-property-coordinates-template.csv', ['id', 'propertyName', 'latitude', 'longitude'], {
+          id: 'P-123456',
+          propertyName: 'e.g. Forest View 12',
+          latitude: '-34.0033',
+          longitude: '23.3833'
+        });
+      });
+
+      var importCoordsBtn = document.getElementById('importCoordsBtn');
+      var importCoordsFileInput = document.getElementById('importCoordsFileInput');
+      var importCoordsStatusEl = document.getElementById('importCoordsStatus');
+      importCoordsBtn.addEventListener('click', function(){ importCoordsFileInput.click(); });
+      importCoordsFileInput.addEventListener('change', function(){
+        if(!importCoordsFileInput.files || !importCoordsFileInput.files[0]) return;
+        var file = importCoordsFileInput.files[0];
+        var reader = new FileReader();
+        reader.onload = function(){
+          importCoordsStatusEl.textContent = 'Importing\u2026';
+          importCoordsStatusEl.className = 'status show';
+          mapAdminPost('importPropertyCoordinatesCsv', { csv: reader.result }).then(function(res){
+            if(res.data && res.data.ok){
+              importCoordsStatusEl.textContent = 'Updated ' + res.data.updated + ' propert' + (res.data.updated === 1 ? 'y' : 'ies') +
+                '. Skipped ' + res.data.skippedNoMatch + ' with no match, ' + res.data.skippedAmbiguous + ' with an ambiguous name match.';
+              loadActivities();
+            } else {
+              importCoordsStatusEl.textContent = (res.data && res.data.error) || 'Could not import CSV.';
+            }
+            importCoordsStatusEl.className = 'status show';
+          }).catch(function(){
+            importCoordsStatusEl.textContent = 'Could not import CSV.';
+            importCoordsStatusEl.className = 'status show';
+          });
+        };
+        reader.readAsText(file);
+        importCoordsFileInput.value = '';
+      });
+
+      var importBtn = document.getElementById('importActivitiesBtn');
+      var importFileInput = document.getElementById('importActivitiesFileInput');
+      var importStatusEl = document.getElementById('importActivitiesStatus');
+      importBtn.addEventListener('click', function(){ importFileInput.click(); });
+      importFileInput.addEventListener('change', function(){
+        if(!importFileInput.files || !importFileInput.files[0]) return;
+        var file = importFileInput.files[0];
+        var reader = new FileReader();
+        reader.onload = function(){
+          importStatusEl.textContent = 'Importing\u2026';
+          importStatusEl.className = 'status show';
+          mapAdminPost('importActivitiesCsv', { csv: reader.result }).then(function(res){
+            if(res.data && res.data.ok){
+              importStatusEl.textContent = 'Imported: ' + res.data.created + ' added, ' + res.data.updated + ' updated.';
+              loadActivities();
+            } else {
+              importStatusEl.textContent = (res.data && res.data.error) || 'Could not import CSV.';
+            }
+            importStatusEl.className = 'status show';
+          }).catch(function(){
+            importStatusEl.textContent = 'Could not import CSV.';
+            importStatusEl.className = 'status show';
+          });
+        };
+        reader.readAsText(file);
+        importFileInput.value = '';
+      });
+
+      function csvEscape(v){
+        v = String(v == null ? '' : v);
+        return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+      }
+
+      document.getElementById('templateActivitiesBtn').addEventListener('click', function(){
+        downloadCsv('avante-activities-template.csv', ['name', 'area', 'zone', 'price', 'contactLink', 'description', 'latitude', 'longitude'], {
+          name: 'e.g. Bloukrans Bungy',
+          area: 'e.g. Plettenberg Bay',
+          zone: 'Eastern Cape & Garden Route',
+          price: 'e.g. R2,800 pp',
+          contactLink: 'https://example.com/book',
+          description: 'Short blurb for the map popup',
+          latitude: '-34.0033',
+          longitude: '23.3833'
+        });
+      });
+
+      document.getElementById('exportActivitiesBtn').addEventListener('click', function(){
+        mapAdminPost('adminList').then(function(res){
+          if(!res.data || !res.data.ok) return;
+          var cols = ['id', 'name', 'area', 'zone', 'price', 'contactLink', 'description', 'latitude', 'longitude', 'visible'];
+          var lines = [cols.join(',')];
+          (res.data.activities || []).forEach(function(a){
+            lines.push(cols.map(function(c){
+              var v = c === 'visible' ? (a.visible === false ? 'N' : 'Y') : a[c];
+              return csvEscape(v);
+            }).join(','));
+          });
+          var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = 'avante-activities.csv';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        });
+      });
+
+      document.querySelectorAll('.tab').forEach(function(btn){
+        if(btn.dataset.panel === 'mapActivities'){
+          btn.addEventListener('click', function(){
+            if(!loadedMapAdmin){ loadedMapAdmin = true; loadActivities(); }
+            else loadActivities();
+            setTimeout(function(){ if(adminLeafletMap) adminLeafletMap.invalidateSize(); }, 150);
           });
         }
       });

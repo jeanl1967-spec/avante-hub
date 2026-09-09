@@ -27,14 +27,17 @@ function parseCsvLine(line) {
   return result;
 }
 
-// Parses the resort master CSV into { name, district, siteId, resortId } per
-// row. name/district/siteId/resortId are looked up by header name so the
-// parser doesn't break if StockNetwork reorders columns; siteId/resortId fall
-// back to the last two columns (their known position) if the headers aren't
-// found by name. Rows are kept even if they share a name with another row —
-// different physical properties can share a name, and each needs its own
-// SiteID/ResortID for the Resort Info Link to work. Only exact duplicate rows
-// (same name + siteId + resortId) are collapsed.
+// Parses the resort master CSV into { name, district, siteId, resortId,
+// latitude, longitude } per row. name/district/siteId/resortId are looked
+// up by header name so the parser doesn't break if StockNetwork reorders
+// columns; siteId/resortId fall back to the last two columns (their known
+// position) if the headers aren't found by name. Latitude/Longitude are
+// optional — most CSV exports from StockNetwork won't have them, so a row
+// missing either just gets "" for that field and this file's own callers
+// keep working exactly as before. Rows are kept even if they share a name
+// with another row — different physical properties can share a name, and
+// each needs its own SiteID/ResortID for the Resort Info Link to work.
+// Only exact duplicate rows (same name + siteId + resortId) are collapsed.
 function parseResortsFromCsv(text) {
   const lines = text.split(/\r\n|\r|\n/).filter((l) => l.trim().length > 0);
   if (lines.length === 0) return [];
@@ -46,6 +49,8 @@ function parseResortsFromCsv(text) {
   let districtIdx = findCol("district");
   let siteIdIdx = findCol("siteid");
   let resortIdIdx = findCol("resortid");
+  const latIdx = findCol("latitude");
+  const lngIdx = findCol("longitude");
   if (nameIdx === -1) nameIdx = 0;
   if (resortIdIdx === -1) resortIdIdx = header.length - 1;
   if (siteIdIdx === -1) siteIdIdx = header.length - 2;
@@ -60,11 +65,13 @@ function parseResortsFromCsv(text) {
     const district = districtIdx > -1 ? (fields[districtIdx] || "").trim() : "";
     const siteId = siteIdIdx > -1 ? (fields[siteIdIdx] || "").trim() : "";
     const resortId = resortIdIdx > -1 ? (fields[resortIdIdx] || "").trim() : "";
+    const latitude = latIdx > -1 ? (fields[latIdx] || "").trim() : "";
+    const longitude = lngIdx > -1 ? (fields[lngIdx] || "").trim() : "";
 
     const key = name.toLowerCase() + "|" + siteId + "|" + resortId;
     if (seen.has(key)) continue;
     seen.add(key);
-    resorts.push({ name, district, siteId, resortId });
+    resorts.push({ name, district, siteId, resortId, latitude, longitude });
   }
 
   resorts.sort((a, b) => a.name.localeCompare(b.name) || a.district.localeCompare(b.district));

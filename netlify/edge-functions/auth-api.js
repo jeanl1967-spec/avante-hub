@@ -176,6 +176,11 @@ export default async (request, context) => {
             email: (dirRecord && dirRecord.email) || "",
             phone: (dirRecord && dirRecord.phone) || "",
             siteNr: (dirRecord && dirRecord.siteNr) || "",
+            zones: (dirRecord && dirRecord.zones && dirRecord.zones.length)
+              ? dirRecord.zones
+              : (dirRecord && dirRecord.zone ? [dirRecord.zone] : []),
+            zone: (dirRecord && dirRecord.zone) || (dirRecord && dirRecord.zones && dirRecord.zones[0]) || "",
+            types: (dirRecord && Array.isArray(dirRecord.types)) ? dirRecord.types : [],
             bank: bank,
             revenueShare: revenueShare,
           },
@@ -296,4 +301,3 @@ export default async (request, context) => {
 };
 
 export const config = { path: "/api/auth" };
-
