@@ -35,18 +35,15 @@ export async function resolveShortLink(rawUrl, shortLinksStore) {
   }
 }
 
-// The two helpers below are used by admin-api.js's bulk short-code
-// generator (generateShortCodes) — a separate, deliberately independent
-// path from shorten-api.js's own POST /api/shorten handler, which has its
-// own (slightly different) custom-alias upsert semantics we don't want to
-// entangle with a bulk/idempotent caller. Kept here rather than duplicated
-// inline so the slug alphabet/length and per-affiliate index shape can't
-// drift from shorten-api.js's.
-const SLUG_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ"; // no 0/O/1/l/I
-const RANDOM_SLUG_LEN = 6;
-const MAX_LINKS_PER_AFFILIATE = 300; // same cap shorten-api.js enforces
+// Slug shape and per-affiliate index — shared by shorten-api.js's own POST
+// /api/shorten handler and the two helpers below (admin-api.js's bulk
+// short-code generator), so neither can drift from the other on what a
+// slug looks like or how the per-affiliate index is keyed/capped.
+export const SLUG_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ"; // no 0/O/1/l/I
+export const RANDOM_SLUG_LEN = 6;
+export const MAX_LINKS_PER_AFFILIATE = 300; // cap the per-affiliate index so it can't grow unbounded
 
-function randomSlug() {
+export function randomSlug() {
   let out = "";
   for (let i = 0; i < RANDOM_SLUG_LEN; i++) {
     out += SLUG_ALPHABET[Math.floor(Math.random() * SLUG_ALPHABET.length)];
@@ -54,9 +51,15 @@ function randomSlug() {
   return out;
 }
 
-function affIndexKey(aff) {
+export function affIndexKey(aff) {
   return "aff:" + aff;
 }
+
+// The two functions below are used by admin-api.js's bulk short-code
+// generator (generateShortCodes) — a separate, deliberately independent
+// code path from shorten-api.js's own POST /api/shorten handler, which has
+// its own (slightly different) custom-alias upsert semantics we don't want
+// to entangle with a bulk/idempotent caller.
 
 // Looks for a short link this affiliate already has pointing at exactly
 // longUrl, so a bulk/idempotent caller can skip creating a duplicate for
@@ -77,29 +80,39 @@ export async function findExistingShortLink(shortLinksStore, aff, longUrl) {
 // Creates a brand-new random-slug short link for longUrl, tagged to aff,
 // and indexes it under that affiliate (same index shorten-api.js's own GET
 // ?aff= listing reads). Always creates fresh — callers wanting idempotency
-// should check findExistingShortLink() first. Returns null only in the
-// (extremely unlikely) case of repeated slug collisions.
+// should check findExistingShortLink() first.
+//
+// Netlify Blobs has no compare-and-swap, so a "check candidate is free,
+// then write it" pair isn't atomic — a bulk caller running many of these
+// concurrently (see admin-api.js's mapWithConcurrency) could have two
+// callers both see the same candidate slug as free and both write it, with
+// the second silently clobbering the first's record. Guarded against by
+// re-reading immediately after the write and confirming it's still ours;
+// if another writer clobbered it in between, that attempt is abandoned and
+// a fresh candidate is tried instead of returning a slug that doesn't
+// actually point where we think it does. Returns null only if every
+// attempt collides or loses that race.
 export async function createShortLink(shortLinksStore, longUrl, aff) {
-  let slug;
+  const record = { url: longUrl, aff: aff || "", createdAt: new Date().toISOString(), clicks: 0 };
+
   for (let attempt = 0; attempt < 6; attempt++) {
     const candidate = randomSlug();
     const existing = await shortLinksStore.get(candidate, { type: "json" });
-    if (!existing) {
-      slug = candidate;
-      break;
+    if (existing) continue;
+
+    await shortLinksStore.setJSON(candidate, record);
+
+    const verify = await shortLinksStore.get(candidate, { type: "json" });
+    if (!verify || verify.url !== record.url || verify.aff !== record.aff) continue; // lost the race — try another slug
+
+    if (aff) {
+      const indexKey = affIndexKey(aff);
+      const existingSlugs = (await shortLinksStore.get(indexKey, { type: "json" })) || [];
+      const updatedSlugs = [candidate, ...existingSlugs.filter((s) => s !== candidate)].slice(0, MAX_LINKS_PER_AFFILIATE);
+      await shortLinksStore.setJSON(indexKey, updatedSlugs);
     }
+
+    return { slug: candidate, shortUrl: "https://" + SHORT_LINK_HOST + "/" + candidate, ...record };
   }
-  if (!slug) return null;
-
-  const record = { url: longUrl, aff: aff || "", createdAt: new Date().toISOString(), clicks: 0 };
-  await shortLinksStore.setJSON(slug, record);
-
-  if (aff) {
-    const indexKey = affIndexKey(aff);
-    const existingSlugs = (await shortLinksStore.get(indexKey, { type: "json" })) || [];
-    const updatedSlugs = [slug, ...existingSlugs.filter((s) => s !== slug)].slice(0, MAX_LINKS_PER_AFFILIATE);
-    await shortLinksStore.setJSON(indexKey, updatedSlugs);
-  }
-
-  return { slug, shortUrl: "https://" + SHORT_LINK_HOST + "/" + slug, ...record };
+  return null;
 }

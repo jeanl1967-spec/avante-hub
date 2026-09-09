@@ -1352,9 +1352,12 @@ export default async (request, context) => {
     if (action === "generateShortCodes") {
       // "Should have all their short codes in their hub and frontstore set
       // up" (Stage 4): gives every affiliate a permanent go.avantetravel.co.za
-      // short code for their own Hub link, plus one for each admin-managed
-      // hook's "Full Details" page (hook-landing.html) that actually has
-      // content worth linking to.
+      // short code for their own Hub link, plus one for each hook's "Full
+      // Details" page (hook-landing.html) that actually has content worth
+      // linking to for THAT affiliate — whether that content comes from
+      // the shared admin default or from a hook they've switched to
+      // "Manage my own" (see the mode check below, matching hook-api.js's
+      // own GET exactly).
       //
       // Deliberately does NOT generate a short code for a hook's live
       // booking link itself: that link is a personalized *snapshot* of
@@ -1385,10 +1388,14 @@ export default async (request, context) => {
 
       const shortLinksStore = getStore({ name: "short-links", consistency: "strong" });
 
-      const hooksWithContent = [];
+      // Mirrors hook-api.js's own hasContent test exactly (adminRecord.booking
+      // || adminRecord.landing — caption alone isn't enough to render
+      // anything on hook-landing.html), read once up front since it's the
+      // same 6 admin records for every affiliate.
+      const adminHasContent = {};
       for (let n = 1; n <= DEFAULT_HOOK_COUNT; n++) {
         const rec = await hookStore.get("__admin__:" + n, { type: "json" });
-        if (rec && (rec.booking || rec.landing || rec.caption)) hooksWithContent.push(n);
+        adminHasContent[n] = !!(rec && (rec.booking || rec.landing));
       }
 
       const { blobs } = await directoryStore.list();
@@ -1421,7 +1428,20 @@ export default async (request, context) => {
 
       await mapWithConcurrency(affIds, async (affId) => {
         await ensureOne(affId, "hub", origin + "/hub.html?aff=" + encodeURIComponent(affId));
-        for (const n of hooksWithContent) {
+        for (let n = 1; n <= DEFAULT_HOOK_COUNT; n++) {
+          // Same mode resolution hook-api.js's GET uses: an affiliate who
+          // has explicitly switched this hook to "Manage my own" gets their
+          // own booking/landing checked instead of the shared admin
+          // default — otherwise a self-managed hook with real content
+          // never gets a Full Details short code just because the admin's
+          // own default for that slot happens to be empty, and (the
+          // opposite mistake) an admin default that does have content
+          // wouldn't wrongly get shortened for someone who's managing that
+          // exact hook themselves.
+          const ownRec = await hookStore.get(affId + ":" + n, { type: "json" });
+          const mode = ownRec && ownRec.mode === "self" ? "self" : "admin";
+          const hasContent = mode === "self" ? !!(ownRec && (ownRec.booking || ownRec.landing)) : adminHasContent[n];
+          if (!hasContent) continue;
           await ensureOne(affId, "hook" + n, origin + "/hook-landing.html?aff=" + encodeURIComponent(affId) + "&hook=" + n);
         }
       });
@@ -1434,7 +1454,6 @@ export default async (request, context) => {
           ok: true,
           dryRun: dryRun,
           affiliateCount: affIds.length,
-          hooksWithContent: hooksWithContent,
           createdCount: createdCount,
           existingCount: existingCount,
           results: results,

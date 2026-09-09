@@ -1,18 +1,7 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
-import { SHORT_LINK_HOST } from "./lib/short-link.js";
+import { SHORT_LINK_HOST, randomSlug, affIndexKey, MAX_LINKS_PER_AFFILIATE } from "./lib/short-link.js";
 
-const ALPHABET = "23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ"; // no 0/O/1/l/I
-const RANDOM_SLUG_LEN = 6;
 const MAX_ALIAS_LEN = 40;
-const MAX_LINKS_PER_AFFILIATE = 300; // cap the per-affiliate index so it can't grow unbounded
-
-function randomSlug() {
-  let out = "";
-  for (let i = 0; i < RANDOM_SLUG_LEN; i++) {
-    out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
-  }
-  return out;
-}
 
 function isSafeUrl(u) {
   try {
@@ -25,10 +14,6 @@ function isSafeUrl(u) {
 
 function isValidAlias(a) {
   return /^[a-zA-Z0-9-]{2,40}$/.test(a);
-}
-
-function affIndexKey(aff) {
-  return "aff:" + aff;
 }
 
 export default async (request, context) => {
