@@ -97,10 +97,17 @@ export async function addToAffIndex(shortLinksStore, aff, slug) {
 export async function findExistingShortLink(shortLinksStore, aff, longUrl) {
   if (!aff || !longUrl) return null;
   const slugs = (await shortLinksStore.get(affIndexKey(aff), { type: "json" })) || [];
-  for (const slug of slugs) {
-    const record = await shortLinksStore.get(slug, { type: "json" });
+  // The index is capped at MAX_LINKS_PER_AFFILIATE (300), so fetching every
+  // slug's record in parallel is a bounded fan-out, not an unbounded one —
+  // this is called once per hub/hook check (up to 7 times per affiliate)
+  // by generateShortCodes' bulk run, so an affiliate with many existing
+  // short links shouldn't turn that into hundreds of sequential round
+  // trips per check.
+  const records = await Promise.all(slugs.map((slug) => shortLinksStore.get(slug, { type: "json" })));
+  for (let i = 0; i < slugs.length; i++) {
+    const record = records[i];
     if (record && record.url === longUrl) {
-      return { slug, shortUrl: "https://" + SHORT_LINK_HOST + "/" + slug, ...record };
+      return { slug: slugs[i], shortUrl: "https://" + SHORT_LINK_HOST + "/" + slugs[i], ...record };
     }
   }
   return null;

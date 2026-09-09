@@ -1679,12 +1679,21 @@
             return;
           }
           var toCreate = res.data.results.filter(function(r){ return r.created; });
+          var writeErrorNote = res.data.writeErrors ?
+            (' (' + res.data.writeErrors + ' affiliate/hook pair' + (res.data.writeErrors === 1 ? '' : 's') + ' could not be checked — click "Check now" again to retry.)') : '';
           if(!toCreate.length){
-            statusEl.textContent = 'Every affiliate already has short codes set up — nothing to create.';
+            statusEl.textContent = 'Every affiliate already has short codes set up — nothing to create.' + writeErrorNote;
             return;
           }
+          // Affiliates actually affected, not res.data.affiliateCount (every
+          // affiliate scanned) — a single new affiliate showing "will be
+          // created across 50 affiliates" (the whole affiliate base) would
+          // be misleading when the work is really confined to just them.
+          var affectedCount = {};
+          toCreate.forEach(function(r){ affectedCount[r.affId] = true; });
+          var affectedAffiliates = Object.keys(affectedCount).length;
           statusEl.textContent = toCreate.length + ' short code' + (toCreate.length === 1 ? '' : 's') +
-            ' will be created across ' + res.data.affiliateCount + ' affiliate' + (res.data.affiliateCount === 1 ? '' : 's') + ':';
+            ' will be created across ' + affectedAffiliates + ' affiliate' + (affectedAffiliates === 1 ? '' : 's') + ':' + writeErrorNote;
           renderRows(toCreate);
           resultsEl.style.display = 'block';
         }).catch(function(){

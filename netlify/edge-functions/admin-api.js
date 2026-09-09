@@ -1443,9 +1443,20 @@ export default async (request, context) => {
           // and (the opposite mistake) an admin default that does have
           // content doesn't wrongly get shortened for someone who's
           // managing that exact hook themselves right now.
-          const ownRec = await hookStore.get(affId + ":" + n, { type: "json" });
-          const { source } = resolveHookMode(ownRec);
-          const hasContent = source === "self" ? !!(ownRec && (ownRec.booking || ownRec.landing)) : adminHasContent[n];
+          let hasContent;
+          try {
+            const ownRec = await hookStore.get(affId + ":" + n, { type: "json" });
+            const { source } = resolveHookMode(ownRec);
+            hasContent = source === "self" ? !!(ownRec && (ownRec.booking || ownRec.landing)) : adminHasContent[n];
+          } catch (e) {
+            // A transient read failure here shouldn't abort the whole bulk
+            // run (mapWithConcurrency has no per-item error isolation of
+            // its own — a rejection here would reject the entire
+            // Promise.all) — record it and move on to the next hook/
+            // affiliate, same as ensureOne already does for its own steps.
+            writeErrors++;
+            continue;
+          }
           if (!hasContent) continue;
           await ensureOne(affId, "hook" + n, origin + "/hook-landing.html?aff=" + encodeURIComponent(affId) + "&hook=" + n);
         }
