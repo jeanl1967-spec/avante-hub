@@ -1389,14 +1389,27 @@ export default async (request, context) => {
 
       const shortLinksStore = getStore({ name: "short-links", consistency: "strong" });
 
-      // Mirrors hook-api.js's own hasContent test exactly (adminRecord.booking
-      // || adminRecord.landing — caption alone isn't enough to render
-      // anything on hook-landing.html), read once up front since it's the
-      // same 6 admin records for every affiliate.
+      // hook-landing.html's own renderDetails only ever shows the "Book
+      // Now" button — the entire point of that page — when isSafeUrl(data.
+      // booking) is true (typeof booking === "string" &&
+      // /^https?:\/\//i.test(booking)); it never reads `landing` at all.
+      // So "worth a Full Details short code" has to match that exact
+      // gate, not hook-api.js's own (broader, different-purpose)
+      // hasContent test of booking||landing — a hook with only a Landing
+      // page link set (e.g. via "Build landing page link" without ever
+      // running "Build booking link") would otherwise get a short code
+      // pointing at a page that renders "This offer isn't available right
+      // now" forever.
+      function hasBookingLink(rec) {
+        return !!(rec && typeof rec.booking === "string" && /^https?:\/\//i.test(rec.booking));
+      }
+
+      // Read once up front since it's the same 6 admin records for every
+      // affiliate.
       const adminHasContent = {};
       for (let n = 1; n <= DEFAULT_HOOK_COUNT; n++) {
         const rec = await hookStore.get("__admin__:" + n, { type: "json" });
-        adminHasContent[n] = !!(rec && (rec.booking || rec.landing));
+        adminHasContent[n] = hasBookingLink(rec);
       }
 
       const { blobs } = await directoryStore.list();
@@ -1447,7 +1460,7 @@ export default async (request, context) => {
           try {
             const ownRec = await hookStore.get(affId + ":" + n, { type: "json" });
             const { source } = resolveHookMode(ownRec);
-            hasContent = source === "self" ? !!(ownRec && (ownRec.booking || ownRec.landing)) : adminHasContent[n];
+            hasContent = source === "self" ? hasBookingLink(ownRec) : adminHasContent[n];
           } catch (e) {
             // A transient read failure here shouldn't abort the whole bulk
             // run (mapWithConcurrency has no per-item error isolation of

@@ -94,16 +94,35 @@ export async function addToAffIndex(shortLinksStore, aff, slug) {
 // longUrl, so a bulk/idempotent caller can skip creating a duplicate for
 // content that hasn't changed since the last run. Returns null if none
 // exists (or aff is empty).
+// Small, dependency-free bounded-concurrency helper — deliberately not
+// importing lib/booking-stats.js's mapWithConcurrency here so this file
+// keeps its existing zero-import footprint (it's pulled into hook-api.js's
+// hot GET path, where every extra module is one more cold-start cost).
+async function mapBounded(items, fn, concurrency) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
+}
+
 export async function findExistingShortLink(shortLinksStore, aff, longUrl) {
   if (!aff || !longUrl) return null;
   const slugs = (await shortLinksStore.get(affIndexKey(aff), { type: "json" })) || [];
-  // The index is capped at MAX_LINKS_PER_AFFILIATE (300), so fetching every
-  // slug's record in parallel is a bounded fan-out, not an unbounded one —
-  // this is called once per hub/hook check (up to 7 times per affiliate)
-  // by generateShortCodes' bulk run, so an affiliate with many existing
-  // short links shouldn't turn that into hundreds of sequential round
-  // trips per check.
-  const records = await Promise.all(slugs.map((slug) => shortLinksStore.get(slug, { type: "json" })));
+  // The index is capped at MAX_LINKS_PER_AFFILIATE (300), and this is
+  // called once per hub/hook check (up to 7 times per affiliate) by
+  // generateShortCodes' bulk run across many affiliates concurrently —
+  // fetching one affiliate's up-to-300 slug records with an unbounded
+  // Promise.all could still pile into a large simultaneous burst of Blobs
+  // reads across the whole bulk run. Bounded to 20 at a time per call
+  // instead, so an affiliate with many existing short links doesn't turn
+  // one check into an unbounded read burst.
+  const records = await mapBounded(slugs, (slug) => shortLinksStore.get(slug, { type: "json" }), 20);
   for (let i = 0; i < slugs.length; i++) {
     const record = records[i];
     if (record && record.url === longUrl) {
