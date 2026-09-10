@@ -2324,11 +2324,21 @@
             tdSkip.textContent = 'Skipped — affiliate not subscribed to this status';
             tr.appendChild(tdSkip);
           }else{
-            [e.groupOk, e.clientOk].forEach(function(ok){
+            [
+              { ok: e.groupOk, error: e.groupError },
+              { ok: e.clientOk, error: e.clientError }
+            ].forEach(function(info){
               var td = document.createElement('td');
               var badge = document.createElement('span');
-              badge.className = 'badge ' + (ok ? 'active' : 'inactive');
-              badge.textContent = ok ? 'Sent' : 'Failed';
+              badge.className = 'badge ' + (info.ok ? 'active' : 'inactive');
+              badge.textContent = info.ok ? 'Sent' : 'Failed';
+              if(!info.ok && info.error){
+                badge.title = info.error;
+                badge.style.cursor = 'help';
+                badge.style.borderBottom = '1px dotted currentColor';
+                // title tooltips don't show on tap, so this covers mobile too.
+                badge.addEventListener('click', function(){ showToast(info.error); });
+              }
               td.appendChild(badge);
               tr.appendChild(td);
             });
