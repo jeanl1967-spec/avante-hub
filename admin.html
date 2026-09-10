@@ -565,10 +565,18 @@
       <p class="modal-sub" id="waModalSub">For this affiliate.</p>
       <label for="waAliasInput">Booking email alias</label>
       <input id="waAliasInput" placeholder="e.g. jeanl1967+sarah@gmail.com">
-      <p class="modal-sub" style="margin:-2px 0 8px;">Enter this exact address as the notification email on this affiliate's StockNetwork site. Every booking sent there gets routed to their WhatsApp group below.</p>
-      <label for="waGroupIdInput">WhatsApp group chat ID</label>
-      <input id="waGroupIdInput" placeholder="e.g. 120363422035129309@g.us">
-      <p class="modal-sub" style="margin:-2px 0 8px;">Add your Green-API-linked WhatsApp number to the affiliate's group, then click "Fetch My Groups" to pick it from a list — or paste an ID directly.</p>
+      <p class="modal-sub" style="margin:-2px 0 8px;">Enter this exact address as the notification email on this affiliate's StockNetwork site. Every booking sent there gets routed to everyone listed below.</p>
+      <label>WhatsApp recipients</label>
+      <p class="modal-sub" style="margin:-2px 0 8px;">Every group and number listed here gets notified on each matching booking. Add as many as you need — a group, a personal number, or both.</p>
+      <div id="waRecipientsList" style="margin-bottom:10px;"></div>
+      <div class="row" style="gap:8px; align-items:flex-end; flex-wrap:wrap;">
+        <div style="flex:1; min-width:220px;">
+          <label for="waNewNumberInput" style="font-size:12px;">Add a phone number</label>
+          <input id="waNewNumberInput" placeholder="e.g. 0821234567 or a full chat ID">
+        </div>
+        <button type="button" class="btn-outline btn-small" id="waAddNumberBtn">Add</button>
+      </div>
+      <p class="modal-sub" style="margin:6px 0 8px;">Add your Green-API-linked WhatsApp number to a group, then click "Fetch My Groups" to add it from a list — or paste/type its chat ID above.</p>
       <button type="button" class="btn-outline btn-small" id="waFetchGroupsBtn">Fetch My Groups</button>
       <select id="waGroupPicker" style="display:none; margin-top:8px;"></select>
       <label>Notify on booking status</label>
@@ -587,7 +595,6 @@
       </label>
       <div class="modal-status" id="waModalStatus"></div>
       <div class="modal-actions">
-        <button type="button" class="btn-outline" id="waTestBtn" style="margin-right:auto;">Send Test Message</button>
         <button type="button" class="modal-btn-secondary" id="waCancelBtn">Cancel</button>
         <button type="button" class="modal-btn-primary" id="waSaveBtn">Save Routing</button>
       </div>
@@ -2249,9 +2256,14 @@
         tdAlias.style.color = a.bookingEmailAlias ? 'inherit' : 'var(--muted)';
 
         var tdGroup = document.createElement('td');
-        tdGroup.textContent = a.whatsappGroupId || '—';
+        var waRecips = (Array.isArray(a.whatsappRecipients) && a.whatsappRecipients.length)
+          ? a.whatsappRecipients
+          : (a.whatsappGroupId ? [{ chatId: a.whatsappGroupId, label: '' }] : []);
+        tdGroup.textContent = waRecips.length
+          ? (waRecips.length === 1 ? '1 recipient' : waRecips.length + ' recipients')
+          : '—';
         tdGroup.style.fontSize = '11px';
-        tdGroup.style.color = a.whatsappGroupId ? 'inherit' : 'var(--muted)';
+        tdGroup.style.color = waRecips.length ? 'inherit' : 'var(--muted)';
 
         var tdNotify = document.createElement('td');
         var notifyOn = whatsappNotifyOnOf_(a);
@@ -2328,12 +2340,87 @@
 
     var waOverlay = document.getElementById('waModalOverlay');
     var editingWaAffId = null;
+    var waRecipients = []; // { chatId, label }
+
+    function waRecipientKind_(chatId){
+      if(chatId.endsWith('@g.us')) return 'Group';
+      if(chatId.endsWith('@c.us')) return 'Number';
+      return 'Unsaved';
+    }
+
+    function renderWaRecipients(){
+      var list = document.getElementById('waRecipientsList');
+      list.innerHTML = '';
+      if(!waRecipients.length){
+        var empty = document.createElement('p');
+        empty.className = 'modal-sub';
+        empty.style.margin = '0 0 8px';
+        empty.textContent = 'No recipients yet — add a group or a number below.';
+        list.appendChild(empty);
+        return;
+      }
+      waRecipients.forEach(function(r, i){
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; margin-bottom:6px; flex-wrap:wrap;';
+
+        var badge = document.createElement('span');
+        badge.textContent = waRecipientKind_(r.chatId);
+        badge.style.cssText = 'font-size:11px; font-weight:700; padding:2px 8px; border-radius:20px; background:var(--mint); color:var(--ink); flex-shrink:0;';
+        row.appendChild(badge);
+
+        var text = document.createElement('span');
+        text.style.cssText = 'flex:1; min-width:160px; font-size:13px; word-break:break-all;';
+        text.textContent = r.label ? (r.label + ' — ' + r.chatId) : r.chatId;
+        row.appendChild(text);
+
+        var testBtn = document.createElement('button');
+        testBtn.type = 'button';
+        testBtn.className = 'btn-outline btn-small';
+        testBtn.textContent = 'Test';
+        testBtn.addEventListener('click', function(){
+          var statusEl = document.getElementById('waModalStatus');
+          statusEl.classList.remove('show');
+          testBtn.disabled = true;
+          testBtn.textContent = 'Sending…';
+          adminPost('testWhatsappGroup', { groupId: r.chatId }).then(function(res){
+            testBtn.disabled = false;
+            testBtn.textContent = 'Test';
+            if(res.data && res.data.ok){
+              showToast('Test message sent to ' + (r.label || r.chatId));
+            }else{
+              statusEl.textContent = (res.data && res.data.detail) || (res.data && res.data.error) || 'Could not send test message.';
+              statusEl.classList.add('show');
+            }
+          }).catch(function(){
+            testBtn.disabled = false;
+            testBtn.textContent = 'Test';
+          });
+        });
+        row.appendChild(testBtn);
+
+        var rmBtn = document.createElement('button');
+        rmBtn.type = 'button';
+        rmBtn.className = 'btn-outline btn-small';
+        rmBtn.textContent = 'Remove';
+        rmBtn.addEventListener('click', function(){
+          waRecipients.splice(i, 1);
+          renderWaRecipients();
+        });
+        row.appendChild(rmBtn);
+
+        list.appendChild(row);
+      });
+    }
 
     function openWhatsappModal(a){
       editingWaAffId = a.affId;
       document.getElementById('waModalSub').textContent = 'For ' + (a.name || a.affId) + '.';
       document.getElementById('waAliasInput').value = a.bookingEmailAlias || '';
-      document.getElementById('waGroupIdInput').value = a.whatsappGroupId || '';
+      waRecipients = (Array.isArray(a.whatsappRecipients) && a.whatsappRecipients.length)
+        ? a.whatsappRecipients.map(function(r){ return { chatId: r.chatId, label: r.label || '' }; })
+        : (a.whatsappGroupId ? [{ chatId: a.whatsappGroupId, label: '' }] : []);
+      renderWaRecipients();
+      document.getElementById('waNewNumberInput').value = '';
       var notifyOn = whatsappNotifyOnOf_(a);
       document.getElementById('waNotifyRequestInput').checked = notifyOn.indexOf('request') > -1;
       document.getElementById('waNotifyBookedInput').checked = notifyOn.indexOf('booked') > -1;
@@ -2349,6 +2436,26 @@
 
     document.getElementById('waCancelBtn').addEventListener('click', closeWhatsappModal);
     waOverlay.addEventListener('click', function(e){ if(e.target === waOverlay) closeWhatsappModal(); });
+
+    document.getElementById('waAddNumberBtn').addEventListener('click', function(){
+      var input = document.getElementById('waNewNumberInput');
+      var val = input.value.trim();
+      var statusEl = document.getElementById('waModalStatus');
+      statusEl.classList.remove('show');
+      if(!val){
+        statusEl.textContent = 'Type a phone number or chat ID first.';
+        statusEl.classList.add('show');
+        return;
+      }
+      if(waRecipients.length >= 10){
+        statusEl.textContent = 'Maximum 10 recipients per affiliate.';
+        statusEl.classList.add('show');
+        return;
+      }
+      waRecipients.push({ chatId: val, label: '' });
+      renderWaRecipients();
+      input.value = '';
+    });
 
     document.getElementById('waSaveBtn').addEventListener('click', function(){
       var btn = this;
@@ -2372,7 +2479,7 @@
       adminPost('setWhatsappRouting', {
         affId: editingWaAffId,
         bookingEmailAlias: document.getElementById('waAliasInput').value.trim(),
-        whatsappGroupId: document.getElementById('waGroupIdInput').value.trim(),
+        whatsappRecipients: waRecipients,
         notifyOn: notifyOn
       }).then(function(res){
         btn.disabled = false;
@@ -2411,17 +2518,31 @@
           }
           var placeholder = document.createElement('option');
           placeholder.value = '';
-          placeholder.textContent = '— Select a group —';
+          placeholder.textContent = '— Select a group to add —';
           picker.appendChild(placeholder);
           groups.forEach(function(g){
             var opt = document.createElement('option');
             opt.value = g.id;
             opt.textContent = (g.name || g.id) + '  (' + g.id + ')';
+            opt.dataset.name = g.name || '';
             picker.appendChild(opt);
           });
           picker.style.display = '';
           picker.onchange = function(){
-            if(picker.value) document.getElementById('waGroupIdInput').value = picker.value;
+            if(!picker.value) return;
+            if(waRecipients.length >= 10){
+              statusEl.textContent = 'Maximum 10 recipients per affiliate.';
+              statusEl.classList.add('show');
+              picker.value = '';
+              return;
+            }
+            var already = waRecipients.some(function(r){ return r.chatId === picker.value; });
+            if(!already){
+              var opt = picker.options[picker.selectedIndex];
+              waRecipients.push({ chatId: picker.value, label: (opt && opt.dataset.name) || '' });
+              renderWaRecipients();
+            }
+            picker.value = '';
           };
         }else{
           statusEl.textContent = (res.data && res.data.error) || 'Could not fetch groups.';
@@ -2430,33 +2551,6 @@
       }).catch(function(){
         btn.disabled = false;
         btn.textContent = 'Fetch My Groups';
-      });
-    });
-
-    document.getElementById('waTestBtn').addEventListener('click', function(){
-      var btn = this;
-      var statusEl = document.getElementById('waModalStatus');
-      statusEl.classList.remove('show');
-      var groupId = document.getElementById('waGroupIdInput').value.trim();
-      if(!groupId){
-        statusEl.textContent = 'Enter a WhatsApp group chat ID first.';
-        statusEl.classList.add('show');
-        return;
-      }
-      btn.disabled = true;
-      btn.textContent = 'Sending…';
-      adminPost('testWhatsappGroup', { groupId: groupId }).then(function(res){
-        btn.disabled = false;
-        btn.textContent = 'Send Test Message';
-        if(res.data && res.data.ok){
-          showToast('Test message sent — check the group');
-        }else{
-          statusEl.textContent = (res.data && res.data.detail) || (res.data && res.data.error) || 'Could not send test message.';
-          statusEl.classList.add('show');
-        }
-      }).catch(function(){
-        btn.disabled = false;
-        btn.textContent = 'Send Test Message';
       });
     });
 
