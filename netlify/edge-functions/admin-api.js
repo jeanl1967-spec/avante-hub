@@ -109,6 +109,33 @@ function normalizeChatId_(raw) {
   return digits + "@c.us";
 }
 
+// Accepts a list of { chatId, label } (or bare strings) from the client and
+// turns it into a clean, deduped list ready to store. An entry already
+// ending in @g.us (a group) or @c.us (an individual chat) is kept as-is;
+// anything else is treated as a phone number and run through
+// normalizeChatId_ the same way an incoming booking's guest cellphone is.
+// Caps at 10 — this is meant for a handful of real recipients per
+// affiliate, not an unbounded broadcast list.
+function normalizeRecipients_(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const entry of list) {
+    if (out.length >= 10) break;
+    const raw = typeof entry === "string" ? entry : (entry && entry.chatId) || "";
+    const label = typeof entry === "object" && entry && typeof entry.label === "string" ? entry.label.trim().slice(0, 60) : "";
+    let chatId = raw.trim();
+    if (!chatId) continue;
+    if (!chatId.endsWith("@g.us") && !chatId.endsWith("@c.us")) {
+      chatId = normalizeChatId_(chatId);
+    }
+    if (!chatId || seen.has(chatId)) continue;
+    seen.add(chatId);
+    out.push({ chatId, label });
+  }
+  return out;
+}
+
 function formatGroupMessage_(b) {
   const ref = b.paymentRef || b.refNo || "?";
   return (
@@ -524,15 +551,24 @@ export default async (request, context) => {
       // not set up yet) falls back to a default group, so existing behavior
       // keeps working during the transition to per-affiliate aliases.
       const defaultGroupId = Deno.env.get("DEFAULT_WHATSAPP_GROUP_ID") || "";
-      const groupId = (matched && matched.whatsappGroupId) || defaultGroupId;
+      const recipients =
+        matched && Array.isArray(matched.whatsappRecipients) && matched.whatsappRecipients.length
+          ? matched.whatsappRecipients
+          : matched && matched.whatsappGroupId
+          ? [{ chatId: matched.whatsappGroupId, label: "" }]
+          : defaultGroupId
+          ? [{ chatId: defaultGroupId, label: "default" }]
+          : [];
 
-      const result = { ok: true, matchedAffId: matched ? matched.affId : null, group: null, client: null };
+      const result = { ok: true, matchedAffId: matched ? matched.affId : null, recipients: [], client: null };
 
-      if (groupId) {
-        const send = await sendGreenApiMessage_(groupId, formatGroupMessage_(booking));
-        result.group = { chatId: groupId, ok: send.ok, status: send.status, detail: send.ok ? undefined : send.body };
+      if (recipients.length) {
+        for (const r of recipients) {
+          const send = await sendGreenApiMessage_(r.chatId, formatGroupMessage_(booking));
+          result.recipients.push({ chatId: r.chatId, label: r.label || "", ok: send.ok, status: send.status, detail: send.ok ? undefined : send.body });
+        }
       } else {
-        result.group = { ok: false, error: "No WhatsApp group configured for this alias, and no default group set." };
+        result.recipients.push({ ok: false, error: "No WhatsApp recipients configured for this alias, and no default group set." });
       }
 
       const clientChatId = normalizeChatId_(booking.cellphone || "");
@@ -553,7 +589,8 @@ export default async (request, context) => {
           guest: booking.name || "",
           resort: booking.resort || "",
           status: bookingStatus,
-          groupOk: !!(result.group && result.group.ok),
+          groupOk: result.recipients.length > 0 && result.recipients.every((r) => r.ok),
+          groupCount: result.recipients.length,
           clientOk: !!(result.client && result.client.ok),
         })
       );
@@ -823,7 +860,11 @@ export default async (request, context) => {
       const existing = await directoryStore.get(affId, { type: "json" });
       if (!existing) return json({ ok: false, error: "Unknown affiliate." }, 404, cors);
       existing.bookingEmailAlias = sanitizeAlias_(body.bookingEmailAlias || "");
-      existing.whatsappGroupId = typeof body.whatsappGroupId === "string" ? body.whatsappGroupId.trim() : "";
+      existing.whatsappRecipients = normalizeRecipients_(body.whatsappRecipients);
+      // Kept in sync with the first recipient so anything still reading the
+      // old singular field (e.g. a stale cached client) degrades gracefully
+      // rather than breaking outright.
+      existing.whatsappGroupId = (existing.whatsappRecipients[0] && existing.whatsappRecipients[0].chatId) || "";
       if (Array.isArray(body.notifyOn)) {
         const cleaned = body.notifyOn.filter(
           (s) => s === "request" || s === "booked" || s === "confirmed" || s === "paid"
