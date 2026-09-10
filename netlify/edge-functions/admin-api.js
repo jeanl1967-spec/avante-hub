@@ -191,6 +191,24 @@ async function appendWhatsappLog_(store, entry) {
   await store.setJSON("recent", list);
 }
 
+// Turns the per-recipient send results into one short, readable string for
+// the log — e.g. "Backup Number: Green-API error 401 Unauthorized" — so a
+// FAILED badge in the admin UI can show *why*, not just *that* it failed.
+// Green-API's own error bodies are often raw JSON/HTML, so this keeps only
+// the first line and caps length rather than dumping the whole response.
+function summarizeRecipientFailures_(recipients) {
+  const failed = (recipients || []).filter((r) => !r.ok);
+  if (!failed.length) return "";
+  return failed
+    .map((r) => {
+      const who = r.label || r.chatId || "recipient";
+      const reason = (r.error || r.detail || "unknown error").toString().split("\n")[0].slice(0, 150);
+      return who + ": " + reason;
+    })
+    .join(" | ")
+    .slice(0, 500);
+}
+
 function randomToken() {
   const bytes = crypto.getRandomValues(new Uint8Array(24));
   return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -591,7 +609,9 @@ export default async (request, context) => {
           status: bookingStatus,
           groupOk: result.recipients.length > 0 && result.recipients.every((r) => r.ok),
           groupCount: result.recipients.length,
+          groupError: summarizeRecipientFailures_(result.recipients),
           clientOk: !!(result.client && result.client.ok),
+          clientError: result.client && !result.client.ok ? (result.client.error || (result.client.detail || "").toString().split("\n")[0].slice(0, 150)) : "",
         })
       );
 
