@@ -672,6 +672,7 @@
     <div class="brand">AVANTE<span>TRAVEL &middot; ADMIN</span></div>
     <nav class="tabs" id="tabs">
       <button class="tab active" data-panel="affiliates">Affiliates</button>
+      <button class="tab" data-panel="applications">Applications</button>
       <button class="tab" data-panel="defaultHooks">Default Hooks</button>
       <button class="tab" data-panel="payouts">Payouts</button>
       <button class="tab" data-panel="leaderboard">Leaderboard</button>
@@ -1045,6 +1046,48 @@
     </section>
 
     <!-- ===================== PROPERTY LISTINGS ===================== -->
+    <section class="panel" id="panel-applications">
+      <div class="hero">
+        <h1>Applications</h1>
+        <p>Review Agent and Franchise affiliate applications submitted via the "Become an Affiliate" form on avantehospitality.co.za. Approving here doesn't create a real affiliate automatically — once you're ready, add them via the Affiliates tab using the details below.</p>
+      </div>
+
+      <div class="card">
+        <label for="aaNotificationEmailInput">Notify this email address when a new application is submitted</label>
+        <input id="aaNotificationEmailInput" type="email" placeholder="e.g. bookings@avantetravel.co.za">
+        <button class="primary" id="aaSaveNotificationEmailBtn" style="margin-top:10px;">Save</button>
+        <div class="status" id="aaSettingsStatus"></div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="btn-row" style="margin-top:0;">
+          <button class="btn-outline" id="aaRefreshBtn">Refresh</button>
+        </div>
+        <div class="status" id="aaListStatus"></div>
+        <div style="margin-top:18px;">
+          <p class="table-scroll-hint">&larr; Scroll sideways to see Region, Status and Submitted &mdash; Actions stays visible on the right</p>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>Region</th>
+                  <th>Status</th>
+                  <th>Submitted</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="aaTableBody"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="aaEmpty" style="display:none;">No affiliate applications submitted yet.</div>
+        </div>
+      </div>
+    </section>
+
     <section class="panel" id="panel-propertyListings">
       <div class="hero">
         <h1>Property Listings</h1>
@@ -1418,6 +1461,7 @@
         btn.classList.add('active');
         document.getElementById('panel-' + btn.dataset.panel).classList.add('active');
         if(btn.dataset.panel === 'payouts') populatePayoutPicker();
+        if(btn.dataset.panel === 'applications' && window.__loadApplicationsTab) window.__loadApplicationsTab();
         if(btn.dataset.panel === 'leaderboard'){
           if(affiliatesCache.length) renderLeaderboard();
           else loadAffiliates().then(renderLeaderboard);
@@ -3752,6 +3796,187 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
   <script>
+    // ---------- Applications (admin review of affiliate applications) ----------
+    (function(){
+      var tableBody = document.getElementById('aaTableBody');
+      var emptyEl = document.getElementById('aaEmpty');
+      var listStatusEl = document.getElementById('aaListStatus');
+      var settingsStatusEl = document.getElementById('aaSettingsStatus');
+      var settingsLoaded = false;
+
+      function aaAdminPost(action, extraBody){
+        var body = Object.assign({ action: action, token: ADMIN_TOKEN }, extraBody || {});
+        return fetch('/api/affiliate-application', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body)
+        }).then(function(r){
+          if(r.status === 401){ goToLogin(); return Promise.reject(new Error('unauthenticated')); }
+          return r.json().then(function(data){ return { status: r.status, data: data }; });
+        });
+      }
+
+      function fmtAaDate(iso){
+        if(!iso) return '\u2014';
+        try{
+          var d = new Date(iso);
+          return d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
+        }catch(e){ return '\u2014'; }
+      }
+
+      function loadApplicationSettings(){
+        return aaAdminPost('getSettings').then(function(res){
+          if(res.data && res.data.ok){
+            document.getElementById('aaNotificationEmailInput').value = (res.data.settings && res.data.settings.notificationEmail) || '';
+          }
+          settingsLoaded = true;
+        });
+      }
+
+      document.getElementById('aaSaveNotificationEmailBtn').addEventListener('click', function(){
+        var email = document.getElementById('aaNotificationEmailInput').value.trim();
+        settingsStatusEl.textContent = 'Saving\u2026';
+        settingsStatusEl.className = 'status show';
+        aaAdminPost('setSettings', { notificationEmail: email }).then(function(res){
+          settingsStatusEl.textContent = (res.data && res.data.ok) ? 'Saved.' : ((res.data && res.data.error) || 'Could not save.');
+          settingsStatusEl.className = 'status show';
+        }).catch(function(){
+          settingsStatusEl.textContent = 'Could not save.';
+          settingsStatusEl.className = 'status show';
+        });
+      });
+
+      var STATUS_COLORS = { New: '#B7791F', Contacted: '#2563EB', Approved: '#0E7C66', Rejected: '#B42318' };
+
+      function renderApplicationsTable(applications){
+        tableBody.innerHTML = '';
+        if(!applications.length){
+          emptyEl.style.display = 'block';
+          return;
+        }
+        emptyEl.style.display = 'none';
+        applications.forEach(function(a){
+          var tr = document.createElement('tr');
+
+          var tdType = document.createElement('td');
+          tdType.textContent = a.applicantType === 'franchise' ? 'Franchise' : 'Agent';
+          tr.appendChild(tdType);
+
+          var tdName = document.createElement('td');
+          tdName.textContent = a.fullName || '\u2014';
+          tr.appendChild(tdName);
+
+          var tdEmail = document.createElement('td');
+          tdEmail.textContent = a.email || '\u2014';
+          tdEmail.style.fontSize = '13px';
+          tr.appendChild(tdEmail);
+
+          var tdPhone = document.createElement('td');
+          tdPhone.textContent = a.phone || '\u2014';
+          tr.appendChild(tdPhone);
+
+          var tdRegion = document.createElement('td');
+          tdRegion.textContent = a.cityRegion || '\u2014';
+          tr.appendChild(tdRegion);
+
+          var tdStatus = document.createElement('td');
+          var badge = document.createElement('span');
+          badge.textContent = a.status || 'New';
+          badge.style.cssText = 'font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px; color:#fff; background:' + (STATUS_COLORS[a.status] || '#808080') + ';';
+          tdStatus.appendChild(badge);
+          tr.appendChild(tdStatus);
+
+          var tdSubmitted = document.createElement('td');
+          tdSubmitted.textContent = fmtAaDate(a.dateSubmitted);
+          tdSubmitted.style.fontSize = '12px';
+          tr.appendChild(tdSubmitted);
+
+          var tdActions = document.createElement('td');
+          tdActions.style.cssText = 'display:flex; flex-direction:column; gap:6px; min-width:120px;';
+
+          var detailBtn = document.createElement('button');
+          detailBtn.className = 'btn-outline btn-small';
+          detailBtn.textContent = 'View details';
+          detailBtn.addEventListener('click', function(){
+            var lines = [
+              'Name: ' + (a.fullName || '\u2014'),
+              'Type: ' + (a.applicantType === 'franchise' ? 'Franchise Affiliate' : 'Agent Affiliate'),
+              'Email: ' + (a.email || '\u2014'),
+              'Phone: ' + (a.phone || '\u2014'),
+              'Region: ' + (a.cityRegion || '\u2014'),
+              '',
+              'How they plan to promote:',
+              (a.promotionPlan || '\u2014'),
+              '',
+              'Notes:',
+              (a.notes || '\u2014')
+            ];
+            alert(lines.join('\n'));
+          });
+          tdActions.appendChild(detailBtn);
+
+          var statusSelect = document.createElement('select');
+          ['New', 'Contacted', 'Approved', 'Rejected'].forEach(function(s){
+            var opt = document.createElement('option');
+            opt.value = s;
+            opt.textContent = s;
+            if(s === a.status) opt.selected = true;
+            statusSelect.appendChild(opt);
+          });
+          statusSelect.addEventListener('change', function(){
+            aaAdminPost('updateStatus', { id: a.id, status: statusSelect.value }).then(function(res){
+              if(res.data && res.data.ok){
+                showToast('Status updated');
+                a.status = statusSelect.value;
+                badge.textContent = a.status;
+                badge.style.background = STATUS_COLORS[a.status] || '#808080';
+              }
+            });
+          });
+          tdActions.appendChild(statusSelect);
+
+          var delBtn = document.createElement('button');
+          delBtn.className = 'btn-outline btn-small';
+          delBtn.textContent = 'Delete';
+          delBtn.addEventListener('click', function(){
+            if(!confirm('Delete this application? This can\'t be undone.')) return;
+            aaAdminPost('deleteApplication', { id: a.id }).then(function(res){
+              if(res.data && res.data.ok){
+                showToast('Application deleted');
+                loadApplications();
+              }
+            });
+          });
+          tdActions.appendChild(delBtn);
+
+          tr.appendChild(tdActions);
+          tableBody.appendChild(tr);
+        });
+      }
+
+      function loadApplications(){
+        listStatusEl.textContent = 'Loading\u2026';
+        listStatusEl.className = 'status show';
+        return aaAdminPost('list').then(function(res){
+          if(res.data && res.data.ok){
+            renderApplicationsTable(res.data.applications || []);
+            listStatusEl.classList.remove('show');
+          }else{
+            listStatusEl.textContent = (res.data && res.data.error) || 'Could not load applications.';
+          }
+        }).catch(function(){
+          listStatusEl.textContent = 'Could not load applications.';
+        });
+      }
+
+      document.getElementById('aaRefreshBtn').addEventListener('click', loadApplications);
+
+      window.__loadApplicationsTab = function(){
+        if(!settingsLoaded) loadApplicationSettings();
+        loadApplications();
+      };
+    })();
+
     // ---------- Property Listings (admin review of submitted properties) ----------
     (function(){
       var tableBody = document.getElementById('propertyListingsTableBody');
