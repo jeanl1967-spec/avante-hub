@@ -3409,27 +3409,37 @@
         statusEl.className = 'status';
         statusEl.textContent = '';
 
-        // Parse the real {aff, hook} straight out of the Landing page link
-        // field itself rather than assuming this hook's own number and a
-        // freshly recomputed affId — both can be wrong: booking and landing
-        // can drift apart (the affiliate edits the booking link after
-        // uploading a PDF, before ever clicking "Save hook"), and the same
-        // hook-pdf link can be deliberately reused across multiple hooks'
-        // Landing page link fields to share one brochure. Only falls back
-        // to this hook's own number + a booking-derived affId when the
-        // landing field isn't currently a hook-pdf link at all (nothing
-        // uploaded yet).
-        var landingEl = document.getElementById('h' + n + '-landing');
-        var landingVal = landingEl.value.trim();
-        var parsed = parseHookPdfUrl(landingVal);
+        // affId always comes from this affiliate's own identity (the URL,
+        // or their own booking link) — never from the Landing page link
+        // field. A hook-pdf link is inherently public (it's the exact URL
+        // meant to be shared with customers), so if someone pastes a
+        // *different* affiliate's hook-pdf link in here, it must never be
+        // trusted as permission to delete that affiliate's file.
         var bookingVal = document.getElementById('h' + n + '-booking').value.trim();
-        var affId = (parsed && parsed.aff) || AFF_ID || (bookingVal ? extractAffiliateId(bookingVal) : '');
-        var targetHook = (parsed && parsed.hook) || n;
+        var affId = AFF_ID || (bookingVal ? extractAffiliateId(bookingVal) : '');
         if(!affId){
           statusEl.textContent = 'Add your booking link above (or open the Hub using your own personalized link) before removing a PDF.';
           statusEl.className = 'status show';
           return;
         }
+
+        // Only the *hook number* is ever taken from the Landing page link
+        // field itself (so a link deliberately reused across hooks still
+        // deletes the file it actually names, not whatever hook the button
+        // happens to sit on) — and only once its aff is confirmed to be
+        // this exact affiliate's own. A parsed link belonging to someone
+        // else is rejected outright below, never silently substituted with
+        // "just delete my own hook n instead".
+        var landingEl = document.getElementById('h' + n + '-landing');
+        var landingVal = landingEl.value.trim();
+        var parsedRaw = parseHookPdfUrl(landingVal);
+        if(parsedRaw && parsedRaw.aff !== affId){
+          statusEl.textContent = 'That Landing page link doesn\'t belong to you — please clear or replace it before removing a PDF here.';
+          statusEl.className = 'status show';
+          return;
+        }
+        var parsed = parsedRaw;
+        var targetHook = (parsed && parsed.hook) || n;
 
         if(!window.confirm('Remove this hook\'s uploaded PDF? This can\'t be undone.')) return;
 
