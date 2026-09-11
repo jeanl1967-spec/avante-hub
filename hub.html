@@ -2888,7 +2888,10 @@
     // Impact.com/Travelstart tracking link, with each affiliate's own ID
     // appended as a Sub ID so bookings can be attributed and revenue shared.
     (function(){
-      var currentLink = '';
+      var currentLink = '';   // raw Travelstart tracking link — used as the iframe src
+      var shareLink = '';     // Front Store link — this is what gets copied/shared, so
+                               // anyone who opens it gets the same Avante-branded iframe
+                               // as the Hub button and the Front Store's own Flights tab.
       var errorEl = document.getElementById('f-errorStatus');
       var linkBox = document.getElementById('f-linkBox');
 
@@ -2898,13 +2901,17 @@
       }else{
         var sep = FLIGHT_BASE_URL.indexOf('?') === -1 ? '?' : '&';
         currentLink = FLIGHT_BASE_URL + sep + 'subId1=' + encodeURIComponent(AFF_ID);
-        document.getElementById('f-finalUrl').textContent = currentLink;
+        var shareUrl = new URL('landing.html', window.location.href);
+        shareUrl.searchParams.set('aff', AFF_ID);
+        shareUrl.searchParams.set('open', 'flights');
+        shareLink = shareUrl.toString();
+        document.getElementById('f-finalUrl').textContent = shareLink;
         linkBox.classList.add('show');
       }
 
       document.getElementById('f-copyBtn').addEventListener('click', function(){
-        if(!currentLink) return;
-        copyText(currentLink, document.getElementById('f-finalUrl'));
+        if(!shareLink) return;
+        copyText(shareLink, document.getElementById('f-finalUrl'));
       });
       document.getElementById('f-openBtn').addEventListener('click', function(){
         if(!currentLink) return;

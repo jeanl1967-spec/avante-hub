@@ -748,6 +748,18 @@
             e.preventDefault();
             showAccommodationFrame(url);
           });
+        }else if(key === 'flights'){
+          // Opens inline in the full-screen booking modal (same one used by
+          // the "Book Now" promo cards) instead of a new tab. Note: this
+          // means Impact.com's subId1 tracking cookie is set from inside an
+          // iframe rather than a top-level page load, which some browsers'
+          // third-party-cookie protections (e.g. Safari ITP) may block —
+          // a booking could go through without crediting this affiliate.
+          // Chosen deliberately by Jean, aware of that tradeoff.
+          el.addEventListener('click', function(e){
+            e.preventDefault();
+            openBookingModal(url);
+          });
         }else{
           el.target = '_blank';
           el.rel = 'noopener';
@@ -780,6 +792,19 @@
     document.addEventListener('keydown', function(e){
       if(e.key === 'Escape'){ closeBookingModal(); }
     });
+
+    // ---------- Auto-open via ?open=<category> ----------
+    // Lets a shared link (e.g. from the Hub's "Copy link" on the Flight tab)
+    // land here and immediately open that category's booking modal, instead
+    // of requiring an extra tap once the Front Store loads. Placed after
+    // bookingModalOverlay/Frame are assigned above — calling this any
+    // earlier would hit them while still undefined.
+    (function(){
+      var openKey = new URLSearchParams(window.location.search).get('open');
+      if(openKey && CATEGORY_LINKS[openKey] && openKey !== 'accommodation'){
+        openBookingModal(CATEGORY_LINKS[openKey]);
+      }
+    })();
 
     // Home is the Great Deals grid itself (main#promotions), so it's
     // already what's showing by default — no need to force it on load
