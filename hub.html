@@ -11,6 +11,14 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Avante Hub">
+<!--
+  Shared with admin.html — the pure, stateless pieces of the "Upload PDF
+  instead of a Landing page link" feature (URL shape, parsing, file-type
+  check). Loaded early (before any inline script needs it) since these two
+  pages' independently-written copies of this logic once drifted apart in
+  a way that opened a real security bug — see hook-pdf-link.js itself.
+-->
+<script src="hook-pdf-link.js"></script>
 <script>
   // ---------- Auth gate ----------
   // Runs immediately, before the page renders, so an unauthenticated visitor
@@ -2903,6 +2911,12 @@
             '<input id="h' + i + '-booking" placeholder="Your StockNetwork booking link for this promo">' +
             '<label for="h' + i + '-landing">Landing page link</label>' +
             '<input id="h' + i + '-landing" placeholder="Link to the promo\'s landing page">' +
+            '<input type="file" accept="application/pdf" id="h' + i + '-pdfInput" style="display:none;">' +
+            '<div class="btn-row" style="margin-top:6px;">' +
+              '<button type="button" class="btn-outline" data-upload-pdf="' + i + '">📄 Upload PDF instead</button>' +
+              '<button type="button" class="btn-outline" data-delete-pdf="' + i + '">Remove PDF</button>' +
+            '</div>' +
+            '<div class="status" id="h' + i + '-pdfStatus"></div>' +
             '<div class="hint">We\'ll automatically tag this with your affiliate ID (taken from the end of your booking link) so you can tell who sent the traffic.</div>' +
             '<label for="h' + i + '-caption">Caption</label>' +
             '<textarea id="h' + i + '-caption" placeholder="Ready-to-paste caption for this promo"></textarea>' +
@@ -3006,10 +3020,24 @@
 
       // Append ?aff=<id> (or &aff=<id> if the landing link already has query
       // params) so the landing page can tell which affiliate sent the click.
+      // Skips our own hook-pdf / hook-landing.html links entirely — their
+      // aff= is already the exact affiliate+hook combo that link was built
+      // for (needed to actually locate the stored PDF, or personalize the
+      // right hook), not a generic tracking tag safe to overwrite with
+      // whichever affId happens to be current right now. Blindly re-tagging
+      // it here previously meant the *displayed*, shareable landing link
+      // could silently point at the wrong affiliate's PDF/hook if the
+      // booking link (and so the computed affId) changed after the link
+      // was built but before "Save hook" was clicked — even though the
+      // record saved to the backend was unaffected, since this function
+      // only touches the preview text shown/copied from this row.
       function tagLandingUrl(landingUrl, affId){
         if(!affId) return landingUrl;
         try{
           var u = new URL(landingUrl);
+          if(u.origin === window.location.origin && (u.pathname === '/api/hook-pdf' || u.pathname === '/hook-landing.html')){
+            return landingUrl;
+          }
           u.searchParams.set('aff', affId);
           return u.toString();
         }catch(e){
@@ -3295,6 +3323,143 @@
         });
       }
 
+      // Uploads a PDF (a brochure, rate sheet, flyer) as an alternative to
+      // building a Landing page link to our own hook-landing.html page —
+      // same "fill the field, still needs Save" pattern as every other
+      // link builder here. Only fills in the Landing page link field
+      // below; nothing is actually saved to this hook until "Save hook"
+      // is clicked.
+      function uploadHookPdf(n, file){
+        var statusEl = document.getElementById('h' + n + '-pdfStatus');
+        statusEl.className = 'status';
+        statusEl.textContent = '';
+
+        var bookingVal = document.getElementById('h' + n + '-booking').value.trim();
+        var affId = AFF_ID || (bookingVal ? extractAffiliateId(bookingVal) : '');
+        if(!affId){
+          statusEl.textContent = 'Add your booking link above (or open the Hub using your own personalized link) before uploading a PDF.';
+          statusEl.className = 'status show';
+          return;
+        }
+        if(!PdfLinkTool.isPdfFile(file)){
+          statusEl.textContent = 'Please choose a PDF file.';
+          statusEl.className = 'status show';
+          return;
+        }
+        if(file.size > PdfLinkTool.PDF_MAX_BYTES){
+          statusEl.textContent = 'That PDF is too large — please use one under 10MB.';
+          statusEl.className = 'status show';
+          return;
+        }
+
+        statusEl.textContent = 'Uploading PDF…';
+        statusEl.className = 'status show';
+
+        fetch('/api/hook-pdf?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), {
+          method: 'POST',
+          headers: { 'content-type': 'application/pdf' },
+          body: file
+        }).then(function(res){
+          return res.json().then(function(data){ return { ok: res.ok, data: data }; });
+        }).then(function(result){
+          if(!result.ok || !result.data || !result.data.ok){
+            statusEl.textContent = (result.data && result.data.error) || 'Could not upload that PDF — please try again.';
+            statusEl.className = 'status show';
+            return;
+          }
+          document.getElementById('h' + n + '-landing').value = PdfLinkTool.hookPdfUrl(affId, n);
+          statusEl.textContent = 'PDF uploaded — Landing page link updated below. Remember to click "Save hook".';
+          statusEl.className = 'status show';
+          showToast('PDF uploaded');
+        }).catch(function(){
+          statusEl.textContent = 'We couldn\'t reach the server — please check your connection and try again.';
+          statusEl.className = 'status show';
+        });
+      }
+
+      // Removes the PDF a hook's Landing page link actually points at.
+      // Also clears the field afterward, so "Save hook" can't leave behind
+      // a link to a file that no longer exists — a landing link the
+      // affiliate typed or built some other way is left completely
+      // untouched.
+      function deleteHookPdf(n){
+        var statusEl = document.getElementById('h' + n + '-pdfStatus');
+        statusEl.className = 'status';
+        statusEl.textContent = '';
+
+        // affId always comes from this affiliate's own identity (the URL,
+        // or their own booking link) — never from the Landing page link
+        // field. A hook-pdf link is inherently public (it's the exact URL
+        // meant to be shared with customers), so if someone pastes a
+        // *different* affiliate's hook-pdf link in here, it must never be
+        // trusted as permission to delete that affiliate's file.
+        var bookingVal = document.getElementById('h' + n + '-booking').value.trim();
+        var affId = AFF_ID || (bookingVal ? extractAffiliateId(bookingVal) : '');
+        if(!affId){
+          statusEl.textContent = 'Add your booking link above (or open the Hub using your own personalized link) before removing a PDF.';
+          statusEl.className = 'status show';
+          return;
+        }
+
+        // Only the *hook number* is ever taken from the Landing page link
+        // field itself (so a link deliberately reused across hooks still
+        // deletes the file it actually names, not whatever hook the button
+        // happens to sit on) — and only once its aff is confirmed to be
+        // this exact affiliate's own. A parsed link belonging to someone
+        // else is rejected outright below, never silently substituted with
+        // "just delete my own hook n instead".
+        var landingEl = document.getElementById('h' + n + '-landing');
+        var landingVal = landingEl.value.trim();
+        var parsedRaw = PdfLinkTool.parseHookPdfUrl(landingVal);
+        if(parsedRaw && parsedRaw.aff !== affId){
+          statusEl.textContent = 'That Landing page link doesn\'t belong to you — please clear or replace it before removing a PDF here.';
+          statusEl.className = 'status show';
+          return;
+        }
+        var parsed = parsedRaw;
+        var targetHook = (parsed && parsed.hook) || n;
+
+        if(!window.confirm('Remove this hook\'s uploaded PDF? This can\'t be undone.')) return;
+
+        statusEl.textContent = 'Removing PDF…';
+        statusEl.className = 'status show';
+
+        fetch('/api/hook-pdf?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(targetHook), { method: 'DELETE' }).then(function(res){
+          if(!res.ok) throw new Error('delete failed');
+          if(parsed) landingEl.value = '';
+
+          // The same hook-pdf link can be deliberately pasted into more
+          // than one hook's Landing page link field to share one brochure
+          // (see the comment above) — now that the underlying file is
+          // gone, clear every other hook still pointing at that exact
+          // {aff, hook}, not just the one the button was clicked on, so
+          // nothing is left silently pointing at a 404.
+          var clearedOthers = 0;
+          for(var s = 1; s <= HOOK_COUNT; s++){
+            if(s === n) continue;
+            var siblingEl = document.getElementById('h' + s + '-landing');
+            if(!siblingEl) continue;
+            var siblingParsed = PdfLinkTool.parseHookPdfUrl(siblingEl.value.trim());
+            if(siblingParsed && siblingParsed.aff === affId && String(siblingParsed.hook) === String(targetHook)){
+              siblingEl.value = '';
+              clearedOthers++;
+            }
+          }
+
+          if(clearedOthers){
+            statusEl.textContent = 'Also cleared from ' + clearedOthers + ' other hook' + (clearedOthers === 1 ? '' : 's') + ' reusing this PDF — remember to click "Save hook" on ' + (clearedOthers === 1 ? 'it' : 'those') + ' too.';
+            statusEl.className = 'status show';
+          }else{
+            statusEl.textContent = '';
+            statusEl.className = 'status';
+          }
+          showToast('PDF removed');
+        }).catch(function(){
+          statusEl.textContent = 'We couldn\'t remove that PDF — please check your connection and try again.';
+          statusEl.className = 'status show';
+        });
+      }
+
       function saveHook(n){
         var p = 'h' + n + '-';
         var booking = document.getElementById(p + 'booking').value.trim();
@@ -3418,6 +3583,18 @@
           return;
         }
 
+        var uploadPdfN = e.target.getAttribute('data-upload-pdf');
+        if(uploadPdfN){
+          document.getElementById('h' + uploadPdfN + '-pdfInput').click();
+          return;
+        }
+
+        var deletePdfN = e.target.getAttribute('data-delete-pdf');
+        if(deletePdfN){
+          deleteHookPdf(deletePdfN);
+          return;
+        }
+
         var copyId = e.target.getAttribute('data-copy');
         if(copyId){
           var el = document.getElementById(copyId);
@@ -3463,6 +3640,12 @@
         var m = e.target.id && e.target.id.match(/^h(\d+)-imageInput$/);
         if(m && e.target.files && e.target.files[0]){
           uploadHookImage(m[1], e.target.files[0]);
+          e.target.value = '';
+          return;
+        }
+        var pm = e.target.id && e.target.id.match(/^h(\d+)-pdfInput$/);
+        if(pm && e.target.files && e.target.files[0]){
+          uploadHookPdf(pm[1], e.target.files[0]);
           e.target.value = '';
         }
       });
