@@ -17,6 +17,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Avante Travel — Admin</title>
+<!--
+  Shared with hub.html — the pure, stateless pieces of the "Upload PDF
+  instead of a Landing page link" feature (URL shape, parsing, file-type
+  check). Loaded early (before any inline script needs it) since these two
+  pages' independently-written copies of this logic once drifted apart in
+  a way that opened a real security bug — see hook-pdf-link.js itself.
+-->
+<script src="hook-pdf-link.js"></script>
 <script>
   // ---------- Auth gate ----------
   // Runs before the page renders, so the dashboard never flashes on screen
@@ -3473,12 +3481,6 @@
         statusEl.textContent = 'Landing page link filled in below — remember to click "Save default".';
       }
 
-      var PDF_MAX_BYTES = 10 * 1024 * 1024; // 10MB
-
-      function hookPdfUrl(n){
-        return window.location.origin + '/api/hook-pdf?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(n);
-      }
-
       // Uploads a PDF (a brochure, rate sheet, flyer) as an alternative to
       // building a Landing page link to our own hook-landing.html page —
       // same "fill the field, still needs Save default" pattern as
@@ -3490,17 +3492,12 @@
         statusEl.className = 'status';
         statusEl.textContent = '';
 
-        // file.type comes from the browser/OS and isn't always reliable —
-        // some file managers hand over a real PDF with an empty or generic
-        // type (e.g. application/octet-stream). Accept either a
-        // correctly-reported type or a .pdf filename; the server's own
-        // magic-byte check is the real, authoritative gate.
-        if(file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)){
+        if(!PdfLinkTool.isPdfFile(file)){
           statusEl.textContent = 'Please choose a PDF file.';
           statusEl.className = 'status show';
           return;
         }
-        if(file.size > PDF_MAX_BYTES){
+        if(file.size > PdfLinkTool.PDF_MAX_BYTES){
           statusEl.textContent = 'That PDF is too large — please use one under 10MB.';
           statusEl.className = 'status show';
           return;
@@ -3521,7 +3518,7 @@
             statusEl.className = 'status show';
             return;
           }
-          document.getElementById('dh' + n + '-landing').value = hookPdfUrl(n);
+          document.getElementById('dh' + n + '-landing').value = PdfLinkTool.hookPdfUrl(ADMIN_AFF, n);
           statusEl.textContent = 'PDF uploaded — Landing page link updated below. Remember to click "Save default".';
           statusEl.className = 'status show';
           showToast('PDF uploaded');
@@ -3531,23 +3528,18 @@
         });
       }
 
-      // If url is one of our own hook-pdf links, returns the exact hook
-      // number it points at (parsed from its own query string) —
-      // otherwise null. Used by deleteDefaultHookPdf so a hook-pdf link
-      // deliberately reused across multiple hooks' Landing page link
-      // fields (to share one brochure) still deletes the actual file that
-      // link points at, not whichever hook's card the button was clicked
-      // on.
-      function parseHookPdfUrl(url){
-        try{
-          var u = new URL(url, window.location.href);
-          if(u.origin !== window.location.origin || u.pathname !== '/api/hook-pdf') return null;
-          var hook = u.searchParams.get('hook');
-          if(u.searchParams.get('aff') !== ADMIN_AFF || !hook) return null;
-          return { hook: hook };
-        }catch(e){
-          return null;
-        }
+      // If url is one of our own hook-pdf links AND belongs to the admin
+      // default hooks specifically (aff === ADMIN_AFF — never trust a
+      // parsed link belonging to some other affiliate, even though
+      // PdfLinkTool.parseHookPdfUrl itself doesn't know or care whose it
+      // is), returns the exact hook number it points at — otherwise null.
+      // Used by deleteDefaultHookPdf so a hook-pdf link deliberately
+      // reused across multiple default hooks' Landing page link fields
+      // (to share one brochure) still deletes the actual file that link
+      // points at, not whichever hook's card the button was clicked on.
+      function parseOwnHookPdfUrl(url){
+        var parsed = PdfLinkTool.parseHookPdfUrl(url);
+        return (parsed && parsed.aff === ADMIN_AFF) ? { hook: parsed.hook } : null;
       }
 
       // Removes the PDF a hook's Landing page link actually points at.
@@ -3562,7 +3554,7 @@
         if(!window.confirm('Remove this hook\'s uploaded PDF? This can\'t be undone.')) return;
 
         var landingEl = document.getElementById('dh' + n + '-landing');
-        var parsed = parseHookPdfUrl(landingEl.value.trim());
+        var parsed = parseOwnHookPdfUrl(landingEl.value.trim());
         var targetHook = (parsed && parsed.hook) || n;
 
         statusEl.textContent = 'Removing PDF…';
@@ -3584,7 +3576,7 @@
             if(s === n) continue;
             var siblingEl = document.getElementById('dh' + s + '-landing');
             if(!siblingEl) continue;
-            var siblingParsed = parseHookPdfUrl(siblingEl.value.trim());
+            var siblingParsed = parseOwnHookPdfUrl(siblingEl.value.trim());
             if(siblingParsed && String(siblingParsed.hook) === String(targetHook)){
               siblingEl.value = '';
               clearedOthers++;

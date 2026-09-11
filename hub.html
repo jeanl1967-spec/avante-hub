@@ -11,6 +11,14 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Avante Hub">
+<!--
+  Shared with admin.html — the pure, stateless pieces of the "Upload PDF
+  instead of a Landing page link" feature (URL shape, parsing, file-type
+  check). Loaded early (before any inline script needs it) since these two
+  pages' independently-written copies of this logic once drifted apart in
+  a way that opened a real security bug — see hook-pdf-link.js itself.
+-->
+<script src="hook-pdf-link.js"></script>
 <script>
   // ---------- Auth gate ----------
   // Runs immediately, before the page renders, so an unauthenticated visitor
@@ -2978,7 +2986,6 @@
       grid.innerHTML = html;
 
       var IMAGE_MAX_BYTES = 4 * 1024 * 1024; // 4MB
-      var PDF_MAX_BYTES = 10 * 1024 * 1024; // 10MB
 
       function isValidUrl(v){ return /^https?:\/\//i.test(v); }
 
@@ -3316,10 +3323,6 @@
         });
       }
 
-      function hookPdfUrl(affId, n){
-        return window.location.origin + '/api/hook-pdf?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n);
-      }
-
       // Uploads a PDF (a brochure, rate sheet, flyer) as an alternative to
       // building a Landing page link to our own hook-landing.html page —
       // same "fill the field, still needs Save" pattern as every other
@@ -3338,17 +3341,12 @@
           statusEl.className = 'status show';
           return;
         }
-        // file.type comes from the browser/OS and isn't always reliable —
-        // some mobile share-sheet/scanner flows hand over a real PDF with
-        // an empty or generic type (e.g. application/octet-stream).
-        // Accept either a correctly-reported type or a .pdf filename; the
-        // server's own magic-byte check is the real, authoritative gate.
-        if(file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)){
+        if(!PdfLinkTool.isPdfFile(file)){
           statusEl.textContent = 'Please choose a PDF file.';
           statusEl.className = 'status show';
           return;
         }
-        if(file.size > PDF_MAX_BYTES){
+        if(file.size > PdfLinkTool.PDF_MAX_BYTES){
           statusEl.textContent = 'That PDF is too large — please use one under 10MB.';
           statusEl.className = 'status show';
           return;
@@ -3369,7 +3367,7 @@
             statusEl.className = 'status show';
             return;
           }
-          document.getElementById('h' + n + '-landing').value = hookPdfUrl(affId, n);
+          document.getElementById('h' + n + '-landing').value = PdfLinkTool.hookPdfUrl(affId, n);
           statusEl.textContent = 'PDF uploaded — Landing page link updated below. Remember to click "Save hook".';
           statusEl.className = 'status show';
           showToast('PDF uploaded');
@@ -3377,26 +3375,6 @@
           statusEl.textContent = 'We couldn\'t reach the server — please check your connection and try again.';
           statusEl.className = 'status show';
         });
-      }
-
-      // If url is one of our own hook-pdf links, returns the exact
-      // {aff, hook} it points at (parsed from its own query string, not
-      // assumed from context) — otherwise null. Used by deleteHookPdf so a
-      // hook-pdf link that's been copy-pasted into a *different* hook's
-      // Landing page link (to reuse the same brochure across promos)
-      // still deletes the actual file that link points at, not whatever
-      // aff/hook happen to apply to the field it was pasted into.
-      function parseHookPdfUrl(url){
-        try{
-          var u = new URL(url, window.location.href);
-          if(u.origin !== window.location.origin || u.pathname !== '/api/hook-pdf') return null;
-          var aff = u.searchParams.get('aff');
-          var hook = u.searchParams.get('hook');
-          if(!aff || !hook) return null;
-          return { aff: aff, hook: hook };
-        }catch(e){
-          return null;
-        }
       }
 
       // Removes the PDF a hook's Landing page link actually points at.
@@ -3432,7 +3410,7 @@
         // "just delete my own hook n instead".
         var landingEl = document.getElementById('h' + n + '-landing');
         var landingVal = landingEl.value.trim();
-        var parsedRaw = parseHookPdfUrl(landingVal);
+        var parsedRaw = PdfLinkTool.parseHookPdfUrl(landingVal);
         if(parsedRaw && parsedRaw.aff !== affId){
           statusEl.textContent = 'That Landing page link doesn\'t belong to you — please clear or replace it before removing a PDF here.';
           statusEl.className = 'status show';
@@ -3461,7 +3439,7 @@
             if(s === n) continue;
             var siblingEl = document.getElementById('h' + s + '-landing');
             if(!siblingEl) continue;
-            var siblingParsed = parseHookPdfUrl(siblingEl.value.trim());
+            var siblingParsed = PdfLinkTool.parseHookPdfUrl(siblingEl.value.trim());
             if(siblingParsed && siblingParsed.aff === affId && String(siblingParsed.hook) === String(targetHook)){
               siblingEl.value = '';
               clearedOthers++;
