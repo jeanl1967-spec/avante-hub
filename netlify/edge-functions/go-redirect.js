@@ -26,10 +26,14 @@ export default async (request, context) => {
     const record = await store.get(slug, { type: "json" });
 
     if (!record || !record.url) {
-      return new Response(
-        "This short link doesn't exist or has expired.",
-        { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } }
-      );
+      // Every real page on this domain (hub.html, admin.html, the various
+      // onboarding/application forms, etc.) reaches this function too, since
+      // it's a catch-all on go.avantetravel.co.za. A slug that isn't a known
+      // short link almost always means "this is a real page, not a short
+      // link" — so it falls through to normal static serving rather than
+      // hard-erroring. Genuinely nonexistent paths still end up 404ing
+      // normally once nothing (short link or real file) matches them.
+      return context.next();
     }
 
     // Count the click without holding up the redirect.
