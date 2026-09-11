@@ -65,6 +65,19 @@ export default async (request, context) => {
         });
       }
 
+      // Reject an oversized upload from its declared Content-Length before
+      // ever buffering the body — the byteLength check below still runs as
+      // a fallback for a request that lies about (or omits) that header,
+      // but this avoids paying the full memory/bandwidth cost of reading
+      // an obviously-too-large body first.
+      const declaredLength = Number(request.headers.get("content-length") || "0");
+      if (declaredLength > MAX_BYTES) {
+        return new Response(JSON.stringify({ error: "PDF too large (max 10MB)" }), {
+          status: 413,
+          headers: { "content-type": "application/json", ...cors },
+        });
+      }
+
       const buf = await request.arrayBuffer();
       if (buf.byteLength > MAX_BYTES) {
         return new Response(JSON.stringify({ error: "PDF too large (max 10MB)" }), {

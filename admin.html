@@ -3490,7 +3490,12 @@
         statusEl.className = 'status';
         statusEl.textContent = '';
 
-        if(file.type !== 'application/pdf'){
+        // file.type comes from the browser/OS and isn't always reliable —
+        // some file managers hand over a real PDF with an empty or generic
+        // type (e.g. application/octet-stream). Accept either a
+        // correctly-reported type or a .pdf filename; the server's own
+        // magic-byte check is the real, authoritative gate.
+        if(file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)){
           statusEl.textContent = 'Please choose a PDF file.';
           statusEl.className = 'status show';
           return;
@@ -3566,8 +3571,33 @@
         fetch('/api/hook-pdf?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(targetHook), { method: 'DELETE' }).then(function(res){
           if(!res.ok) throw new Error('delete failed');
           if(parsed) landingEl.value = '';
-          statusEl.textContent = '';
-          statusEl.className = 'status';
+
+          // Same hook-pdf link can be deliberately pasted into more than
+          // one default hook's Landing page link field to share one
+          // brochure — now that the underlying file is gone, clear every
+          // other hook still pointing at that exact hook number too, not
+          // just the one the button was clicked on, so nothing is left
+          // silently pointing at a 404 (every default hook shares the same
+          // __admin__ aff, so only the hook number needs to match).
+          var clearedOthers = 0;
+          for(var s = 1; s <= HOOK_COUNT; s++){
+            if(s === n) continue;
+            var siblingEl = document.getElementById('dh' + s + '-landing');
+            if(!siblingEl) continue;
+            var siblingParsed = parseHookPdfUrl(siblingEl.value.trim());
+            if(siblingParsed && String(siblingParsed.hook) === String(targetHook)){
+              siblingEl.value = '';
+              clearedOthers++;
+            }
+          }
+
+          if(clearedOthers){
+            statusEl.textContent = 'Also cleared from ' + clearedOthers + ' other hook' + (clearedOthers === 1 ? '' : 's') + ' reusing this PDF — remember to click "Save default" on ' + (clearedOthers === 1 ? 'it' : 'those') + ' too.';
+            statusEl.className = 'status show';
+          }else{
+            statusEl.textContent = '';
+            statusEl.className = 'status';
+          }
           showToast('PDF removed');
         }).catch(function(){
           statusEl.textContent = 'Could not remove that PDF — please try again.';
