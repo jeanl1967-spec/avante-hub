@@ -3013,10 +3013,24 @@
 
       // Append ?aff=<id> (or &aff=<id> if the landing link already has query
       // params) so the landing page can tell which affiliate sent the click.
+      // Skips our own hook-pdf / hook-landing.html links entirely — their
+      // aff= is already the exact affiliate+hook combo that link was built
+      // for (needed to actually locate the stored PDF, or personalize the
+      // right hook), not a generic tracking tag safe to overwrite with
+      // whichever affId happens to be current right now. Blindly re-tagging
+      // it here previously meant the *displayed*, shareable landing link
+      // could silently point at the wrong affiliate's PDF/hook if the
+      // booking link (and so the computed affId) changed after the link
+      // was built but before "Save hook" was clicked — even though the
+      // record saved to the backend was unaffected, since this function
+      // only touches the preview text shown/copied from this row.
       function tagLandingUrl(landingUrl, affId){
         if(!affId) return landingUrl;
         try{
           var u = new URL(landingUrl);
+          if(u.origin === window.location.origin && (u.pathname === '/api/hook-pdf' || u.pathname === '/hook-landing.html')){
+            return landingUrl;
+          }
           u.searchParams.set('aff', affId);
           return u.toString();
         }catch(e){
@@ -3360,32 +3374,52 @@
         });
       }
 
-      // Removes this hook's uploaded PDF. Also clears the Landing page
-      // link field if it's still pointing at that exact PDF, so "Save
-      // hook" can't leave behind a link to a file that no longer exists —
-      // a landing link the affiliate typed or built some other way is
-      // left completely untouched.
+      // If url is one of our own hook-pdf links, returns the exact
+      // {aff, hook} it points at (parsed from its own query string, not
+      // assumed from context) — otherwise null. Used by deleteHookPdf so a
+      // hook-pdf link that's been copy-pasted into a *different* hook's
+      // Landing page link (to reuse the same brochure across promos)
+      // still deletes the actual file that link points at, not whatever
+      // aff/hook happen to apply to the field it was pasted into.
+      function parseHookPdfUrl(url){
+        try{
+          var u = new URL(url, window.location.href);
+          if(u.origin !== window.location.origin || u.pathname !== '/api/hook-pdf') return null;
+          var aff = u.searchParams.get('aff');
+          var hook = u.searchParams.get('hook');
+          if(!aff || !hook) return null;
+          return { aff: aff, hook: hook };
+        }catch(e){
+          return null;
+        }
+      }
+
+      // Removes the PDF a hook's Landing page link actually points at.
+      // Also clears the field afterward, so "Save hook" can't leave behind
+      // a link to a file that no longer exists — a landing link the
+      // affiliate typed or built some other way is left completely
+      // untouched.
       function deleteHookPdf(n){
         var statusEl = document.getElementById('h' + n + '-pdfStatus');
         statusEl.className = 'status';
         statusEl.textContent = '';
 
-        // Prefer the aff the PDF was actually uploaded under — read straight
-        // back out of the Landing page link field itself (it's a hook-pdf
-        // URL with ?aff=<id> in it) — over recomputing one fresh from the
-        // current booking field. Booking and landing can drift apart (the
-        // affiliate edits/replaces the booking link after uploading a PDF,
-        // before ever clicking "Save hook"), and recomputing would target
-        // the wrong store key: a no-op DELETE on a key nothing was ever
-        // uploaded to, leaving the real PDF behind while the UI claims it
-        // was removed. Only falls back to the booking-derived id when the
+        // Parse the real {aff, hook} straight out of the Landing page link
+        // field itself rather than assuming this hook's own number and a
+        // freshly recomputed affId — both can be wrong: booking and landing
+        // can drift apart (the affiliate edits the booking link after
+        // uploading a PDF, before ever clicking "Save hook"), and the same
+        // hook-pdf link can be deliberately reused across multiple hooks'
+        // Landing page link fields to share one brochure. Only falls back
+        // to this hook's own number + a booking-derived affId when the
         // landing field isn't currently a hook-pdf link at all (nothing
-        // uploaded yet, or "Remove PDF" clicked with no upload to remove).
+        // uploaded yet).
         var landingEl = document.getElementById('h' + n + '-landing');
         var landingVal = landingEl.value.trim();
-        var landingAffMatch = /[?&]aff=([^&]+)&hook=\d+$/.exec(landingVal.indexOf('/api/hook-pdf?') !== -1 ? landingVal : '');
+        var parsed = parseHookPdfUrl(landingVal);
         var bookingVal = document.getElementById('h' + n + '-booking').value.trim();
-        var affId = (landingAffMatch && decodeURIComponent(landingAffMatch[1])) || AFF_ID || (bookingVal ? extractAffiliateId(bookingVal) : '');
+        var affId = (parsed && parsed.aff) || AFF_ID || (bookingVal ? extractAffiliateId(bookingVal) : '');
+        var targetHook = (parsed && parsed.hook) || n;
         if(!affId){
           statusEl.textContent = 'Add your booking link above (or open the Hub using your own personalized link) before removing a PDF.';
           statusEl.className = 'status show';
@@ -3397,9 +3431,9 @@
         statusEl.textContent = 'Removing PDF…';
         statusEl.className = 'status show';
 
-        fetch('/api/hook-pdf?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), { method: 'DELETE' }).then(function(res){
+        fetch('/api/hook-pdf?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(targetHook), { method: 'DELETE' }).then(function(res){
           if(!res.ok) throw new Error('delete failed');
-          if(landingVal === hookPdfUrl(affId, n)) landingEl.value = '';
+          if(parsed) landingEl.value = '';
           statusEl.textContent = '';
           statusEl.className = 'status';
           showToast('PDF removed');

@@ -3526,11 +3526,29 @@
         });
       }
 
-      // Removes this hook's uploaded PDF. Also clears the Landing page
-      // link field if it's still pointing at that exact PDF, so "Save
-      // default" can't leave behind a link to a file that no longer
-      // exists — a landing link built or typed some other way is left
-      // completely untouched.
+      // If url is one of our own hook-pdf links, returns the exact hook
+      // number it points at (parsed from its own query string) —
+      // otherwise null. Used by deleteDefaultHookPdf so a hook-pdf link
+      // deliberately reused across multiple hooks' Landing page link
+      // fields (to share one brochure) still deletes the actual file that
+      // link points at, not whichever hook's card the button was clicked
+      // on.
+      function parseHookPdfUrl(url){
+        try{
+          var u = new URL(url, window.location.href);
+          if(u.origin !== window.location.origin || u.pathname !== '/api/hook-pdf') return null;
+          var hook = u.searchParams.get('hook');
+          if(u.searchParams.get('aff') !== ADMIN_AFF || !hook) return null;
+          return { hook: hook };
+        }catch(e){
+          return null;
+        }
+      }
+
+      // Removes the PDF a hook's Landing page link actually points at.
+      // Also clears the field afterward, so "Save default" can't leave
+      // behind a link to a file that no longer exists — a landing link
+      // built or typed some other way is left completely untouched.
       function deleteDefaultHookPdf(n){
         var statusEl = document.getElementById('dh' + n + '-pdfStatus');
         statusEl.className = 'status';
@@ -3538,13 +3556,16 @@
 
         if(!window.confirm('Remove this hook\'s uploaded PDF? This can\'t be undone.')) return;
 
+        var landingEl = document.getElementById('dh' + n + '-landing');
+        var parsed = parseHookPdfUrl(landingEl.value.trim());
+        var targetHook = (parsed && parsed.hook) || n;
+
         statusEl.textContent = 'Removing PDF…';
         statusEl.className = 'status show';
 
-        fetch('/api/hook-pdf?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(n), { method: 'DELETE' }).then(function(res){
+        fetch('/api/hook-pdf?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(targetHook), { method: 'DELETE' }).then(function(res){
           if(!res.ok) throw new Error('delete failed');
-          var landingEl = document.getElementById('dh' + n + '-landing');
-          if(landingEl.value.trim() === hookPdfUrl(n)) landingEl.value = '';
+          if(parsed) landingEl.value = '';
           statusEl.textContent = '';
           statusEl.className = 'status';
           showToast('PDF removed');
