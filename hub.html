@@ -3370,8 +3370,22 @@
         statusEl.className = 'status';
         statusEl.textContent = '';
 
+        // Prefer the aff the PDF was actually uploaded under — read straight
+        // back out of the Landing page link field itself (it's a hook-pdf
+        // URL with ?aff=<id> in it) — over recomputing one fresh from the
+        // current booking field. Booking and landing can drift apart (the
+        // affiliate edits/replaces the booking link after uploading a PDF,
+        // before ever clicking "Save hook"), and recomputing would target
+        // the wrong store key: a no-op DELETE on a key nothing was ever
+        // uploaded to, leaving the real PDF behind while the UI claims it
+        // was removed. Only falls back to the booking-derived id when the
+        // landing field isn't currently a hook-pdf link at all (nothing
+        // uploaded yet, or "Remove PDF" clicked with no upload to remove).
+        var landingEl = document.getElementById('h' + n + '-landing');
+        var landingVal = landingEl.value.trim();
+        var landingAffMatch = /[?&]aff=([^&]+)&hook=\d+$/.exec(landingVal.indexOf('/api/hook-pdf?') !== -1 ? landingVal : '');
         var bookingVal = document.getElementById('h' + n + '-booking').value.trim();
-        var affId = AFF_ID || (bookingVal ? extractAffiliateId(bookingVal) : '');
+        var affId = (landingAffMatch && decodeURIComponent(landingAffMatch[1])) || AFF_ID || (bookingVal ? extractAffiliateId(bookingVal) : '');
         if(!affId){
           statusEl.textContent = 'Add your booking link above (or open the Hub using your own personalized link) before removing a PDF.';
           statusEl.className = 'status show';
@@ -3385,8 +3399,7 @@
 
         fetch('/api/hook-pdf?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), { method: 'DELETE' }).then(function(res){
           if(!res.ok) throw new Error('delete failed');
-          var landingEl = document.getElementById('h' + n + '-landing');
-          if(landingEl.value.trim() === hookPdfUrl(affId, n)) landingEl.value = '';
+          if(landingVal === hookPdfUrl(affId, n)) landingEl.value = '';
           statusEl.textContent = '';
           statusEl.className = 'status';
           showToast('PDF removed');

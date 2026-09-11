@@ -6,6 +6,21 @@ import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 // URL once a PDF is uploaded, exactly the same "fill the field, still
 // needs Save" pattern as the other link builders. One PDF per hook, no
 // gallery/rotation concept (unlike hook-image.js) — simple replace.
+//
+// Deliberately not sharing hook-image.js's code despite the structural
+// overlap (CORS, aff/hook validation, store-key shape, GET/404 handling):
+// the two diverge on real behavior (no rotation/slots here, a different
+// content-type and magic-byte check, no galleryCount bookkeeping to keep
+// in sync) rather than being the same logic wearing a different content
+// type, so forcing a shared abstraction now seemed more likely to produce
+// an awkward one than a clean one. Revisit if a third asset-upload
+// endpoint shows up and the overlap is still this large.
+//
+// Same as hook-image.js: no authentication on POST/DELETE. `aff` (an
+// affiliate's real StockNetwork GUID, or "__admin__") is unguessable in
+// practice for a real affiliate, but this is a known, accepted gap in
+// this app's whole hook-asset story, not something specific to this file
+// — see the standing note on hook-api.js having no auth either.
 const MAX_BYTES = 10 * 1024 * 1024; // 10MB
 
 export default async (request, context) => {
