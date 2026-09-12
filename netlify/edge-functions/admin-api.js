@@ -1140,8 +1140,6 @@ export default async (request, context) => {
         landing: landing,
         caption: caption,
         hashtags: hashtags,
-        galleryCount: (existingForSave && existingForSave.galleryCount) || 0,
-        source: (existingForSave && existingForSave.source) || null,
         updatedAt: new Date().toISOString(),
       };
       await hookStore.setJSON("__admin__:" + n, record);
