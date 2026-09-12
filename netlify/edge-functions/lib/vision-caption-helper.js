@@ -55,7 +55,20 @@ function arrayBufferToBase64(buffer) {
 // Returns a caption string, or null if generation isn't possible / fails.
 export async function draftCaptionFromImage(imageBytes, mimeType) {
   if (!imageBytes || !imageBytes.byteLength) return null;
-  if (!SUPPORTED_MEDIA_TYPES.includes(mimeType)) return null;
+
+  // A stored content-type isn't always the clean "image/jpeg" a plain
+  // browser file upload sends — admin-api.js's saveHookPhotos stores
+  // whatever content-type header an external (StockNetwork) server sent
+  // verbatim, which can carry extra parameters (e.g. "image/jpeg;
+  // charset=binary"). Strip those before comparing, the same defensive
+  // instinct hook-image.js already applies via .startsWith("image/") at
+  // upload time — otherwise a perfectly valid image gets rejected here
+  // over a formatting technicality, not an actual unsupported format.
+  const normalizedMimeType = String(mimeType || "")
+    .split(";")[0]
+    .trim()
+    .toLowerCase();
+  if (!SUPPORTED_MEDIA_TYPES.includes(normalizedMimeType)) return null;
 
   const base64 = arrayBufferToBase64(imageBytes);
   const input = await callClaudeTool(
@@ -63,7 +76,7 @@ export async function draftCaptionFromImage(imageBytes, mimeType) {
       {
         role: "user",
         content: [
-          { type: "image", source: { type: "base64", media_type: mimeType, data: base64 } },
+          { type: "image", source: { type: "base64", media_type: normalizedMimeType, data: base64 } },
           {
             type: "text",
             text: "Write a ready-to-post promo caption for this travel flyer, based only on what's visible in the image.",

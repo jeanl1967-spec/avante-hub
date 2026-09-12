@@ -50,9 +50,14 @@ export default async (request, context) => {
       // slots at random, making "delete image" look like it didn't work).
       let galleryCount = 0;
       let readFailed = false;
+      let hadAnythingToClean = false;
       try {
         const record = await hookStore.get(aff + ":" + hook, { type: "json" });
         galleryCount = (record && record.galleryCount) || 0;
+        hadAnythingToClean = !!(
+          record &&
+          (galleryCount > 0 || record.imageHash || record.aiCaption || record.aiHashtags || record.aiImageHash)
+        );
       } catch (e) {
         // best-effort — if this lookup fails we still delete the cover key
         // below, but galleryCount stays 0 here purely because we don't
@@ -91,13 +96,26 @@ export default async (request, context) => {
       // merge when we're sure; otherwise it's left as whatever it already
       // is; mergeIntoRecord re-reads fresh right before writing either way,
       // so this can't clobber a concurrent edit to this same record.
-      const cleanupFields = {
-        ...AI_SCAN_CACHE_FIELDS_CLEARED,
-        imageHash: undefined,
-        updatedAt: new Date().toISOString(),
-      };
-      if (!readFailed) cleanupFields.galleryCount = 0;
-      await mergeIntoRecord(hookStore, aff + ":" + hook, cleanupFields);
+      //
+      // None of this runs at all when the read succeeded and genuinely
+      // found nothing (a hook that never had an image, or doesn't exist)
+      // — this endpoint is unauthenticated, so an unconditional write
+      // regardless of whether there's anything to clean would let anyone
+      // create a throwaway "promo-hooks" record for any random aff/hook
+      // pair just by calling DELETE on it, growing that store forever and
+      // slowing down admin tools that list every record in it. A failed
+      // read still always writes (readFailed below) since in that case we
+      // genuinely don't know, and erring toward cleanup is the safer
+      // default there.
+      if (readFailed || hadAnythingToClean) {
+        const cleanupFields = {
+          ...AI_SCAN_CACHE_FIELDS_CLEARED,
+          imageHash: undefined,
+          updatedAt: new Date().toISOString(),
+        };
+        if (!readFailed) cleanupFields.galleryCount = 0;
+        await mergeIntoRecord(hookStore, aff + ":" + hook, cleanupFields);
+      }
 
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "content-type": "application/json", ...cors },
