@@ -1,5 +1,5 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
-import { draftCaptionFromImage } from "./lib/vision-caption-helper.js";
+import { draftCaptionFromImage, isSupportedImageMediaType } from "./lib/vision-caption-helper.js";
 import { generateHashtags } from "./lib/hashtag-helper.js";
 import { sha256Hex } from "./lib/image-hash.js";
 import { mergeIntoRecord } from "./lib/record-merge.js";
@@ -189,18 +189,34 @@ export default async (request, context) => {
       if (!imageResult) return json({ ok: true, available: false, reason: "no-image" }, 200, cors);
     }
 
-    // Marked right before the real attempt, not any earlier — so a burst
-    // of near-simultaneous requests all reading a not-yet-updated
+    const mimeType = (imageResult.metadata && imageResult.metadata.contentType) || "image/jpeg";
+
+    // Same reasoning as the no-image check above: known for free, no
+    // network call involved, so it must not burn the attempt cooldown —
+    // otherwise replacing an unsupported-format image with a valid one
+    // and reopening the modal within the cooldown window would wrongly
+    // block that genuinely first-ever scan too.
+    if (!isSupportedImageMediaType(mimeType)) {
+      return json({ ok: true, available: false, reason: "scan-failed" }, 200, cors);
+    }
+
+    // Marked right before the real (billed) attempt, not any earlier — so
+    // a burst of near-simultaneous requests all reading a not-yet-updated
     // lastAttemptAt can't all slip past the check above before any of
     // them finish (see the module comment for this mitigation's limits).
+    // A missing ANTHROPIC_API_KEY still gets marked here even though
+    // draftCaptionFromImage will bail for free in that case too — left
+    // as is, since a missing key breaks every AI feature on the whole
+    // site, not just this one hook, and is something to fix in the
+    // environment, not a per-hook throttling nuance worth chasing.
     await mergeIntoRecord(hookStore, key, { lastAttemptAt: new Date().toISOString() });
 
-    const mimeType = (imageResult.metadata && imageResult.metadata.contentType) || "image/jpeg";
     const caption = await draftCaptionFromImage(imageResult.data, mimeType);
     if (!caption) {
-      // Best-effort — a missing API key, an unsupported image format, or a
-      // failed call all land here. The modal falls back to the hook's
-      // manually-typed caption, same as if this endpoint didn't exist.
+      // Best-effort — a missing API key or a failed call land here (an
+      // unsupported format was already handled above, before the
+      // cooldown mark). The modal falls back to the hook's manually-typed
+      // caption, same as if this endpoint didn't exist.
       return json({ ok: true, available: false, reason: "scan-failed" }, 200, cors);
     }
     const hashtags = await generateHashtags(caption);

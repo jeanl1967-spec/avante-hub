@@ -52,22 +52,39 @@ function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
+// A stored content-type isn't always the clean "image/jpeg" a plain
+// browser file upload sends — admin-api.js's saveHookPhotos stores
+// whatever content-type header an external (StockNetwork) server sent
+// verbatim, which can carry extra parameters (e.g. "image/jpeg;
+// charset=binary"). Strip those before comparing, the same defensive
+// instinct hook-image.js already applies via .startsWith("image/") at
+// upload time — otherwise a perfectly valid image gets rejected here over
+// a formatting technicality, not an actual unsupported format.
+//
+// Exported so hook-share-content.js can check this itself *before*
+// marking its per-hook attempt cooldown (see there) — an unsupported
+// format is known for free, with no network call, so it must not burn
+// the same cooldown a real (billed) attempt does.
+export function isSupportedImageMediaType(mimeType) {
+  const normalized = String(mimeType || "")
+    .split(";")[0]
+    .trim()
+    .toLowerCase();
+  return SUPPORTED_MEDIA_TYPES.includes(normalized);
+}
+
+function normalizeMediaType(mimeType) {
+  return String(mimeType || "")
+    .split(";")[0]
+    .trim()
+    .toLowerCase();
+}
+
 // Returns a caption string, or null if generation isn't possible / fails.
 export async function draftCaptionFromImage(imageBytes, mimeType) {
   if (!imageBytes || !imageBytes.byteLength) return null;
 
-  // A stored content-type isn't always the clean "image/jpeg" a plain
-  // browser file upload sends — admin-api.js's saveHookPhotos stores
-  // whatever content-type header an external (StockNetwork) server sent
-  // verbatim, which can carry extra parameters (e.g. "image/jpeg;
-  // charset=binary"). Strip those before comparing, the same defensive
-  // instinct hook-image.js already applies via .startsWith("image/") at
-  // upload time — otherwise a perfectly valid image gets rejected here
-  // over a formatting technicality, not an actual unsupported format.
-  const normalizedMimeType = String(mimeType || "")
-    .split(";")[0]
-    .trim()
-    .toLowerCase();
+  const normalizedMimeType = normalizeMediaType(mimeType);
   if (!SUPPORTED_MEDIA_TYPES.includes(normalizedMimeType)) return null;
 
   const base64 = arrayBufferToBase64(imageBytes);

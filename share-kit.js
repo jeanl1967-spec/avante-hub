@@ -167,6 +167,11 @@
           // (cached) caption as before, not a fresh take, so say so rather
           // than implying Regenerate did something it didn't.
           aiStatusEl.textContent = 'Just regenerated this one — try again in a bit for a fresh take.';
+        }else if(data.cached){
+          // A plain cache hit on open (not a fresh call, not throttled —
+          // just "this image was already scanned before") shouldn't claim
+          // something was just generated when nothing was.
+          aiStatusEl.textContent = '✨ Using the caption already generated from this image';
         }else{
           // Only claim hashtags were generated when they actually were —
           // the caption's own vision scan can succeed while the follow-up
