@@ -6,6 +6,7 @@ import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
 // from lib/image-hash.js hashes raw bytes, a different job worth keeping
 // separate rather than merging into one function with branching for both.
 import { sha256Hex as sha256HexBytes } from "./lib/image-hash.js";
+import { mergeIntoRecord } from "./lib/record-merge.js";
 import { isShortLink, resolveShortLink, findExistingShortLink, createShortLink } from "./lib/short-link.js";
 import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-link.js";
 import { resolveHookMode } from "./lib/hook-mode.js";
@@ -1214,9 +1215,19 @@ export default async (request, context) => {
       // wipe that out (orphaning its still-live image blobs) despite the
       // API telling the caller nothing was saved.
       if (saved > 0) {
+        // Only ever read to decide *whether* previously-covered gallery
+        // slots need cleaning up below (previousGalleryCount) — never
+        // written back directly. sha256HexBytes below is itself an await,
+        // so holding this record in memory across it and writing it back
+        // wholesale would risk clobbering a concurrent write to this same
+        // record (a caption/booking save via setDefaultHook, or an
+        // overlapping image upload) — the same lost-update hazard already
+        // fixed for hook-image.js and hook-share-content.js. mergeIntoRecord
+        // re-reads fresh immediately before writing instead.
         const existing = (await hookStore.get("__admin__:" + n, { type: "json" })) || {};
         const previousGalleryCount = existing.galleryCount || 0;
-        existing.galleryCount = galleryCount;
+
+        const fields = { galleryCount: galleryCount, updatedAt: new Date().toISOString() };
         // The cover image (the "saved === 0" slot above) was just
         // rewritten to a new photo — recompute its hash, and drop any AI
         // caption cached against the old one (hook-share-content.js), so
@@ -1224,10 +1235,10 @@ export default async (request, context) => {
         // caption describing whatever flyer this hook had before, and
         // instead re-scans this new cover.
         if (coverBuf) {
-          existing.imageHash = await sha256HexBytes(coverBuf);
-          delete existing.aiCaption;
-          delete existing.aiHashtags;
-          delete existing.aiImageHash;
+          fields.imageHash = await sha256HexBytes(coverBuf);
+          fields.aiCaption = undefined;
+          fields.aiHashtags = undefined;
+          fields.aiImageHash = undefined;
         }
         // Optional — carried straight through from generateHookDraft's
         // response rather than re-scraped here, so a hook remembers what
@@ -1236,7 +1247,7 @@ export default async (request, context) => {
         // save didn't come from an Auto-build draft (e.g. a future manual
         // photo save with no source context).
         if (body.source && typeof body.source === "object") {
-          existing.source = {
+          fields.source = {
             mode: body.source.mode === "area" ? "area" : "property",
             label: typeof body.source.label === "string" ? body.source.label.trim().slice(0, 200) : "",
             description: typeof body.source.description === "string" ? body.source.description.trim().slice(0, 2000) : "",
@@ -1247,8 +1258,7 @@ export default async (request, context) => {
               : [],
           };
         }
-        existing.updatedAt = new Date().toISOString();
-        await hookStore.setJSON("__admin__:" + n, existing);
+        await mergeIntoRecord(hookStore, "__admin__:" + n, fields);
 
         // A previous save may have covered more gallery slots than this
         // one did (e.g. 4 photos saved before, only 2 saved this time) —
