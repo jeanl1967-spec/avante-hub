@@ -347,14 +347,14 @@
     padding:4px 10px; border-radius:100px; margin-bottom:10px;
   }
   .hook-placeholder{
-    width:100%; aspect-ratio:4 / 5; height:auto; display:flex; align-items:center;
+    width:100%; aspect-ratio:1; height:auto; display:flex; align-items:center;
     justify-content:center; text-align:center; background:var(--mint);
     border:1.5px dashed #bfe6e2; border-radius:10px; color:var(--muted);
     font-size:12px; margin-bottom:4px;
   }
   .hook-image-wrap{ margin-bottom:8px; }
   .hook-image{
-    display:none; width:100%; aspect-ratio:4 / 5; height:auto; object-fit:contain;
+    display:none; width:100%; aspect-ratio:1; height:auto; object-fit:contain;
     background:var(--mint); border-radius:10px; border:1.5px solid var(--line);
   }
   .hook-image.show{ display:block; }
@@ -3354,6 +3354,7 @@
             '<div class="btn-row" style="margin-top:0;">' +
               '<button type="button" class="btn-outline" data-upload-image="' + i + '">Upload image</button>' +
             '</div>' +
+            '<div class="hint">Recommended: a square image, 1080 × 1080px — Facebook, Instagram, WhatsApp and LinkedIn each fit and crop this on their own once it\'s posted, so no extra cropping happens here.</div>' +
             '<div class="status" id="dh' + i + '-imageStatus"></div>' +
             '<div class="hook-updated" id="dh' + i + '-galleryNote" style="display:none;"></div>' +
             '<div class="hook-updated" id="dh' + i + '-sourceNote" style="display:none;"></div>' +
