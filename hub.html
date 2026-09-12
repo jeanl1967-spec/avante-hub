@@ -512,7 +512,7 @@
   }
   .hook-placeholder{
     width:100%;
-    aspect-ratio:4 / 5;
+    aspect-ratio:1;
     height:auto;
     display:flex;
     align-items:center;
@@ -529,7 +529,7 @@
   .hook-image{
     display:none;
     width:100%;
-    aspect-ratio:4 / 5;
+    aspect-ratio:1;
     height:auto;
     object-fit:contain;
     background:var(--mint);
@@ -3000,6 +3000,7 @@
               '<button type="button" class="btn-outline" data-upload-image="' + i + '">Upload image</button>' +
               '<button type="button" class="btn-outline" data-delete-image="' + i + '">Delete image</button>' +
             '</div>' +
+            '<div class="hint">Recommended: a square image, 1080 × 1080px — Facebook, Instagram, WhatsApp and LinkedIn each fit and crop this on their own once it\'s posted, so no extra cropping happens here.</div>' +
             '<div class="status" id="h' + i + '-imageStatus"></div>' +
             '<label for="h' + i + '-booking">Booking link</label>' +
             '<input id="h' + i + '-booking" placeholder="Your StockNetwork booking link for this promo">' +
