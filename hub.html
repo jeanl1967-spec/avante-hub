@@ -566,6 +566,8 @@
   .sharekit-body{ display:flex; gap:20px; flex-wrap:wrap; }
   .sharekit-canvas-wrap canvas{ border-radius:8px; border:1.5px solid var(--line); background:var(--mint); display:block; }
   .sharekit-dims{ font-size:11px; color:var(--muted); margin-top:8px; }
+  .sharekit-ai-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:8px; font-size:11.5px; color:var(--muted); }
+  .sharekit-ai-row button{ padding:4px 10px; font-size:11.5px; flex:none; white-space:nowrap; }
   .sharekit-text-col{ flex:1; min-width:230px; display:flex; flex-direction:column; }
   .sharekit-caption{ width:100%; min-height:150px; font-size:13px; font-family:'Noto Sans',sans-serif; }
   .sharekit-actions{ display:flex; gap:10px; margin-top:12px; }
@@ -927,6 +929,10 @@
           <div class="sharekit-dims" id="shareKitDims"></div>
           <label for="shareKitCaption" style="margin-top:10px;">Caption</label>
           <textarea class="sharekit-caption" id="shareKitCaption" readonly></textarea>
+          <div class="sharekit-ai-row" id="shareKitAiRow" style="display:none;">
+            <span id="shareKitAiStatus"></span>
+            <button type="button" class="btn-outline" id="shareKitRegenBtn" style="display:none;">🔄 Regenerate</button>
+          </div>
           <div class="sharekit-actions">
             <button type="button" class="btn-outline" id="shareKitCopyBtn">Copy Caption</button>
             <button type="button" class="btn-secondary" id="shareKitDownloadBtn">Download Image</button>
@@ -3726,7 +3732,8 @@
             caption: resolved ? resolved.caption : document.getElementById('h' + shareN + '-caption').value.trim(),
             hashtags: resolved ? (resolved.hashtags || null) : null,
             link: clientLink,
-            linkLabel: 'Your link'
+            linkLabel: 'Your link',
+            shareContentUrl: imageAff ? ('/api/hook-share-content?aff=' + encodeURIComponent(imageAff) + '&hook=' + encodeURIComponent(shareN)) : ''
           });
         }
       });

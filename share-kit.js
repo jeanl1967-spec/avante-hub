@@ -20,11 +20,22 @@
 // untouched — sizing it for its own feed is each platform's job, not
 // ours. Only the caption + hashtags still vary per platform.
 //
+// Also scans the hook's image itself (via /api/hook-share-content, a
+// Claude vision call) to offer a caption drafted from what's actually on
+// the flyer — property/festival name, dates, price — instead of only
+// whatever was typed by hand into the hook's own Caption field. That AI
+// caption only ever fills this modal's own caption box; it's never written
+// back to the hook's saved Caption field. The scan result is cached
+// server-side per image, so reopening the modal on an unchanged image is
+// a cheap cache read, not a fresh AI call each time — see
+// hook-share-content.js for the caching rule.
+//
 // Depends on the page it's loaded from already defining a global
 // showToast(message) function, and rendering the Share Kit modal markup
 // with these exact element ids: shareKitModalOverlay, shareKitTabs,
 // shareKitCanvasWrap, shareKitDims, shareKitCaption, shareKitCopyBtn,
-// shareKitDownloadBtn, shareKitCloseBtn, shareKitTitle.
+// shareKitDownloadBtn, shareKitCloseBtn, shareKitTitle, shareKitAiRow,
+// shareKitAiStatus, shareKitRegenBtn.
 (function(){
   var PLATFORMS = [
     { id: 'facebook', label: 'Facebook' },
@@ -45,15 +56,22 @@
   var downloadBtn = document.getElementById('shareKitDownloadBtn');
   var closeBtn = document.getElementById('shareKitCloseBtn');
   var titleEl = document.getElementById('shareKitTitle');
+  // Optional — a caller that hasn't added the AI-scan row to its modal
+  // markup yet still gets everything else; the scan just never fires
+  // (currentShareContentUrl stays empty, see requestAiContent below).
+  var aiRowEl = document.getElementById('shareKitAiRow');
+  var aiStatusEl = document.getElementById('shareKitAiStatus');
+  var aiRegenBtn = document.getElementById('shareKitRegenBtn');
 
   var currentImg = null;
   var currentPlatform = PLATFORMS[0];
   var currentCanvas = null;
-  var openSeq = 0; // bumped on every openShareKit call, so a slow-loading image from a previous open can't clobber a newer one
+  var openSeq = 0; // bumped on every openShareKit call, so a slow-loading image (or AI scan) from a previous open can't clobber a newer one
   var currentCaption = '';
   var currentLink = '';
   var currentLinkLabel = '';
   var currentHashtags = null; // { facebook: [...], instagram: [...], whatsapp: [], linkedin: [...] } | null
+  var currentShareContentUrl = ''; // /api/hook-share-content?aff=..&hook=.. for this hook, or '' if not supplied
 
   function drawToCanvas(img){
     var size = EXPORT_SIZE;
@@ -111,6 +129,40 @@
     captionEl.value = buildCaptionText(currentCaption, tags, currentLink, currentLinkLabel);
   }
 
+  // Asks hook-share-content.js to (re)scan this hook's image. force=false
+  // is the automatic scan on open (cheap — a cache read whenever the image
+  // hasn't changed since it was last scanned); force=true is the modal's
+  // "Regenerate" button, which always re-scans regardless of cache.
+  function requestAiContent(seq, force){
+    if(!currentShareContentUrl || !aiRowEl || !aiStatusEl || !aiRegenBtn) return;
+    aiRowEl.style.display = '';
+    aiStatusEl.textContent = force ? 'Regenerating from image…' : 'Scanning image for a caption…';
+    aiRegenBtn.disabled = true;
+    if(!force) aiRegenBtn.style.display = 'none'; // nothing to regenerate until the first scan succeeds
+
+    var sep = currentShareContentUrl.indexOf('?') >= 0 ? '&' : '?';
+    fetch(currentShareContentUrl + sep + 'force=' + (force ? '1' : '0'), { method: 'POST' })
+      .then(function(res){ return res.json(); })
+      .then(function(data){
+        if(seq !== openSeq) return; // a newer modal has since opened — ignore this stale response
+        aiRegenBtn.disabled = false;
+        if(!data || !data.available){
+          aiRowEl.style.display = 'none';
+          return;
+        }
+        currentCaption = data.caption || currentCaption;
+        if(data.hashtags) currentHashtags = data.hashtags;
+        aiStatusEl.textContent = '✨ Caption + hashtags generated from this image';
+        aiRegenBtn.style.display = '';
+        renderPlatform(currentPlatform);
+      })
+      .catch(function(){
+        if(seq !== openSeq) return;
+        aiRegenBtn.disabled = false;
+        aiStatusEl.textContent = "Couldn't scan the image — showing the typed caption instead.";
+      });
+  }
+
   function buildCaptionText(caption, hashtags, link, linkLabel){
     var lines = [];
     lines.push(caption || '(No caption written yet — add one above and reopen this.)');
@@ -166,6 +218,10 @@
     }, 'image/png');
   });
 
+  if(aiRegenBtn){
+    aiRegenBtn.addEventListener('click', function(){ requestAiContent(openSeq, true); });
+  }
+
   closeBtn.addEventListener('click', function(){ overlay.classList.remove('show'); });
   overlay.addEventListener('click', function(e){ if(e.target === overlay) overlay.classList.remove('show'); });
 
@@ -177,11 +233,14 @@
     currentLink = opts.link || '';
     currentLinkLabel = opts.linkLabel || '';
     currentHashtags = opts.hashtags || null;
+    currentShareContentUrl = opts.shareContentUrl || '';
     currentImg = null;
     currentCanvas = null;
     currentPlatform = PLATFORMS[0];
     overlay.classList.add('show');
     var seq = ++openSeq;
+
+    if(aiRowEl) aiRowEl.style.display = 'none'; // reset from any previous open until this one's own scan responds
 
     var tabsHtml = '';
     PLATFORMS.forEach(function(p){
@@ -189,6 +248,8 @@
     });
     tabsEl.innerHTML = tabsHtml;
     renderPlatform(currentPlatform);
+
+    if(currentShareContentUrl) requestAiContent(seq, false);
 
     if(opts.imageUrl){
       var img = new Image();

@@ -1,4 +1,5 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
+import { sha256Hex } from "./lib/image-hash.js";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
@@ -59,8 +60,18 @@ export default async (request, context) => {
       for (let s = 1; s <= galleryCount; s++) keysToDelete.push(aff + ":" + hook + ":" + s);
       await Promise.all(keysToDelete.map((k) => store.delete(k).catch(() => {})));
 
-      if (record && galleryCount > 0) {
+      // Also drop imageHash and any cached AI scan (hook-share-content.js)
+      // — they describe an image that no longer exists, so leaving them
+      // would let a later scan request serve a stale cached caption for
+      // whatever image eventually replaces this one, right up until that
+      // replacement's own hash happened to differ (it always would, but
+      // there's no reason to rely on that).
+      if (record && (galleryCount > 0 || record.imageHash || record.aiCaption || record.aiHashtags || record.aiImageHash)) {
         record.galleryCount = 0;
+        delete record.imageHash;
+        delete record.aiCaption;
+        delete record.aiHashtags;
+        delete record.aiImageHash;
         record.updatedAt = new Date().toISOString();
         await hookStore.setJSON(aff + ":" + hook, record).catch(() => {});
       }
@@ -97,17 +108,26 @@ export default async (request, context) => {
       // instead of the image just uploaded. An explicit ?slot= POST (no
       // current caller sends one, but defensively) is a single-slot
       // write, not a full replace, so it skips this.
+      //
+      // Also records a content hash of the new image, so
+      // hook-share-content.js's AI caption scan can tell a genuinely new
+      // image apart from the same one being re-saved, and re-scan only
+      // when it actually needs to. Any previously cached AI caption is
+      // left in place here (not cleared) — hook-share-content.js compares
+      // hashes itself and only trusts a cached caption whose hash still
+      // matches this new one, which it never will after this write.
       if (key === aff + ":" + hook) {
         try {
-          const record = await hookStore.get(key, { type: "json" });
-          const galleryCount = (record && record.galleryCount) || 0;
+          const record = (await hookStore.get(key, { type: "json" })) || {};
+          const galleryCount = record.galleryCount || 0;
           if (galleryCount > 0) {
             const staleSlots = [];
             for (let s = 1; s <= galleryCount; s++) staleSlots.push(key + ":" + s);
             await Promise.all(staleSlots.map((k) => store.delete(k).catch(() => {})));
             record.galleryCount = 0;
-            await hookStore.setJSON(key, record).catch(() => {});
           }
+          record.imageHash = await sha256Hex(buf);
+          await hookStore.setJSON(key, record).catch(() => {});
         } catch (e) {
           // best-effort — the cover upload above already succeeded either way
         }
