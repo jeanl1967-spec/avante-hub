@@ -187,6 +187,20 @@ export default async (request, context) => {
       // first-ever scan, not a repeat, and must not be held back by a
       // cooldown from a request that never reached the paid API at all).
       if (!imageResult) return json({ ok: true, available: false, reason: "no-image" }, 200, cors);
+
+      // For a hook that already had an imageHash (skipping the backfill
+      // branch above entirely), currentHash has been sitting unverified
+      // since the record read at the very top of this request. Refresh it
+      // now, right alongside actually fetching the bytes we're about to
+      // scan: a concurrent upload landing in that gap would otherwise
+      // leave us writing aiImageHash: (the old, stale hash) further down
+      // for a caption generated from different, newer bytes — never wrong
+      // content (the caption itself always describes whatever was
+      // actually fetched), but a mislabeled cache entry that forces one
+      // avoidable extra scan next time. The backfill branch above already
+      // has its own equivalent re-check before ever reaching this point.
+      const freshRecord = await hookStore.get(key, { type: "json" });
+      if (freshRecord && freshRecord.imageHash) currentHash = freshRecord.imageHash;
     }
 
     const mimeType = (imageResult.metadata && imageResult.metadata.contentType) || "image/jpeg";

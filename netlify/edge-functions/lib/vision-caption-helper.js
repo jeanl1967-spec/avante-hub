@@ -61,23 +61,21 @@ function arrayBufferToBase64(buffer) {
 // upload time — otherwise a perfectly valid image gets rejected here over
 // a formatting technicality, not an actual unsupported format.
 //
-// Exported so hook-share-content.js can check this itself *before*
-// marking its per-hook attempt cooldown (see there) — an unsupported
-// format is known for free, with no network call, so it must not burn
-// the same cooldown a real (billed) attempt does.
-export function isSupportedImageMediaType(mimeType) {
-  const normalized = String(mimeType || "")
-    .split(";")[0]
-    .trim()
-    .toLowerCase();
-  return SUPPORTED_MEDIA_TYPES.includes(normalized);
-}
-
 function normalizeMediaType(mimeType) {
   return String(mimeType || "")
     .split(";")[0]
     .trim()
     .toLowerCase();
+}
+
+// Exported so hook-share-content.js can check this itself *before*
+// marking its per-hook attempt cooldown (see there) — an unsupported
+// format is known for free, with no network call, so it must not burn
+// the same cooldown a real (billed) attempt does. Built on the same
+// normalizeMediaType draftCaptionFromImage itself uses below, so the two
+// can't silently drift into disagreeing about what counts as supported.
+export function isSupportedImageMediaType(mimeType) {
+  return SUPPORTED_MEDIA_TYPES.includes(normalizeMediaType(mimeType));
 }
 
 // Returns a caption string, or null if generation isn't possible / fails.
