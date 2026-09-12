@@ -110,7 +110,17 @@ export default async (request, context) => {
         await hookStore.setJSON(key, freshForBackfill).catch(() => {});
         currentHash = backfilledHash;
       } else {
+        // A concurrent upload got there first — currentHash now points to
+        // its real, newer hash, but `imageResult` above still holds the
+        // OLD cover's bytes (fetched before that upload landed). Scanning
+        // those now-stale bytes and tagging the result as aiImageHash:
+        // currentHash (the NEW hash) would describe the wrong image while
+        // looking, to every future cache check, exactly like a valid scan
+        // of the current one. Discard imageResult so the fetch further
+        // down (which only runs when it's still null) picks up the real
+        // current bytes instead.
         currentHash = freshForBackfill.imageHash;
+        imageResult = null;
       }
     }
 
