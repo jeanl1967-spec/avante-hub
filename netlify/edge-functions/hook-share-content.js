@@ -153,7 +153,14 @@ export default async (request, context) => {
     if (record.lastAttemptAt) {
       const sinceAttemptMs = Date.now() - new Date(record.lastAttemptAt).getTime();
       if (isFinite(sinceAttemptMs) && sinceAttemptMs < ATTEMPT_COOLDOWN_MS) {
-        if (record.aiCaption) {
+        // Only ever fall back to the cached caption here if it actually
+        // describes the CURRENT image — the cache-hit check above already
+        // failed by the time we reach this point, meaning either there's
+        // no cache yet or (just as likely) the image has since changed.
+        // Serving record.aiCaption unconditionally would present a stale
+        // caption for a now-different photo as if it were valid, current,
+        // cached content — worse than declining outright.
+        if (record.aiCaption && record.aiImageHash === currentHash) {
           return json(
             {
               ok: true,

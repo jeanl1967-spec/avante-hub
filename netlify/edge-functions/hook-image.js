@@ -143,6 +143,22 @@ export default async (request, context) => {
       // single upload would risk clobbering a concurrent caption/booking
       // save to this same record far more often than the old,
       // gallery-reset-only write path ever could.
+      // Known, accepted narrow race (not fixed — see reasoning below):
+      // galleryCount here is read once, before the sha256Hex await, and
+      // used to decide both which gallery slots to physically delete and
+      // whether to merge galleryCount:0 afterward. mergeIntoRecord's own
+      // re-read-before-write protects every *other* field from being
+      // clobbered, but it can't retroactively validate a decision already
+      // acted on using stale data — if admin-api.js's saveHookPhotos
+      // (Auto-build) writes a fresh, different gallery for this exact
+      // hook in the moment between this read and this branch's writes,
+      // this upload could still delete Auto-build's newly-saved slot
+      // blobs and reset its galleryCount back to 0. Fixing that fully
+      // would need real per-hook locking around the delete+write pair,
+      // not just a smarter merge — disproportionate for what this is: two
+      // different admin actions (a manual cover upload and Auto-build's
+      // multi-photo picker) targeting the identical hook within the same
+      // sub-second window, recoverable by simply re-running Auto-build.
       if (key === aff + ":" + hook) {
         try {
           const record = (await hookStore.get(key, { type: "json" })) || {};
