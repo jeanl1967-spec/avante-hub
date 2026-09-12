@@ -89,13 +89,29 @@ export default async (request, context) => {
       // would redo this exact same fetch-and-hash for nothing.
       imageResult = await imageStore.getWithMetadata(key, { type: "arrayBuffer" });
       if (!imageResult) return json({ ok: true, available: false, reason: "no-image" }, 200, cors);
-      currentHash = await sha256Hex(imageResult.data);
-      record.imageHash = currentHash;
-      // Merged into a freshly re-read copy of the record, not written back
-      // via the `record` object read at the top of this request — see the
-      // long comment on the write further down for why a stale full-object
-      // write is a real lost-update hazard, not just theoretical.
-      await mergeIntoRecord(hookStore, key, { imageHash: currentHash });
+      const backfilledHash = await sha256Hex(imageResult.data);
+
+      // Unlike the writes further down, this can't just use
+      // mergeIntoRecord's blind merge: imageHash is the record's one
+      // ground-truth pointer to "what the current cover image actually
+      // is" (aiImageHash is allowed to lag it — that's the whole cache
+      // check below — but imageHash itself never should). The two awaits
+      // above (fetch, then hash) are enough of a window for a concurrent
+      // hook-image.js upload to have already written a newer, real
+      // imageHash — blindly merging our own guess over that would revert
+      // a real, current value back to a stale one, which a plain
+      // "preserve other fields" merge wouldn't catch since imageHash IS
+      // the field being written. So: only persist ours if the record
+      // still has none, and either way use whatever's actually there now
+      // as currentHash — never our own possibly-stale computation.
+      const freshForBackfill = (await hookStore.get(key, { type: "json" })) || {};
+      if (!freshForBackfill.imageHash) {
+        freshForBackfill.imageHash = backfilledHash;
+        await hookStore.setJSON(key, freshForBackfill).catch(() => {});
+        currentHash = backfilledHash;
+      } else {
+        currentHash = freshForBackfill.imageHash;
+      }
     }
 
     if (!force && record.aiCaption && record.aiImageHash === currentHash) {

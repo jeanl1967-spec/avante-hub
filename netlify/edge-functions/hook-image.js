@@ -49,40 +49,41 @@ export default async (request, context) => {
       // would still occasionally serve one of the now-orphaned gallery
       // slots at random, making "delete image" look like it didn't work).
       let galleryCount = 0;
-      let record = null;
       try {
-        record = await hookStore.get(aff + ":" + hook, { type: "json" });
+        const record = await hookStore.get(aff + ":" + hook, { type: "json" });
         galleryCount = (record && record.galleryCount) || 0;
       } catch (e) {
-        // best-effort — if this lookup fails we still delete the cover key below
+        // best-effort — if this lookup fails we still delete the cover key
+        // below, and still attempt the cleanup write further down
+        // unconditionally regardless (galleryCount just stays 0, meaning
+        // no gallery slots to also delete here — a real gallery, if any,
+        // would be caught by the unconditional cleanup's own best-effort
+        // fresh read instead).
       }
 
       const keysToDelete = [aff + ":" + hook];
       for (let s = 1; s <= galleryCount; s++) keysToDelete.push(aff + ":" + hook + ":" + s);
       await Promise.all(keysToDelete.map((k) => store.delete(k).catch(() => {})));
 
-      // Also drop imageHash and any cached AI scan (hook-share-content.js)
-      // — they describe an image that no longer exists, so leaving them
-      // would let a later scan request serve a stale cached caption for
-      // whatever image eventually replaces this one, right up until that
-      // replacement's own hash happened to differ (it always would, but
-      // there's no reason to rely on that). Written via mergeIntoRecord
-      // (re-reads fresh right before writing) rather than the `record`
-      // read above, which only exists to decide *whether* a write is
-      // needed and which gallery slots to delete — writing it back
-      // directly would risk clobbering a concurrent edit to this same
-      // record (e.g. a caption/booking save landing in between).
-      if (record && (galleryCount > 0 || record.imageHash || record.aiCaption || record.aiHashtags || record.aiImageHash)) {
-        await mergeIntoRecord(hookStore, aff + ":" + hook, {
-          galleryCount: 0,
-          imageHash: undefined,
-          aiCaption: undefined,
-          aiHashtags: undefined,
-          aiImageHash: undefined,
-          aiGeneratedAt: undefined,
-          updatedAt: new Date().toISOString(),
-        });
-      }
+      // Always attempted — not gated on whether the read above succeeded
+      // or found anything worth clearing. A transient read failure must
+      // never be the reason a stale imageHash/aiCaption/aiHashtags/
+      // aiImageHash survives an image that was just deleted: since
+      // imageHash and aiImageHash would then still match each other
+      // (neither touched), hook-share-content.js's cache check would keep
+      // reporting a "match" and serve a cached caption for an image that
+      // is now simply gone, indefinitely. mergeIntoRecord (re-reads fresh
+      // right before writing, so this can't clobber a concurrent edit to
+      // this same record) is a safe no-op when there was nothing to clear.
+      await mergeIntoRecord(hookStore, aff + ":" + hook, {
+        galleryCount: 0,
+        imageHash: undefined,
+        aiCaption: undefined,
+        aiHashtags: undefined,
+        aiImageHash: undefined,
+        aiGeneratedAt: undefined,
+        updatedAt: new Date().toISOString(),
+      });
 
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "content-type": "application/json", ...cors },
