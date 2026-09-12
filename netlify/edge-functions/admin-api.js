@@ -1229,17 +1229,24 @@ export default async (request, context) => {
 
         const fields = { galleryCount: galleryCount, updatedAt: new Date().toISOString() };
         // The cover image (the "saved === 0" slot above) was just
-        // rewritten to a new photo — recompute its hash, and drop any AI
-        // caption cached against the old one (hook-share-content.js), so
-        // a later "Get Shareable Content" scan doesn't serve a cached
-        // caption describing whatever flyer this hook had before, and
-        // instead re-scans this new cover.
+        // (re-)written — recompute its hash, and only drop the AI cache
+        // (hook-share-content.js) if that hash actually changed. Re-
+        // selecting the exact same cover photo (only the other gallery
+        // slots changed) hashes identically, and force-clearing the cache
+        // in that case would just cost an unnecessary billed Claude call
+        // on the next "Get Shareable Content" open for no real change —
+        // the same reasoning hook-image.js's own upload path already
+        // follows by leaving this to the hash comparison instead of
+        // clearing unconditionally.
         if (coverBuf) {
-          fields.imageHash = await sha256HexBytes(coverBuf);
-          fields.aiCaption = undefined;
-          fields.aiHashtags = undefined;
-          fields.aiImageHash = undefined;
-          fields.aiGeneratedAt = undefined;
+          const newImageHash = await sha256HexBytes(coverBuf);
+          if (newImageHash !== existing.imageHash) {
+            fields.aiCaption = undefined;
+            fields.aiHashtags = undefined;
+            fields.aiImageHash = undefined;
+            fields.aiGeneratedAt = undefined;
+          }
+          fields.imageHash = newImageHash;
         }
         // Optional — carried straight through from generateHookDraft's
         // response rather than re-scraped here, so a hook remembers what

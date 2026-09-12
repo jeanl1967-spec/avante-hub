@@ -49,41 +49,52 @@ export default async (request, context) => {
       // would still occasionally serve one of the now-orphaned gallery
       // slots at random, making "delete image" look like it didn't work).
       let galleryCount = 0;
+      let readFailed = false;
       try {
         const record = await hookStore.get(aff + ":" + hook, { type: "json" });
         galleryCount = (record && record.galleryCount) || 0;
       } catch (e) {
         // best-effort — if this lookup fails we still delete the cover key
-        // below, and still attempt the cleanup write further down
-        // unconditionally regardless (galleryCount just stays 0, meaning
-        // no gallery slots to also delete here — a real gallery, if any,
-        // would be caught by the unconditional cleanup's own best-effort
-        // fresh read instead).
+        // below, but galleryCount stays 0 here purely because we don't
+        // know the real count, not because there isn't one — readFailed
+        // tracks that distinction so the cleanup write below doesn't lie
+        // about it (see there for why that matters).
+        readFailed = true;
       }
 
       const keysToDelete = [aff + ":" + hook];
       for (let s = 1; s <= galleryCount; s++) keysToDelete.push(aff + ":" + hook + ":" + s);
       await Promise.all(keysToDelete.map((k) => store.delete(k).catch(() => {})));
 
-      // Always attempted — not gated on whether the read above succeeded
-      // or found anything worth clearing. A transient read failure must
-      // never be the reason a stale imageHash/aiCaption/aiHashtags/
-      // aiImageHash survives an image that was just deleted: since
-      // imageHash and aiImageHash would then still match each other
-      // (neither touched), hook-share-content.js's cache check would keep
-      // reporting a "match" and serve a cached caption for an image that
-      // is now simply gone, indefinitely. mergeIntoRecord (re-reads fresh
-      // right before writing, so this can't clobber a concurrent edit to
-      // this same record) is a safe no-op when there was nothing to clear.
-      await mergeIntoRecord(hookStore, aff + ":" + hook, {
-        galleryCount: 0,
+      // The AI-cache fields are always safe to clear here — the cover key
+      // is unconditionally in keysToDelete above, so the cover image really
+      // is gone regardless of whether the lookup above succeeded, and a
+      // transient read failure must never be the reason a stale
+      // imageHash/aiCaption/aiHashtags/aiImageHash survives it (they'd
+      // otherwise go on matching each other forever, serving a cached
+      // caption for an image that's now simply gone).
+      //
+      // galleryCount is different: claiming it's now 0 is only true when
+      // we actually know that and deleted every real gallery slot above —
+      // if the lookup failed, there might be a real gallery whose slots
+      // were never touched (galleryCount stayed 0 above for the wrong
+      // reason), and writing galleryCount:0 anyway would permanently lose
+      // track of those still-live blobs (nothing would ever look for them
+      // again — this exact bug shipped once already in an earlier fix
+      // here, caught by review). So galleryCount is only included in the
+      // merge when we're sure; otherwise it's left as whatever it already
+      // is; mergeIntoRecord re-reads fresh right before writing either way,
+      // so this can't clobber a concurrent edit to this same record.
+      const cleanupFields = {
         imageHash: undefined,
         aiCaption: undefined,
         aiHashtags: undefined,
         aiImageHash: undefined,
         aiGeneratedAt: undefined,
         updatedAt: new Date().toISOString(),
-      });
+      };
+      if (!readFailed) cleanupFields.galleryCount = 0;
+      await mergeIntoRecord(hookStore, aff + ":" + hook, cleanupFields);
 
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "content-type": "application/json", ...cors },
