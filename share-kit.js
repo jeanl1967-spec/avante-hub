@@ -152,7 +152,11 @@
         }
         currentCaption = data.caption || currentCaption;
         if(data.hashtags) currentHashtags = data.hashtags;
-        aiStatusEl.textContent = '✨ Caption + hashtags generated from this image';
+        // Only claim hashtags were generated when they actually were — the
+        // caption's own vision scan can succeed while the follow-up
+        // hashtag call fails independently (hashtags: null), in which case
+        // whatever hashtag set was already loaded is left untouched.
+        aiStatusEl.textContent = data.hashtags ? '✨ Caption + hashtags generated from this image' : '✨ Caption generated from this image';
         aiRegenBtn.style.display = '';
         renderPlatform(currentPlatform);
       })

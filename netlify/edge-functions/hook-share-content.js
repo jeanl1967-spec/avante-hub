@@ -73,7 +73,11 @@ export default async (request, context) => {
       if (!imageResult) return json({ ok: true, available: false, reason: "no-image" }, 200, cors);
       currentHash = await sha256Hex(imageResult.data);
       record.imageHash = currentHash;
-      await hookStore.setJSON(key, record).catch(() => {});
+      // Merged into a freshly re-read copy of the record, not written back
+      // via the `record` object read at the top of this request — see the
+      // long comment on the write further down for why a stale full-object
+      // write is a real lost-update hazard, not just theoretical.
+      await mergeIntoRecord(hookStore, key, { imageHash: currentHash });
     }
 
     if (!force && record.aiCaption && record.aiImageHash === currentHash) {
@@ -99,16 +103,43 @@ export default async (request, context) => {
     }
     const hashtags = await generateHashtags(caption);
 
-    record.aiCaption = caption;
-    record.aiHashtags = hashtags;
-    record.aiImageHash = currentHash;
-    await hookStore.setJSON(key, record);
+    // draftCaptionFromImage + generateHashtags together can easily take a
+    // few seconds — long enough for something else (a new image upload, an
+    // admin editing this same hook's booking/caption) to have written to
+    // this record while we were waiting. Writing back the `record` object
+    // read at the very top of this request would silently revert whatever
+    // that other write just did (a real lost-update, not just a race in
+    // theory), including possibly un-doing a *newer* imageHash than the
+    // one we actually scanned. Re-reading fresh right before this write
+    // and merging in only the AI result fields avoids that: if the image
+    // did change mid-scan, aiImageHash here stays pinned to `currentHash`
+    // (the image we actually scanned), which then simply won't match the
+    // record's newer imageHash — correctly forcing a fresh scan next time,
+    // rather than either losing the concurrent write or serving a cached
+    // caption for the wrong image.
+    await mergeIntoRecord(hookStore, key, { aiCaption: caption, aiHashtags: hashtags, aiImageHash: currentHash });
 
     return json({ ok: true, available: true, cached: false, caption: caption, hashtags: hashtags || null }, 200, cors);
   } catch (err) {
     return json({ error: String((err && err.message) || err) }, 500, cors);
   }
 };
+
+// Re-reads the record fresh and writes back only the given fields merged
+// into it, instead of overwriting the whole record with a possibly-stale
+// in-memory copy — see the two call sites above for why that distinction
+// matters here specifically (this endpoint can hold a record in memory
+// across a multi-second AI call). Best-effort, matching every other
+// best-effort record write in this file and in hook-image.js.
+async function mergeIntoRecord(hookStore, key, fields) {
+  try {
+    const fresh = (await hookStore.get(key, { type: "json" })) || {};
+    await hookStore.setJSON(key, { ...fresh, ...fields });
+  } catch (e) {
+    // best-effort — this endpoint's response to the caller doesn't depend
+    // on the cache write succeeding, only on caption/hashtags being generated
+  }
+}
 
 function json(obj, status, cors) {
   return new Response(JSON.stringify(obj), {
