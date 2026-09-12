@@ -180,6 +180,17 @@ export default async (request, context) => {
       // single upload would risk clobbering a concurrent caption/booking
       // save to this same record far more often than the old,
       // gallery-reset-only write path ever could.
+      //
+      // Accepted, pre-existing-class limitation: this whole endpoint is
+      // unauthenticated (same trust model as hook-pdf.js), so an upload to
+      // any made-up aff/hook pair already creates a real image blob
+      // regardless of this write — this hookStore record is small
+      // incremental metadata on top of storage abuse that was already
+      // possible before this feature existed, not a new attack surface of
+      // its own, and every genuine upload needs its hash recorded here
+      // for the AI-scan cache to work at all, so gating this write the
+      // way DELETE's cleanup is gated below isn't an option without
+      // breaking that for legitimate uploads too.
       // Known, accepted narrow race (not fixed — see reasoning below):
       // galleryCount here is read once, before the sha256Hex await, and
       // used to decide both which gallery slots to physically delete and

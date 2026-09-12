@@ -114,8 +114,13 @@ export default async (request, context) => {
       // as currentHash — never our own possibly-stale computation.
       const freshForBackfill = (await hookStore.get(key, { type: "json" })) || {};
       if (!freshForBackfill.imageHash) {
-        freshForBackfill.imageHash = backfilledHash;
-        await hookStore.setJSON(key, freshForBackfill).catch(() => {});
+        // Uses mergeIntoRecord here too (rather than mutating
+        // freshForBackfill and writing it directly, which would be
+        // exactly as safe — both read fresh immediately before writing
+        // with no await in between — but less obviously so to a future
+        // reader) purely for consistency with every other write in this
+        // file, so "is this one safe?" never has to be re-derived by eye.
+        await mergeIntoRecord(hookStore, key, { imageHash: backfilledHash });
         currentHash = backfilledHash;
       } else {
         // A concurrent upload got there first — currentHash now points to
