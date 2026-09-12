@@ -79,6 +79,7 @@ export default async (request, context) => {
           aiCaption: undefined,
           aiHashtags: undefined,
           aiImageHash: undefined,
+          aiGeneratedAt: undefined,
           updatedAt: new Date().toISOString(),
         });
       }

@@ -1239,6 +1239,7 @@ export default async (request, context) => {
           fields.aiCaption = undefined;
           fields.aiHashtags = undefined;
           fields.aiImageHash = undefined;
+          fields.aiGeneratedAt = undefined;
         }
         // Optional — carried straight through from generateHookDraft's
         // response rather than re-scraped here, so a hook remembers what

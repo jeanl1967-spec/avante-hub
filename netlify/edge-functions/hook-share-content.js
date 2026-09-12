@@ -14,8 +14,12 @@ import { mergeIntoRecord } from "./lib/record-merge.js";
 // reads a hook's own (already-public-once-posted) image and writes back a
 // caption/hashtag cache for that same hook, keyed the identical
 // "aff:hook" way (aff === "__admin__" for admin's default hooks, a real
-// affiliate id otherwise). No new attack surface beyond what those two
-// endpoints already accept.
+// affiliate id otherwise). But unlike those two (which only ever do cheap
+// blob-store I/O), every real generation here is a billed Claude call —
+// "unauthenticated" here means anyone who can guess an aff:hook pair (a
+// small, well-known set for admin's own hooks) could otherwise loop
+// ?force=1 to run up API costs with no rate limiting at all. See the
+// FORCE_COOLDOWN_MS check below for the mitigation and its own limits.
 //
 // Caching: the scan is expensive (an LLM vision call) and the modal can be
 // opened many times for the same unchanged image, so the result is cached
@@ -23,7 +27,7 @@ import { mergeIntoRecord } from "./lib/record-merge.js";
 // the image hash it was generated from. A later request only re-scans when
 // that hash no longer matches the hook's current image (i.e. the image was
 // replaced) or the caller explicitly asks for one via ?force=1 (the
-// modal's "Regenerate" button).
+// modal's "Regenerate" button) — throttled below so force can't be looped.
 export default async (request, context) => {
   const cors = {
     "access-control-allow-origin": "*",
@@ -37,6 +41,19 @@ export default async (request, context) => {
   if (request.method !== "POST") {
     return json({ error: "method not allowed" }, 405, cors);
   }
+
+  // A forced re-scan of an image that hasn't changed still costs a real
+  // paid API call — without a floor on how often that can happen, ?force=1
+  // looped against the same hook is an unbounded billing vector (this
+  // endpoint has no other rate limiting or auth). A genuine image change
+  // is never throttled — the imageHash-mismatch path below always runs
+  // regardless of this cooldown. This is a best-effort floor, not a hard
+  // guarantee: a burst of near-simultaneous requests arriving before the
+  // first one's own cache write has landed could still each trigger a
+  // real call — closing that fully would need real distributed
+  // rate-limiting, overkill for this app's actual exposure (a small,
+  // known set of hooks for one business, not a public mass-market target).
+  const FORCE_COOLDOWN_MS = 30 * 1000;
 
   const url = new URL(request.url);
   const aff = (url.searchParams.get("aff") || "").trim();
@@ -89,6 +106,24 @@ export default async (request, context) => {
       );
     }
 
+    if (force && record.aiCaption && record.aiImageHash === currentHash && record.aiGeneratedAt) {
+      const elapsedMs = Date.now() - new Date(record.aiGeneratedAt).getTime();
+      if (isFinite(elapsedMs) && elapsedMs < FORCE_COOLDOWN_MS) {
+        return json(
+          {
+            ok: true,
+            available: true,
+            cached: true,
+            throttled: true,
+            caption: record.aiCaption,
+            hashtags: record.aiHashtags || null,
+          },
+          200,
+          cors
+        );
+      }
+    }
+
     if (!imageResult) {
       imageResult = await imageStore.getWithMetadata(key, { type: "arrayBuffer" });
       if (!imageResult) return json({ ok: true, available: false, reason: "no-image" }, 200, cors);
@@ -118,7 +153,12 @@ export default async (request, context) => {
     // record's newer imageHash — correctly forcing a fresh scan next time,
     // rather than either losing the concurrent write or serving a cached
     // caption for the wrong image.
-    await mergeIntoRecord(hookStore, key, { aiCaption: caption, aiHashtags: hashtags, aiImageHash: currentHash });
+    await mergeIntoRecord(hookStore, key, {
+      aiCaption: caption,
+      aiHashtags: hashtags,
+      aiImageHash: currentHash,
+      aiGeneratedAt: new Date().toISOString(),
+    });
 
     return json({ ok: true, available: true, cached: false, caption: caption, hashtags: hashtags || null }, 200, cors);
   } catch (err) {

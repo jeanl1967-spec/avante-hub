@@ -161,11 +161,19 @@
         }
         currentCaption = data.caption || currentCaption;
         if(data.hashtags) currentHashtags = data.hashtags;
-        // Only claim hashtags were generated when they actually were — the
-        // caption's own vision scan can succeed while the follow-up
-        // hashtag call fails independently (hashtags: null), in which case
-        // whatever hashtag set was already loaded is left untouched.
-        aiStatusEl.textContent = data.hashtags ? '✨ Caption + hashtags generated from this image' : '✨ Caption generated from this image';
+        if(data.throttled){
+          // The server declined to spend another AI call regenerating an
+          // unchanged image so soon after the last one — this is the same
+          // (cached) caption as before, not a fresh take, so say so rather
+          // than implying Regenerate did something it didn't.
+          aiStatusEl.textContent = 'Just regenerated this one — try again in a bit for a fresh take.';
+        }else{
+          // Only claim hashtags were generated when they actually were —
+          // the caption's own vision scan can succeed while the follow-up
+          // hashtag call fails independently (hashtags: null), in which
+          // case whatever hashtag set was already loaded is left untouched.
+          aiStatusEl.textContent = data.hashtags ? '✨ Caption + hashtags generated from this image' : '✨ Caption generated from this image';
+        }
         aiRegenBtn.style.display = '';
         renderPlatform(currentPlatform);
       })
