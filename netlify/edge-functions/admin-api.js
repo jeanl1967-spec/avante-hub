@@ -1,6 +1,12 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
 import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
+// Aliased — this file already has its own sha256Hex(str) below, used for
+// password hashing (string input, not an image buffer); the shared one
+// from lib/image-hash.js hashes raw bytes, a different job worth keeping
+// separate rather than merging into one function with branching for both.
+import { sha256Hex as sha256HexBytes } from "./lib/image-hash.js";
+import { mergeIntoRecord, AI_SCAN_CACHE_FIELDS_CLEARED } from "./lib/record-merge.js";
 import { isShortLink, resolveShortLink, findExistingShortLink, createShortLink } from "./lib/short-link.js";
 import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-link.js";
 import { resolveHookMode } from "./lib/hook-mode.js";
@@ -1120,18 +1126,21 @@ export default async (request, context) => {
       // Best-effort: a failed/unavailable AI call just clears the cached
       // set rather than blocking the save.
       const hashtags = await generateHashtags(caption);
-      // Preserve galleryCount and source (Auto-build's saved gallery/rich
-      // details) across a manual save — both are set by saveHookPhotos
-      // below, not by this form, so a normal caption/link edit here must
-      // not silently wipe either out.
+      // Preserve everything a normal caption/link edit here has no
+      // business touching — galleryCount and source (Auto-build's saved
+      // gallery/rich details, set by saveHookPhotos below, not by this
+      // form) plus imageHash/aiCaption/aiHashtags/aiImageHash (the AI
+      // scan cache set by hook-image.js's upload and
+      // hook-share-content.js's scan) — by spreading the existing record
+      // first, rather than rebuilding it field-by-field and silently
+      // dropping whatever this form doesn't know about.
       const existingForSave = await hookStore.get("__admin__:" + n, { type: "json" });
       const record = {
+        ...(existingForSave || {}),
         booking: booking,
         landing: landing,
         caption: caption,
         hashtags: hashtags,
-        galleryCount: (existingForSave && existingForSave.galleryCount) || 0,
-        source: (existingForSave && existingForSave.source) || null,
         updatedAt: new Date().toISOString(),
       };
       await hookStore.setJSON("__admin__:" + n, record);
@@ -1160,6 +1169,7 @@ export default async (request, context) => {
 
       const imageStore = getStore({ name: "promo-hook-images", consistency: "strong" });
       let saved = 0;
+      let coverBuf = null; // the exact bytes written to the cover slot ("saved === 0" below), for imageHash
       const failed = [];
       for (let i = 0; i < urls.length; i++) {
         const url = urls[i].trim();
@@ -1184,8 +1194,10 @@ export default async (request, context) => {
           // download failing partway through the batch must not leave a
           // gap between the keys written here and the contiguous 0..N
           // range galleryCount below promises hook-image.js's rotation.
-          const key = saved === 0 ? "__admin__:" + n : "__admin__:" + n + ":" + saved;
+          const isCover = saved === 0;
+          const key = isCover ? "__admin__:" + n : "__admin__:" + n + ":" + saved;
           await imageStore.set(key, buf, { metadata: { contentType: contentType, sourceUrl: url } });
+          if (isCover) coverBuf = buf;
           saved++;
         } catch (e) {
           failed.push(url);
@@ -1203,9 +1215,47 @@ export default async (request, context) => {
       // wipe that out (orphaning its still-live image blobs) despite the
       // API telling the caller nothing was saved.
       if (saved > 0) {
+        // Only ever read to decide *whether* previously-covered gallery
+        // slots need cleaning up below (previousGalleryCount) — never
+        // written back directly. sha256HexBytes below is itself an await,
+        // so holding this record in memory across it and writing it back
+        // wholesale would risk clobbering a concurrent write to this same
+        // record (a caption/booking save via setDefaultHook, or an
+        // overlapping image upload) — the same lost-update hazard already
+        // fixed for hook-image.js and hook-share-content.js. mergeIntoRecord
+        // re-reads fresh immediately before writing instead.
         const existing = (await hookStore.get("__admin__:" + n, { type: "json" })) || {};
         const previousGalleryCount = existing.galleryCount || 0;
-        existing.galleryCount = galleryCount;
+
+        const fields = { galleryCount: galleryCount, updatedAt: new Date().toISOString() };
+        // The cover image (the "saved === 0" slot above) was just
+        // (re-)written — recompute its hash, and only drop the AI cache
+        // (hook-share-content.js) if that hash actually changed. Re-
+        // selecting the exact same cover photo (only the other gallery
+        // slots changed) hashes identically, and force-clearing the cache
+        // in that case would just cost an unnecessary billed Claude call
+        // on the next "Get Shareable Content" open for no real change —
+        // the same reasoning hook-image.js's own upload path already
+        // follows by leaving this to the hash comparison instead of
+        // clearing unconditionally.
+        // Known, accepted narrow race, symmetric to the one documented in
+        // hook-image.js's own upload path: this hash describes the cover
+        // *this save* just wrote, but if a manual hook-image.js upload for
+        // the identical hook lands in the moment between here and this
+        // branch's write below, mergeIntoRecord's re-read-before-write
+        // protects every other field, not the correctness of this specific
+        // decision — fields.imageHash could still overwrite that upload's
+        // own (also real, possibly now more current) hash. Not fixed for
+        // the same reason: two different admin actions racing on the
+        // identical hook within the same sub-second window, recoverable by
+        // simply re-uploading or re-running the save that lost the race.
+        if (coverBuf) {
+          const newImageHash = await sha256HexBytes(coverBuf);
+          if (newImageHash !== existing.imageHash) {
+            Object.assign(fields, AI_SCAN_CACHE_FIELDS_CLEARED);
+          }
+          fields.imageHash = newImageHash;
+        }
         // Optional — carried straight through from generateHookDraft's
         // response rather than re-scraped here, so a hook remembers what
         // property/area it was built from (shown on the hook card and on
@@ -1213,7 +1263,7 @@ export default async (request, context) => {
         // save didn't come from an Auto-build draft (e.g. a future manual
         // photo save with no source context).
         if (body.source && typeof body.source === "object") {
-          existing.source = {
+          fields.source = {
             mode: body.source.mode === "area" ? "area" : "property",
             label: typeof body.source.label === "string" ? body.source.label.trim().slice(0, 200) : "",
             description: typeof body.source.description === "string" ? body.source.description.trim().slice(0, 2000) : "",
@@ -1224,8 +1274,7 @@ export default async (request, context) => {
               : [],
           };
         }
-        existing.updatedAt = new Date().toISOString();
-        await hookStore.setJSON("__admin__:" + n, existing);
+        await mergeIntoRecord(hookStore, "__admin__:" + n, fields);
 
         // A previous save may have covered more gallery slots than this
         // one did (e.g. 4 photos saved before, only 2 saved this time) —
