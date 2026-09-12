@@ -1,5 +1,6 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { sha256Hex } from "./lib/image-hash.js";
+import { mergeIntoRecord } from "./lib/record-merge.js";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
@@ -65,15 +66,21 @@ export default async (request, context) => {
       // would let a later scan request serve a stale cached caption for
       // whatever image eventually replaces this one, right up until that
       // replacement's own hash happened to differ (it always would, but
-      // there's no reason to rely on that).
+      // there's no reason to rely on that). Written via mergeIntoRecord
+      // (re-reads fresh right before writing) rather than the `record`
+      // read above, which only exists to decide *whether* a write is
+      // needed and which gallery slots to delete — writing it back
+      // directly would risk clobbering a concurrent edit to this same
+      // record (e.g. a caption/booking save landing in between).
       if (record && (galleryCount > 0 || record.imageHash || record.aiCaption || record.aiHashtags || record.aiImageHash)) {
-        record.galleryCount = 0;
-        delete record.imageHash;
-        delete record.aiCaption;
-        delete record.aiHashtags;
-        delete record.aiImageHash;
-        record.updatedAt = new Date().toISOString();
-        await hookStore.setJSON(aff + ":" + hook, record).catch(() => {});
+        await mergeIntoRecord(hookStore, aff + ":" + hook, {
+          galleryCount: 0,
+          imageHash: undefined,
+          aiCaption: undefined,
+          aiHashtags: undefined,
+          aiImageHash: undefined,
+          updatedAt: new Date().toISOString(),
+        });
       }
 
       return new Response(JSON.stringify({ ok: true }), {
@@ -116,6 +123,16 @@ export default async (request, context) => {
       // left in place here (not cleared) — hook-share-content.js compares
       // hashes itself and only trusts a cached caption whose hash still
       // matches this new one, which it never will after this write.
+      //
+      // Every upload now takes this branch (not just a gallery reset, as
+      // before imageHash existed), so unlike before it runs unconditionally
+      // — written via mergeIntoRecord (re-reads fresh right before writing)
+      // rather than mutating and writing back the `record` read below,
+      // which only exists to decide whether a gallery reset is needed and
+      // which stale slots to delete; writing it back directly on every
+      // single upload would risk clobbering a concurrent caption/booking
+      // save to this same record far more often than the old,
+      // gallery-reset-only write path ever could.
       if (key === aff + ":" + hook) {
         try {
           const record = (await hookStore.get(key, { type: "json" })) || {};
@@ -124,10 +141,9 @@ export default async (request, context) => {
             const staleSlots = [];
             for (let s = 1; s <= galleryCount; s++) staleSlots.push(key + ":" + s);
             await Promise.all(staleSlots.map((k) => store.delete(k).catch(() => {})));
-            record.galleryCount = 0;
           }
-          record.imageHash = await sha256Hex(buf);
-          await hookStore.setJSON(key, record).catch(() => {});
+          const hash = await sha256Hex(buf);
+          await mergeIntoRecord(hookStore, key, galleryCount > 0 ? { galleryCount: 0, imageHash: hash } : { imageHash: hash });
         } catch (e) {
           // best-effort — the cover upload above already succeeded either way
         }

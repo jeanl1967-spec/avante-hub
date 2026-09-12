@@ -2,6 +2,7 @@ import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { draftCaptionFromImage } from "./lib/vision-caption-helper.js";
 import { generateHashtags } from "./lib/hashtag-helper.js";
 import { sha256Hex } from "./lib/image-hash.js";
+import { mergeIntoRecord } from "./lib/record-merge.js";
 
 // Backs the "Get Shareable Content" modal's AI scan: given a hook's own
 // image, drafts a caption from what's actually on it (see
@@ -124,22 +125,6 @@ export default async (request, context) => {
     return json({ error: String((err && err.message) || err) }, 500, cors);
   }
 };
-
-// Re-reads the record fresh and writes back only the given fields merged
-// into it, instead of overwriting the whole record with a possibly-stale
-// in-memory copy — see the two call sites above for why that distinction
-// matters here specifically (this endpoint can hold a record in memory
-// across a multi-second AI call). Best-effort, matching every other
-// best-effort record write in this file and in hook-image.js.
-async function mergeIntoRecord(hookStore, key, fields) {
-  try {
-    const fresh = (await hookStore.get(key, { type: "json" })) || {};
-    await hookStore.setJSON(key, { ...fresh, ...fields });
-  } catch (e) {
-    // best-effort — this endpoint's response to the caller doesn't depend
-    // on the cache write succeeding, only on caption/hashtags being generated
-  }
-}
 
 function json(obj, status, cors) {
   return new Response(JSON.stringify(obj), {

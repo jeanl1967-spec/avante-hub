@@ -173,6 +173,12 @@
         if(seq !== openSeq) return;
         aiRegenBtn.disabled = false;
         aiStatusEl.textContent = "Couldn't scan the image — showing the typed caption instead.";
+        // A network-level failure (not the server saying "no image") is
+        // always worth offering a retry for — without this, the initial
+        // automatic scan hid the button (nothing to regenerate yet) and a
+        // failure here left it hidden forever, with no way to retry short
+        // of closing and reopening the modal.
+        aiRegenBtn.style.display = '';
       });
   }
 
