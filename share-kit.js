@@ -147,7 +147,16 @@
         if(seq !== openSeq) return; // a newer modal has since opened — ignore this stale response
         aiRegenBtn.disabled = false;
         if(!data || !data.available){
-          aiRowEl.style.display = 'none';
+          if(force){
+            // We already know this hook has an image — that's the only way
+            // "Regenerate" could have been visible to click in the first
+            // place — so a failed regenerate should stay retryable, not
+            // vanish along with the only button that could retry it.
+            aiStatusEl.textContent = "Couldn't regenerate — try again.";
+            aiRegenBtn.style.display = '';
+          }else{
+            aiRowEl.style.display = 'none';
+          }
           return;
         }
         currentCaption = data.caption || currentCaption;

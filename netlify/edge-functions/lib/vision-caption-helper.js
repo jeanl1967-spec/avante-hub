@@ -6,19 +6,16 @@
 //
 // Deliberately separate from hook-source.js's draftHookCaption, which drafts
 // from *scraped property text*, not an image — different input, different
-// prompt, no shared logic worth factoring out beyond the same call
-// pattern and failure behaviour (missing key, network error, or a bad
-// response all return null rather than throwing, so a scan request
-// degrades gracefully instead of failing the whole "Get Shareable Content"
-// open).
+// prompt. The actual "call Claude with one tool" plumbing (request shape,
+// tool_use extraction, fail-safe-to-null behaviour) is shared with
+// hashtag-helper.js via anthropic-tool-call.js instead, since those two
+// files started out as near-identical copies of exactly that.
 //
 // Lives in netlify/edge-functions/lib/ (not directly in edge-functions/) so
 // Netlify doesn't try to auto-register it as its own routed function — same
 // reason hashtag-helper.js and the other lib/ files live here too.
 
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
-const ANTHROPIC_VERSION = "2023-06-01";
+import { callClaudeTool } from "./anthropic-tool-call.js";
 
 // Claude's vision input only accepts these; hook-image.js accepts any
 // image/* upload, so anything else (an uncommon format like image/svg+xml
@@ -60,48 +57,24 @@ export async function draftCaptionFromImage(imageBytes, mimeType) {
   if (!imageBytes || !imageBytes.byteLength) return null;
   if (!SUPPORTED_MEDIA_TYPES.includes(mimeType)) return null;
 
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!apiKey) return null;
-
-  try {
-    const base64 = arrayBufferToBase64(imageBytes);
-    const res = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": ANTHROPIC_VERSION,
-      },
-      body: JSON.stringify({
-        model: ANTHROPIC_MODEL,
-        max_tokens: 300,
-        tools: [CAPTION_TOOL],
-        tool_choice: { type: "tool", name: "set_hook_caption" },
-        messages: [
+  const base64 = arrayBufferToBase64(imageBytes);
+  const input = await callClaudeTool(
+    [
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: mimeType, data: base64 } },
           {
-            role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: mimeType, data: base64 } },
-              {
-                type: "text",
-                text: "Write a ready-to-post promo caption for this travel flyer, based only on what's visible in the image.",
-              },
-            ],
+            type: "text",
+            text: "Write a ready-to-post promo caption for this travel flyer, based only on what's visible in the image.",
           },
         ],
-      }),
-    });
+      },
+    ],
+    CAPTION_TOOL,
+    300
+  );
 
-    if (!res.ok) return null;
-
-    const data = await res.json();
-    const toolUse = Array.isArray(data.content)
-      ? data.content.find((block) => block.type === "tool_use" && block.name === "set_hook_caption")
-      : null;
-    const caption =
-      toolUse && toolUse.input && typeof toolUse.input.caption === "string" ? toolUse.input.caption.trim() : "";
-    return caption || null;
-  } catch (e) {
-    return null;
-  }
+  const caption = input && typeof input.caption === "string" ? input.caption.trim() : "";
+  return caption || null;
 }

@@ -3823,7 +3823,13 @@
           var caption = document.getElementById('dh' + shareN + '-caption').value.trim();
           window.openShareKit({
             title: 'Hook ' + shareN + ' — Shareable Content (admin preview)',
-            imageUrl: '/api/hook-image?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(shareN) + '&t=' + Date.now(),
+            // &slot=0 pins this to the deterministic cover image, never
+            // hook-image.js's random gallery rotation (a hook built via
+            // Auto-build's multi-photo picker can have several) — the AI
+            // scan below always describes that same cover, so the modal's
+            // own displayed/downloaded image has to match it, not whichever
+            // gallery photo a plain GET happened to rotate to this time.
+            imageUrl: '/api/hook-image?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(shareN) + '&slot=0&t=' + Date.now(),
             caption: caption,
             hashtags: defaultHookHashtags[shareN] || null,
             link: booking || landing,

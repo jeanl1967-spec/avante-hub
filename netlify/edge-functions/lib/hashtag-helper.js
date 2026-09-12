@@ -21,9 +21,7 @@
 //   null rather than throwing, so a hook save never fails just because
 //   hashtag generation had a bad day.
 
-const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
-const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
-const ANTHROPIC_VERSION = "2023-06-01";
+import { callClaudeTool } from "./anthropic-tool-call.js";
 
 const HASHTAG_TOOL = {
   name: "set_hashtags",
@@ -83,54 +81,30 @@ export async function generateHashtags(caption) {
   const text = (caption || "").trim();
   if (!text) return null;
 
-  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!apiKey) return null;
-
-  try {
-    const res = await fetch(ANTHROPIC_API_URL, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": ANTHROPIC_VERSION,
+  const input = await callClaudeTool(
+    [
+      {
+        role: "user",
+        content:
+          "Generate relevant, high-engagement travel hashtags for this promo, tailored to each platform's own norms (Instagram: a full mixed set of broad + niche tags; Facebook: just a couple, used sparingly; LinkedIn: a small handful, professional in tone). Promo caption:\n\n" +
+          text,
       },
-      body: JSON.stringify({
-        model: ANTHROPIC_MODEL,
-        max_tokens: 400,
-        tools: [HASHTAG_TOOL],
-        tool_choice: { type: "tool", name: "set_hashtags" },
-        messages: [
-          {
-            role: "user",
-            content:
-              "Generate relevant, high-engagement travel hashtags for this promo, tailored to each platform's own norms (Instagram: a full mixed set of broad + niche tags; Facebook: just a couple, used sparingly; LinkedIn: a small handful, professional in tone). Promo caption:\n\n" +
-              text,
-          },
-        ],
-      }),
-    });
+    ],
+    HASHTAG_TOOL,
+    400
+  );
+  if (!input) return null;
 
-    if (!res.ok) return null;
+  const hashtags = {
+    facebook: sanitizeList(input.facebook, 3),
+    instagram: sanitizeList(input.instagram, 15),
+    whatsapp: [],
+    linkedin: sanitizeList(input.linkedin, 5),
+  };
 
-    const data = await res.json();
-    const toolUse = Array.isArray(data.content)
-      ? data.content.find((block) => block.type === "tool_use" && block.name === "set_hashtags")
-      : null;
-    if (!toolUse || !toolUse.input) return null;
-
-    const hashtags = {
-      facebook: sanitizeList(toolUse.input.facebook, 3),
-      instagram: sanitizeList(toolUse.input.instagram, 15),
-      whatsapp: [],
-      linkedin: sanitizeList(toolUse.input.linkedin, 5),
-    };
-
-    // If everything came back empty, treat it as no result.
-    if (!hashtags.facebook.length && !hashtags.instagram.length && !hashtags.linkedin.length) {
-      return null;
-    }
-    return hashtags;
-  } catch (e) {
+  // If everything came back empty, treat it as no result.
+  if (!hashtags.facebook.length && !hashtags.instagram.length && !hashtags.linkedin.length) {
     return null;
   }
+  return hashtags;
 }
