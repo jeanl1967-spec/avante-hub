@@ -27,3 +27,22 @@ export async function mergeIntoRecord(store, key, fields) {
     // best-effort
   }
 }
+
+// The fields hook-share-content.js caches after a successful AI scan.
+// Shared here so every place that needs to clear them — hook-image.js's
+// DELETE, admin-api.js's saveHookPhotos when Auto-build replaces the
+// cover — does so identically via `mergeIntoRecord(store, key, {
+// ...AI_SCAN_CACHE_FIELDS_CLEARED, ...otherFields })`, rather than each
+// keeping its own copy of this field list that could quietly drift out of
+// sync with whatever hook-share-content.js actually writes (add a field
+// there later, and only one of two clear-sites might remember to clear
+// it too). Deliberately excludes imageHash — callers that clear this
+// (an image was deleted) and callers that instead set it fresh (a cover
+// was replaced) need different handling for that one field, so it stays
+// their own responsibility.
+export const AI_SCAN_CACHE_FIELDS_CLEARED = {
+  aiCaption: undefined,
+  aiHashtags: undefined,
+  aiImageHash: undefined,
+  aiGeneratedAt: undefined,
+};

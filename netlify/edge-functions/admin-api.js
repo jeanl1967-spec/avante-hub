@@ -6,7 +6,7 @@ import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
 // from lib/image-hash.js hashes raw bytes, a different job worth keeping
 // separate rather than merging into one function with branching for both.
 import { sha256Hex as sha256HexBytes } from "./lib/image-hash.js";
-import { mergeIntoRecord } from "./lib/record-merge.js";
+import { mergeIntoRecord, AI_SCAN_CACHE_FIELDS_CLEARED } from "./lib/record-merge.js";
 import { isShortLink, resolveShortLink, findExistingShortLink, createShortLink } from "./lib/short-link.js";
 import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-link.js";
 import { resolveHookMode } from "./lib/hook-mode.js";
@@ -1241,10 +1241,7 @@ export default async (request, context) => {
         if (coverBuf) {
           const newImageHash = await sha256HexBytes(coverBuf);
           if (newImageHash !== existing.imageHash) {
-            fields.aiCaption = undefined;
-            fields.aiHashtags = undefined;
-            fields.aiImageHash = undefined;
-            fields.aiGeneratedAt = undefined;
+            Object.assign(fields, AI_SCAN_CACHE_FIELDS_CLEARED);
           }
           fields.imageHash = newImageHash;
         }

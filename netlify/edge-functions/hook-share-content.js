@@ -18,8 +18,12 @@ import { mergeIntoRecord } from "./lib/record-merge.js";
 // blob-store I/O), every real generation here is a billed Claude call —
 // "unauthenticated" here means anyone who can guess an aff:hook pair (a
 // small, well-known set for admin's own hooks) could otherwise loop
-// ?force=1 to run up API costs with no rate limiting at all. See the
-// FORCE_COOLDOWN_MS check below for the mitigation and its own limits.
+// requests to run up API costs with no rate limiting at all: not just via
+// ?force=1 (an explicit cache bypass), but also a hook whose scan simply
+// keeps failing (never reaching the cache-hit branch, so nothing would
+// otherwise throttle retrying it) or a burst of near-simultaneous
+// first-ever requests for an image nothing has cached yet. See
+// ATTEMPT_COOLDOWN_MS below for the mitigation and its own limits.
 //
 // Caching: the scan is expensive (an LLM vision call) and the modal can be
 // opened many times for the same unchanged image, so the result is cached
@@ -27,7 +31,7 @@ import { mergeIntoRecord } from "./lib/record-merge.js";
 // the image hash it was generated from. A later request only re-scans when
 // that hash no longer matches the hook's current image (i.e. the image was
 // replaced) or the caller explicitly asks for one via ?force=1 (the
-// modal's "Regenerate" button) — throttled below so force can't be looped.
+// modal's "Regenerate" button) — throttled below so this can't be looped.
 export default async (request, context) => {
   const cors = {
     "access-control-allow-origin": "*",
@@ -42,18 +46,22 @@ export default async (request, context) => {
     return json({ error: "method not allowed" }, 405, cors);
   }
 
-  // A forced re-scan of an image that hasn't changed still costs a real
-  // paid API call — without a floor on how often that can happen, ?force=1
-  // looped against the same hook is an unbounded billing vector (this
-  // endpoint has no other rate limiting or auth). A genuine image change
-  // is never throttled — the imageHash-mismatch path below always runs
-  // regardless of this cooldown. This is a best-effort floor, not a hard
-  // guarantee: a burst of near-simultaneous requests arriving before the
-  // first one's own cache write has landed could still each trigger a
-  // real call — closing that fully would need real distributed
-  // rate-limiting, overkill for this app's actual exposure (a small,
-  // known set of hooks for one business, not a public mass-market target).
-  const FORCE_COOLDOWN_MS = 30 * 1000;
+  // Any real generation attempt — successful or not, forced or the
+  // natural "nothing cached yet" fallthrough — costs a real paid API
+  // call. Without a floor on how often that can happen *per hook*
+  // (regardless of force), looping requests against the same hook is an
+  // unbounded billing vector (this endpoint has no other rate limiting or
+  // auth), and a hook whose scan just keeps failing would otherwise never
+  // even reach the cache-hit check that would normally protect it. A
+  // cache hit is never throttled — this only ever gates an actual attempt
+  // about to be made, checked and marked right before it happens (see
+  // below). This is a best-effort floor, not a hard guarantee: a burst of
+  // near-simultaneous requests arriving before the first one's own marker
+  // write has landed could still each trigger a real call — closing that
+  // fully would need real distributed rate-limiting, overkill for this
+  // app's actual exposure (a small, known set of hooks for one business,
+  // not a public mass-market target).
+  const ATTEMPT_COOLDOWN_MS = 30 * 1000;
 
   const url = new URL(request.url);
   const aff = (url.searchParams.get("aff") || "").trim();
@@ -132,23 +140,41 @@ export default async (request, context) => {
       );
     }
 
-    if (force && record.aiCaption && record.aiImageHash === currentHash && record.aiGeneratedAt) {
-      const elapsedMs = Date.now() - new Date(record.aiGeneratedAt).getTime();
-      if (isFinite(elapsedMs) && elapsedMs < FORCE_COOLDOWN_MS) {
-        return json(
-          {
-            ok: true,
-            available: true,
-            cached: true,
-            throttled: true,
-            caption: record.aiCaption,
-            hashtags: record.aiHashtags || null,
-          },
-          200,
-          cors
-        );
+    // We're past the cache-hit check, so a real generation attempt is
+    // about to be made — throttle that specifically, not requests in
+    // general, so an already-cached, unchanged image stays instant and
+    // free no matter how often the modal is opened. lastAttemptAt is
+    // deliberately never cleared elsewhere (not on image delete, not on a
+    // cover replace) — it tracks "how recently did this hook burn a real
+    // API call", independent of which image or cache state that was for,
+    // which also closes the narrower version of this same loophole where
+    // repeatedly re-uploading trivially different images would otherwise
+    // keep defeating the imageHash-based cache.
+    if (record.lastAttemptAt) {
+      const sinceAttemptMs = Date.now() - new Date(record.lastAttemptAt).getTime();
+      if (isFinite(sinceAttemptMs) && sinceAttemptMs < ATTEMPT_COOLDOWN_MS) {
+        if (record.aiCaption) {
+          return json(
+            {
+              ok: true,
+              available: true,
+              cached: true,
+              throttled: true,
+              caption: record.aiCaption,
+              hashtags: record.aiHashtags || null,
+            },
+            200,
+            cors
+          );
+        }
+        return json({ ok: true, available: false, reason: "rate-limited" }, 200, cors);
       }
     }
+    // Marked before the real attempt below, not after — so a burst of
+    // near-simultaneous requests all reading a not-yet-updated
+    // lastAttemptAt can't all slip past this check before any of them
+    // finish (see the module comment above for this mitigation's limits).
+    await mergeIntoRecord(hookStore, key, { lastAttemptAt: new Date().toISOString() });
 
     if (!imageResult) {
       imageResult = await imageStore.getWithMetadata(key, { type: "arrayBuffer" });

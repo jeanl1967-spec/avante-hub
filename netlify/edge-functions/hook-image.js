@@ -1,6 +1,6 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { sha256Hex } from "./lib/image-hash.js";
-import { mergeIntoRecord } from "./lib/record-merge.js";
+import { mergeIntoRecord, AI_SCAN_CACHE_FIELDS_CLEARED } from "./lib/record-merge.js";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 
@@ -86,11 +86,8 @@ export default async (request, context) => {
       // is; mergeIntoRecord re-reads fresh right before writing either way,
       // so this can't clobber a concurrent edit to this same record.
       const cleanupFields = {
+        ...AI_SCAN_CACHE_FIELDS_CLEARED,
         imageHash: undefined,
-        aiCaption: undefined,
-        aiHashtags: undefined,
-        aiImageHash: undefined,
-        aiGeneratedAt: undefined,
         updatedAt: new Date().toISOString(),
       };
       if (!readFailed) cleanupFields.galleryCount = 0;
@@ -156,7 +153,9 @@ export default async (request, context) => {
             await Promise.all(staleSlots.map((k) => store.delete(k).catch(() => {})));
           }
           const hash = await sha256Hex(buf);
-          await mergeIntoRecord(hookStore, key, galleryCount > 0 ? { galleryCount: 0, imageHash: hash } : { imageHash: hash });
+          const fields = { imageHash: hash, updatedAt: new Date().toISOString() };
+          if (galleryCount > 0) fields.galleryCount = 0;
+          await mergeIntoRecord(hookStore, key, fields);
         } catch (e) {
           // best-effort — the cover upload above already succeeded either way
         }
