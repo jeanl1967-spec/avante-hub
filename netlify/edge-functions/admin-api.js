@@ -1238,6 +1238,17 @@ export default async (request, context) => {
         // the same reasoning hook-image.js's own upload path already
         // follows by leaving this to the hash comparison instead of
         // clearing unconditionally.
+        // Known, accepted narrow race, symmetric to the one documented in
+        // hook-image.js's own upload path: this hash describes the cover
+        // *this save* just wrote, but if a manual hook-image.js upload for
+        // the identical hook lands in the moment between here and this
+        // branch's write below, mergeIntoRecord's re-read-before-write
+        // protects every other field, not the correctness of this specific
+        // decision — fields.imageHash could still overwrite that upload's
+        // own (also real, possibly now more current) hash. Not fixed for
+        // the same reason: two different admin actions racing on the
+        // identical hook within the same sub-second window, recoverable by
+        // simply re-uploading or re-running the save that lost the race.
         if (coverBuf) {
           const newImageHash = await sha256HexBytes(coverBuf);
           if (newImageHash !== existing.imageHash) {

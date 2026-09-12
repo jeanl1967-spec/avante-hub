@@ -58,7 +58,13 @@ export default async (request, context) => {
         // below, but galleryCount stays 0 here purely because we don't
         // know the real count, not because there isn't one — readFailed
         // tracks that distinction so the cleanup write below doesn't lie
-        // about it (see there for why that matters).
+        // about it (see there for why that matters). A real gallery's
+        // slots 1..N are left undeleted this time (we don't know N), so
+        // GET's rotation could still occasionally serve one — but because
+        // the record keeps correctly saying a gallery exists rather than
+        // claiming 0, simply retrying Delete once this transient failure
+        // has passed will find the real count and finish the job, instead
+        // of silently losing track of those slots forever.
         readFailed = true;
       }
 
