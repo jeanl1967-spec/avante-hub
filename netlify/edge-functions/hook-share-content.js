@@ -155,6 +155,17 @@ export default async (request, context) => {
     // which also closes the narrower version of this same loophole where
     // repeatedly re-uploading trivially different images would otherwise
     // keep defeating the imageHash-based cache.
+    //
+    // Deliberate consequence, not a bug: this is a per-*hook* cooldown,
+    // not a per-*image* one. Scan hook 3, immediately notice the wrong
+    // photo, swap it, and reopen the modal — that legitimate first-ever
+    // scan of the new image is briefly throttled too (up to
+    // ATTEMPT_COOLDOWN_MS), same as any other repeat. Keying this off the
+    // image instead so a genuinely new photo always bypassed it would
+    // reopen exactly the loophole the previous paragraph closes: an
+    // attacker could tweak one byte each time and always look like a
+    // "never-attempted, unthrottled" image. A brief, occasional delay for
+    // a fast manual image swap is the accepted cost of that protection.
     if (record.lastAttemptAt) {
       const sinceAttemptMs = Date.now() - new Date(record.lastAttemptAt).getTime();
       if (isFinite(sinceAttemptMs) && sinceAttemptMs < ATTEMPT_COOLDOWN_MS) {
