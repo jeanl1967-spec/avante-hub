@@ -93,9 +93,22 @@ export default async (request, context) => {
       // track of those still-live blobs (nothing would ever look for them
       // again — this exact bug shipped once already in an earlier fix
       // here, caught by review). So galleryCount is only included in the
-      // merge when we're sure; otherwise it's left as whatever it already
-      // is; mergeIntoRecord re-reads fresh right before writing either way,
-      // so this can't clobber a concurrent edit to this same record.
+      // merge when we're sure.
+      //
+      // mergeIntoRecord's re-read-before-write only protects fields NOT
+      // present in this merge from a stale overwrite — it can't protect
+      // galleryCount itself from being stale, since it IS being written
+      // here. Known, accepted narrow race, the same class already
+      // documented in admin-api.js's saveHookPhotos and hook-image.js's
+      // own upload path above: if Auto-build's saveHookPhotos writes a
+      // fresh, larger gallery for this exact hook in the real-world gap
+      // between reading galleryCount here and the Promise.all delete +
+      // this merge (a real network round-trip in between), that fresh
+      // gallery's slot blobs get orphaned and galleryCount reverts to 0
+      // anyway. Not fixed for the same reason given at the other two
+      // sites — two different admin actions racing on the identical hook
+      // within the same narrow window, recoverable by re-running
+      // whichever one lost.
       //
       // None of this runs at all when the read succeeded and genuinely
       // found nothing (a hook that never had an image, or doesn't exist)

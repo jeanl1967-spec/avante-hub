@@ -177,16 +177,23 @@ export default async (request, context) => {
         return json({ ok: true, available: false, reason: "rate-limited" }, 200, cors);
       }
     }
-    // Marked before the real attempt below, not after — so a burst of
-    // near-simultaneous requests all reading a not-yet-updated
-    // lastAttemptAt can't all slip past this check before any of them
-    // finish (see the module comment above for this mitigation's limits).
-    await mergeIntoRecord(hookStore, key, { lastAttemptAt: new Date().toISOString() });
-
     if (!imageResult) {
       imageResult = await imageStore.getWithMetadata(key, { type: "arrayBuffer" });
+      // Deliberately returns here, before marking lastAttemptAt at all —
+      // there is no image to scan, so no real (billed) attempt was made,
+      // and stamping the cooldown anyway would throttle the *next*
+      // request even once a real image shows up (e.g. upload one, then
+      // reopen the modal within the cooldown window: that's a genuine
+      // first-ever scan, not a repeat, and must not be held back by a
+      // cooldown from a request that never reached the paid API at all).
       if (!imageResult) return json({ ok: true, available: false, reason: "no-image" }, 200, cors);
     }
+
+    // Marked right before the real attempt, not any earlier — so a burst
+    // of near-simultaneous requests all reading a not-yet-updated
+    // lastAttemptAt can't all slip past the check above before any of
+    // them finish (see the module comment for this mitigation's limits).
+    await mergeIntoRecord(hookStore, key, { lastAttemptAt: new Date().toISOString() });
 
     const mimeType = (imageResult.metadata && imageResult.metadata.contentType) || "image/jpeg";
     const caption = await draftCaptionFromImage(imageResult.data, mimeType);
