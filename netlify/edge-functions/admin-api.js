@@ -1,6 +1,11 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
 import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
+// Aliased — this file already has its own sha256Hex(str) below, used for
+// password hashing (string input, not an image buffer); the shared one
+// from lib/image-hash.js hashes raw bytes, a different job worth keeping
+// separate rather than merging into one function with branching for both.
+import { sha256Hex as sha256HexBytes } from "./lib/image-hash.js";
 import { isShortLink, resolveShortLink, findExistingShortLink, createShortLink } from "./lib/short-link.js";
 import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-link.js";
 import { resolveHookMode } from "./lib/hook-mode.js";
@@ -1120,12 +1125,17 @@ export default async (request, context) => {
       // Best-effort: a failed/unavailable AI call just clears the cached
       // set rather than blocking the save.
       const hashtags = await generateHashtags(caption);
-      // Preserve galleryCount and source (Auto-build's saved gallery/rich
-      // details) across a manual save — both are set by saveHookPhotos
-      // below, not by this form, so a normal caption/link edit here must
-      // not silently wipe either out.
+      // Preserve everything a normal caption/link edit here has no
+      // business touching — galleryCount and source (Auto-build's saved
+      // gallery/rich details, set by saveHookPhotos below, not by this
+      // form) plus imageHash/aiCaption/aiHashtags/aiImageHash (the AI
+      // scan cache set by hook-image.js's upload and
+      // hook-share-content.js's scan) — by spreading the existing record
+      // first, rather than rebuilding it field-by-field and silently
+      // dropping whatever this form doesn't know about.
       const existingForSave = await hookStore.get("__admin__:" + n, { type: "json" });
       const record = {
+        ...(existingForSave || {}),
         booking: booking,
         landing: landing,
         caption: caption,
@@ -1160,6 +1170,7 @@ export default async (request, context) => {
 
       const imageStore = getStore({ name: "promo-hook-images", consistency: "strong" });
       let saved = 0;
+      let coverBuf = null; // the exact bytes written to the cover slot ("saved === 0" below), for imageHash
       const failed = [];
       for (let i = 0; i < urls.length; i++) {
         const url = urls[i].trim();
@@ -1184,8 +1195,10 @@ export default async (request, context) => {
           // download failing partway through the batch must not leave a
           // gap between the keys written here and the contiguous 0..N
           // range galleryCount below promises hook-image.js's rotation.
-          const key = saved === 0 ? "__admin__:" + n : "__admin__:" + n + ":" + saved;
+          const isCover = saved === 0;
+          const key = isCover ? "__admin__:" + n : "__admin__:" + n + ":" + saved;
           await imageStore.set(key, buf, { metadata: { contentType: contentType, sourceUrl: url } });
+          if (isCover) coverBuf = buf;
           saved++;
         } catch (e) {
           failed.push(url);
@@ -1206,6 +1219,18 @@ export default async (request, context) => {
         const existing = (await hookStore.get("__admin__:" + n, { type: "json" })) || {};
         const previousGalleryCount = existing.galleryCount || 0;
         existing.galleryCount = galleryCount;
+        // The cover image (the "saved === 0" slot above) was just
+        // rewritten to a new photo — recompute its hash, and drop any AI
+        // caption cached against the old one (hook-share-content.js), so
+        // a later "Get Shareable Content" scan doesn't serve a cached
+        // caption describing whatever flyer this hook had before, and
+        // instead re-scans this new cover.
+        if (coverBuf) {
+          existing.imageHash = await sha256HexBytes(coverBuf);
+          delete existing.aiCaption;
+          delete existing.aiHashtags;
+          delete existing.aiImageHash;
+        }
         // Optional — carried straight through from generateHookDraft's
         // response rather than re-scraped here, so a hook remembers what
         // property/area it was built from (shown on the hook card and on

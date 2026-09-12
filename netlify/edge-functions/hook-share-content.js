@@ -64,10 +64,16 @@ export default async (request, context) => {
       // Older upload from before this feature shipped — no hash was ever
       // computed for it. Fetch once to see if an image even exists, and
       // backfill the hash so the next request can skip this branch.
+      // Persisted right away (not left for the "regenerated" write further
+      // down) because the very next check below can return early on a
+      // cache hit — without persisting here first, that early return would
+      // skip saving the backfilled hash entirely, and every future request
+      // would redo this exact same fetch-and-hash for nothing.
       imageResult = await imageStore.getWithMetadata(key, { type: "arrayBuffer" });
       if (!imageResult) return json({ ok: true, available: false, reason: "no-image" }, 200, cors);
       currentHash = await sha256Hex(imageResult.data);
       record.imageHash = currentHash;
+      await hookStore.setJSON(key, record).catch(() => {});
     }
 
     if (!force && record.aiCaption && record.aiImageHash === currentHash) {
