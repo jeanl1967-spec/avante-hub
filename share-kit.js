@@ -49,6 +49,7 @@
   var currentImg = null;
   var currentPlatform = PLATFORMS[0];
   var currentCanvas = null;
+  var openSeq = 0; // bumped on every openShareKit call, so a slow-loading image from a previous open can't clobber a newer one
   var currentCaption = '';
   var currentLink = '';
   var currentLinkLabel = '';
@@ -180,6 +181,7 @@
     currentCanvas = null;
     currentPlatform = PLATFORMS[0];
     overlay.classList.add('show');
+    var seq = ++openSeq;
 
     var tabsHtml = '';
     PLATFORMS.forEach(function(p){
@@ -191,8 +193,13 @@
     if(opts.imageUrl){
       var img = new Image();
       img.crossOrigin = 'anonymous';
-      img.onload = function(){ currentImg = img; currentCanvas = null; renderPlatform(currentPlatform); };
-      img.onerror = function(){ currentImg = null; currentCanvas = null; renderPlatform(currentPlatform); };
+      // Guard against a slow-loading image from a previous openShareKit
+      // call resolving after a newer one has already opened (e.g. click
+      // Hook 1, close before its image loads, click Hook 2) — without
+      // this, Hook 1's late onload would silently overwrite Hook 2's
+      // already-displayed canvas.
+      img.onload = function(){ if(seq !== openSeq) return; currentImg = img; currentCanvas = null; renderPlatform(currentPlatform); };
+      img.onerror = function(){ if(seq !== openSeq) return; currentImg = null; currentCanvas = null; renderPlatform(currentPlatform); };
       img.src = opts.imageUrl;
     }
   };
