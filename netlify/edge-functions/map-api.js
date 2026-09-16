@@ -137,6 +137,63 @@ function genTownId() {
   return "T-" + n;
 }
 
+// Suburbs — the third, finest tier under a Town (Zone > Town > Suburb).
+// Stored nested inside their parent town record (town.suburbs, an array of
+// {id, name, affId, latitude, longitude, visible}) rather than as their own
+// collection: a suburb never exists independently of a town, so this avoids
+// a second one-blob-collection store and the join it would need on every
+// read. Same affId convention as towns — empty means shared/unallocated.
+function genSuburbId() {
+  const n = Math.floor(Math.random() * 900000) + 100000;
+  return "SB-" + n;
+}
+
+function genSuburbUniqueId(existingIds) {
+  let id = genSuburbId();
+  while (existingIds.has(id)) {
+    id = genSuburbId();
+  }
+  return id;
+}
+
+function allSuburbIds(towns) {
+  const ids = new Set();
+  towns.forEach((t) => {
+    (Array.isArray(t.suburbs) ? t.suburbs : []).forEach((s) => { if (s && s.id) ids.add(s.id); });
+  });
+  return ids;
+}
+
+function sanitizeSuburb(body, existing) {
+  const record = existing ? Object.assign({}, existing) : {};
+  if (typeof body.name === "string") record.name = clean(body.name, 300);
+  if (typeof body.affId === "string") record.affId = clean(body.affId, 60);
+  if (typeof body.latitude === "string" || typeof body.latitude === "number") {
+    const lat = parseFloat(body.latitude);
+    record.latitude = isFinite(lat) ? String(lat) : "";
+  }
+  if (typeof body.longitude === "string" || typeof body.longitude === "number") {
+    const lng = parseFloat(body.longitude);
+    record.longitude = isFinite(lng) ? String(lng) : "";
+  }
+  if (typeof body.visible === "boolean") record.visible = body.visible;
+  if (record.visible === undefined) record.visible = true;
+  return record;
+}
+
+function toSuburbPin(record) {
+  const lat = parseFloat(record.latitude);
+  const lng = parseFloat(record.longitude);
+  return {
+    id: record.id,
+    name: record.name || "",
+    affId: record.affId || "",
+    latitude: isFinite(lat) ? lat : null,
+    longitude: isFinite(lng) ? lng : null,
+    hidden: record.visible === false,
+  };
+}
+
 // Netlify Edge Functions have a very small (documented: 50ms) CPU-time
 // budget per request, and — critically — Netlify Blobs' list() only ever
 // returns keys, never the stored value, so reading N activities always
@@ -353,6 +410,7 @@ function toTownPin(record) {
   const lng = parseFloat(record.longitude);
   const keys = Array.isArray(record.photoKeys) ? record.photoKeys : record.photoKey ? [record.photoKey] : [];
   const photos = keys.map((k) => "/api/property-file?key=" + encodeURIComponent(k));
+  const suburbs = (Array.isArray(record.suburbs) ? record.suburbs : []).map(toSuburbPin);
   return {
     kind: "town",
     id: record.id,
@@ -366,6 +424,7 @@ function toTownPin(record) {
     latitude: isFinite(lat) ? lat : null,
     longitude: isFinite(lng) ? lng : null,
     hidden: record.visible === false,
+    suburbs: suburbs,
   };
 }
 
@@ -415,6 +474,116 @@ function parseCoordinatesCsv(text) {
     rows.push({ id, propertyName, latitude, longitude });
   }
   return rows;
+}
+
+// Auto-discovers the Zone > Town > Suburb tree from data that already
+// exists elsewhere in the system, so an admin doesn't have to type every
+// town and suburb in by hand:
+//  - Onboarded property-listings: city (or district) => town, area => suburb
+//    (skipped when it's identical to the town name), stateProvince => zone.
+//  - The full StockNetwork resort-list: district => town (no suburb-level
+//    field exists on that dataset), district => zone via districtToZone.
+//  - map-activities: area => town (activities don't carry a separate town
+//    field, so their "area" is the finest location grouping they have),
+//    zone as entered by the admin (falls back to a district-style zone
+//    guess if it isn't one of the canonical ZONES).
+// Coordinates for a discovered town/suburb are the average of every
+// contributing record that has a usable latitude/longitude; a node with no
+// such record is left with no coordinates, same as the existing
+// "missing coordinates" pattern used for properties elsewhere in this file.
+async function discoverLocationTree({ listingsStore, resortListStore, activitiesStore }) {
+  const zones = new Map(); // zoneName -> Map(townNameLower -> townNode)
+
+  function zoneBucket(zoneName) {
+    const key = zoneName || "";
+    if (!zones.has(key)) zones.set(key, new Map());
+    return zones.get(key);
+  }
+  function townNode(bucket, name) {
+    const key = name.toLowerCase();
+    if (!bucket.has(key)) {
+      bucket.set(key, { name, suburbs: new Map(), propertyCount: 0, activityCount: 0, latSum: 0, lngSum: 0, coordCount: 0 });
+    }
+    return bucket.get(key);
+  }
+  function suburbNode(town, name) {
+    const key = name.toLowerCase();
+    if (!town.suburbs.has(key)) {
+      town.suburbs.set(key, { name, count: 0, latSum: 0, lngSum: 0, coordCount: 0 });
+    }
+    return town.suburbs.get(key);
+  }
+  function addCoord(node, lat, lng) {
+    const la = parseFloat(lat), ln = parseFloat(lng);
+    if (isFinite(la) && isFinite(ln)) { node.latSum += la; node.lngSum += ln; node.coordCount++; }
+  }
+
+  const { blobs } = await listingsStore.list();
+  const listings = await mapWithConcurrency(blobs, 25, (b) => listingsStore.get(b.key, { type: "json" }));
+  listings.filter(Boolean).forEach((r) => {
+    const townName = clean(r.city || r.district || "", 120);
+    if (!townName) return;
+    const zoneName = provinceToZone(r.stateProvince) || "";
+    const town = townNode(zoneBucket(zoneName), townName);
+    town.propertyCount++;
+    addCoord(town, r.latitude, r.longitude);
+    const suburbName = clean(r.area || "", 120);
+    if (suburbName && suburbName.toLowerCase() !== townName.toLowerCase()) {
+      const sub = suburbNode(town, suburbName);
+      sub.count++;
+      addCoord(sub, r.latitude, r.longitude);
+    }
+  });
+
+  const resortRecord = await resortListStore.get("current", { type: "json" });
+  const resortList = (resortRecord && Array.isArray(resortRecord.resorts)) ? resortRecord.resorts : [];
+  resortList.forEach((r) => {
+    const townName = clean(r.district || "", 120);
+    if (!townName) return;
+    const zoneName = districtToZone(r.district) || "";
+    const town = townNode(zoneBucket(zoneName), townName);
+    town.propertyCount++;
+    addCoord(town, r.latitude, r.longitude);
+  });
+
+  const activities = await loadActivities(activitiesStore);
+  activities.filter(Boolean).forEach((r) => {
+    const townName = clean(r.area || "", 120);
+    if (!townName) return;
+    const zoneName = ZONES.includes(r.zone) ? r.zone : (districtToZone(r.area) || "");
+    const town = townNode(zoneBucket(zoneName), townName);
+    town.activityCount++;
+    addCoord(town, r.latitude, r.longitude);
+  });
+
+  const result = [];
+  zones.forEach((townsMap, zoneName) => {
+    const towns = [];
+    townsMap.forEach((t) => {
+      const suburbs = [];
+      t.suburbs.forEach((s) => {
+        suburbs.push({
+          name: s.name,
+          count: s.count,
+          latitude: s.coordCount ? s.latSum / s.coordCount : null,
+          longitude: s.coordCount ? s.lngSum / s.coordCount : null,
+        });
+      });
+      suburbs.sort((a, b) => a.name.localeCompare(b.name));
+      towns.push({
+        name: t.name,
+        propertyCount: t.propertyCount,
+        activityCount: t.activityCount,
+        latitude: t.coordCount ? t.latSum / t.coordCount : null,
+        longitude: t.coordCount ? t.lngSum / t.coordCount : null,
+        suburbs,
+      });
+    });
+    towns.sort((a, b) => a.name.localeCompare(b.name));
+    result.push({ zone: zoneName, towns });
+  });
+  result.sort((a, b) => a.zone.localeCompare(b.zone));
+  return result;
 }
 
 export default async (request, context) => {
@@ -475,10 +644,25 @@ export default async (request, context) => {
       // view) returns every visible town, allocated or not. Properties and
       // activities are unaffected — they aren't affiliate-scoped.
       const requestedAff = new URL(request.url).searchParams.get("aff") || "";
+      const townMatchesAff = (r) => !r.affId || !requestedAff || r.affId === requestedAff;
       const towns = (await loadTowns(townsStore))
         .filter((r) => r && r.visible !== false)
-        .filter((r) => !r.affId || !requestedAff || r.affId === requestedAff)
-        .map(toTownPin);
+        // A town qualifies if its own allocation matches (or is
+        // shared/unallocated), OR — when it has suburbs — at least one of
+        // those suburbs qualifies on its own. This lets one town hold
+        // suburbs allocated to different affiliates side by side.
+        .filter((r) => {
+          const suburbs = Array.isArray(r.suburbs) ? r.suburbs.filter((s) => s && s.visible !== false) : [];
+          if (!suburbs.length) return townMatchesAff(r);
+          return townMatchesAff(r) || suburbs.some(townMatchesAff);
+        })
+        .map((r) => {
+          const pin = toTownPin(r);
+          if (requestedAff) {
+            pin.suburbs = pin.suburbs.filter((s) => !s.affId || s.affId === requestedAff);
+          }
+          return pin;
+        });
 
       return json({ ok: true, properties, activities, towns });
     }
@@ -543,6 +727,83 @@ export default async (request, context) => {
       const towns = await loadTowns(townsStore);
 
       return json({ ok: true, properties, activities: activities.filter(Boolean), towns: towns.filter(Boolean), missingCoordinates, resortStats });
+    }
+
+    if (action === "discoverLocations") {
+      // Read-only by default (body.apply falsy): scans property-listings,
+      // the resort-list, and map-activities and returns the full Zone >
+      // Town > Suburb tree it finds, flagging which nodes are already Town
+      // / Suburb records so the admin UI can show what's new. Pass
+      // apply:true to actually create the not-yet-existing towns/suburbs —
+      // this only ever ADDS; a town or suburb matched by name (existing
+      // ones are never touched) keeps every field an admin already set
+      // (affId, description, photos, manual coordinate corrections, etc).
+      const tree = await discoverLocationTree({ listingsStore, resortListStore, activitiesStore });
+      const existingTowns = await loadTowns(townsStore);
+      const existingTownByName = new Map(existingTowns.map((t) => [(t.name || "").toLowerCase(), t]));
+
+      let newTowns = 0, newSuburbs = 0;
+      tree.forEach((zoneEntry) => {
+        zoneEntry.towns.forEach((t) => {
+          const existingTown = existingTownByName.get(t.name.toLowerCase());
+          t.existing = !!existingTown;
+          if (!existingTown) newTowns++;
+          const existingSuburbNames = existingTown && Array.isArray(existingTown.suburbs)
+            ? new Set(existingTown.suburbs.map((s) => (s.name || "").toLowerCase()))
+            : new Set();
+          t.suburbs.forEach((s) => {
+            s.existing = existingSuburbNames.has(s.name.toLowerCase());
+            if (!s.existing) newSuburbs++;
+          });
+        });
+      });
+
+      if (body.apply) {
+        const all = existingTowns.slice();
+        const existingIds = new Set(all.map((t) => t.id));
+        tree.forEach((zoneEntry) => {
+          zoneEntry.towns.forEach((t) => {
+            let townRecord = all.find((r) => (r.name || "").toLowerCase() === t.name.toLowerCase());
+            if (!townRecord) {
+              townRecord = {
+                id: genTownUniqueId(existingIds),
+                name: t.name,
+                area: "",
+                zone: ZONES.includes(zoneEntry.zone) ? zoneEntry.zone : "",
+                affId: "",
+                description: "",
+                latitude: t.latitude != null ? String(t.latitude) : "",
+                longitude: t.longitude != null ? String(t.longitude) : "",
+                visible: true,
+                suburbs: [],
+                createdAt: new Date().toISOString(),
+              };
+              townRecord.updatedAt = townRecord.createdAt;
+              existingIds.add(townRecord.id);
+              all.push(townRecord);
+            }
+            if (!Array.isArray(townRecord.suburbs)) townRecord.suburbs = [];
+            const existingSuburbNames = new Set(townRecord.suburbs.map((s) => (s.name || "").toLowerCase()));
+            t.suburbs.forEach((s) => {
+              if (existingSuburbNames.has(s.name.toLowerCase())) return;
+              const suburbRecord = {
+                id: genSuburbUniqueId(allSuburbIds(all)),
+                name: s.name,
+                affId: "",
+                latitude: s.latitude != null ? String(s.latitude) : "",
+                longitude: s.longitude != null ? String(s.longitude) : "",
+                visible: true,
+              };
+              townRecord.suburbs.push(suburbRecord);
+              existingSuburbNames.add(s.name.toLowerCase());
+            });
+          });
+        });
+        await saveTowns(townsStore, all);
+        return json({ ok: true, applied: true, createdTowns: newTowns, createdSuburbs: newSuburbs, towns: all });
+      }
+
+      return json({ ok: true, applied: false, tree, newTowns, newSuburbs });
     }
 
     if (action === "importPropertyCoordinatesCsv") {
@@ -731,6 +992,58 @@ export default async (request, context) => {
       all[idx] = existing;
       await saveTowns(townsStore, all);
       return json({ ok: true, town: existing });
+    }
+
+    if (action === "addSuburb") {
+      const townId = clean(body.townId, 20);
+      if (!townId) return json({ error: "missing townId" }, 400);
+      const all = await loadTowns(townsStore);
+      const idx = all.findIndex((r) => r.id === townId);
+      if (idx === -1) return json({ error: "town not found" }, 404);
+      const town = all[idx];
+      if (!Array.isArray(town.suburbs)) town.suburbs = [];
+      const record = sanitizeSuburb(body, {});
+      if (!record.name) return json({ error: "Suburb name is required." }, 400);
+      record.id = genSuburbUniqueId(allSuburbIds(all));
+      town.suburbs.push(record);
+      town.updatedAt = new Date().toISOString();
+      all[idx] = town;
+      await saveTowns(townsStore, all);
+      return json({ ok: true, town });
+    }
+
+    if (action === "updateSuburb") {
+      const townId = clean(body.townId, 20);
+      const suburbId = clean(body.suburbId, 20);
+      if (!townId || !suburbId) return json({ error: "missing townId or suburbId" }, 400);
+      const all = await loadTowns(townsStore);
+      const idx = all.findIndex((r) => r.id === townId);
+      if (idx === -1) return json({ error: "town not found" }, 404);
+      const town = all[idx];
+      const suburbs = Array.isArray(town.suburbs) ? town.suburbs : [];
+      const sIdx = suburbs.findIndex((s) => s.id === suburbId);
+      if (sIdx === -1) return json({ error: "suburb not found" }, 404);
+      suburbs[sIdx] = sanitizeSuburb(body, suburbs[sIdx]);
+      town.suburbs = suburbs;
+      town.updatedAt = new Date().toISOString();
+      all[idx] = town;
+      await saveTowns(townsStore, all);
+      return json({ ok: true, town });
+    }
+
+    if (action === "deleteSuburb") {
+      const townId = clean(body.townId, 20);
+      const suburbId = clean(body.suburbId, 20);
+      if (!townId || !suburbId) return json({ error: "missing townId or suburbId" }, 400);
+      const all = await loadTowns(townsStore);
+      const idx = all.findIndex((r) => r.id === townId);
+      if (idx === -1) return json({ error: "town not found" }, 404);
+      const town = all[idx];
+      town.suburbs = (Array.isArray(town.suburbs) ? town.suburbs : []).filter((s) => s.id !== suburbId);
+      town.updatedAt = new Date().toISOString();
+      all[idx] = town;
+      await saveTowns(townsStore, all);
+      return json({ ok: true, town });
     }
 
     if (action === "addActivity") {
