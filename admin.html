@@ -516,10 +516,14 @@
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Limpopo" class="aff-zone-cb"> Limpopo</label>
       </div>
       <p class="modal-sub" style="margin:-2px 0 8px;">This affiliate's Explore Map tab in the Hub auto-filters to their first assigned zone by default (they can still switch to another area from the dropdown there).</p>
-      <label>Towns (optional — allocate specific towns to this affiliate)</label>
-      <div id="affTownCheckboxes" style="display:flex; flex-direction:column; gap:8px; margin-bottom:4px; max-height:200px; overflow-y:auto; padding-right:4px;"></div>
-      <p class="modal-sub" id="affTownCheckboxesEmpty" style="margin:-2px 0 8px; display:none;">No towns added yet — add some in the Map &amp; Activities tab first.</p>
-      <p class="modal-sub" style="margin:-2px 0 8px;">A town checked here shows only on this affiliate's Explore Map (and only they can allocate it in an area hook). Leave a town unchecked to keep it shared across every affiliate.</p>
+      <label>Locations (optional — allocate specific areas, towns or suburbs to this affiliate)</label>
+      <button type="button" id="affLocationsToggleBtn" class="btn-outline" style="width:auto; display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:4px;">
+        <span id="affLocationsToggleLabel">No locations selected</span>
+        <span id="affLocationsToggleChevron" aria-hidden="true">▾</span>
+      </button>
+      <div id="affTownCheckboxes" style="display:none; flex-direction:column; gap:2px; margin-bottom:4px; max-height:280px; overflow-y:auto; padding:8px; border:1px solid #e2e2e2; border-radius:8px;"></div>
+      <p class="modal-sub" id="affTownCheckboxesEmpty" style="margin:-2px 0 8px; display:none;">No towns added yet — add some in the Map &amp; Activities tab first (or use "Discover locations" there).</p>
+      <p class="modal-sub" style="margin:-2px 0 8px;">Check an area to select every town (and suburb) in it, or a town to select all its suburbs — or tick individual suburbs one at a time. A location checked here shows only on this affiliate's Explore Map (and only they can allocate it in an area hook). Leave unchecked to keep it shared across every affiliate.</p>
       <label>Affiliate type (optional — select all that apply)</label>
       <div class="row" id="affTypeCheckboxes" style="flex-wrap:wrap; gap:8px 16px; margin-bottom:8px;">
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="franchise" id="affTypeFranchise"> Franchise Affiliate</label>
@@ -1341,6 +1345,15 @@
       </div>
 
       <div class="card" style="margin-top:20px;">
+        <h3 style="margin-top:0;">Discover locations from properties &amp; activities</h3>
+        <p style="margin-top:0;">Scans every onboarded property, the full StockNetwork resort list, and all activities for the areas, towns and suburbs already on file, and adds any that aren't yet a Town or Suburb here — auto-suggesting a zone and coordinates from the source records. Never touches or overwrites a town/suburb you've already added or edited.</p>
+        <div class="btn-row" style="margin-top:0;">
+          <button class="btn-outline" id="discoverLocationsBtn">Discover &amp; add new locations</button>
+        </div>
+        <div class="status" id="discoverLocationsStatus"></div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
         <div class="btn-row" style="margin-top:0;">
           <button class="btn-outline" id="refreshTownsBtn">Refresh</button>
         </div>
@@ -1353,6 +1366,7 @@
                 <tr>
                   <th>Name</th>
                   <th>Area</th>
+                  <th>Suburbs</th>
                   <th>Coordinates</th>
                   <th>Photo</th>
                   <th>Affiliate</th>
@@ -2302,44 +2316,214 @@
       });
     }
 
+    // A location's checkbox state cascades in both directions: checking a
+    // Zone (Area) row checks every town — and every suburb — under it;
+    // checking a Town row checks all of its suburbs; and each parent
+    // checkbox reflects the aggregate state of its children (fully
+    // checked / fully unchecked / indeterminate — some but not all).
+    function updateTownAggregate(townCb, suburbsWrap){
+      var boxes = Array.prototype.slice.call(suburbsWrap.querySelectorAll('.aff-suburb-cb'));
+      var checkedCount = boxes.filter(function(cb){ return cb.checked; }).length;
+      townCb.checked = boxes.length > 0 && checkedCount === boxes.length;
+      townCb.indeterminate = checkedCount > 0 && checkedCount < boxes.length;
+    }
+    function updateZoneAggregate(zoneCb, townsWrap){
+      var leafBoxes = Array.prototype.slice.call(townsWrap.querySelectorAll('.aff-town-cb, .aff-suburb-cb'));
+      var checkedCount = leafBoxes.filter(function(cb){ return cb.checked; }).length;
+      zoneCb.checked = leafBoxes.length > 0 && checkedCount === leafBoxes.length;
+      zoneCb.indeterminate = checkedCount > 0 && checkedCount < leafBoxes.length;
+    }
+    function updateAffLocationsToggleLabel(){
+      var wrap = document.getElementById('affTownCheckboxes');
+      var label = document.getElementById('affLocationsToggleLabel');
+      if(!wrap || !label) return;
+      var n = wrap.querySelectorAll('.aff-town-cb:checked, .aff-suburb-cb:checked').length;
+      label.textContent = n === 0 ? 'No locations selected' : (n + ' location' + (n === 1 ? '' : 's') + ' selected');
+    }
+
+    var AFF_ZONE_ORDER = ['Western Cape (Cape Town & Winelands)', 'Eastern Cape & Garden Route', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng & North West', 'Mpumalanga', 'Limpopo'];
+
     function populateAffTownCheckboxes(existingAffId){
       var wrap = document.getElementById('affTownCheckboxes');
       var emptyEl = document.getElementById('affTownCheckboxesEmpty');
-      wrap.innerHTML = '<span style="font-size:12px; color:var(--muted);">Loading towns…</span>';
+      var toggleBtn = document.getElementById('affLocationsToggleBtn');
+      wrap.innerHTML = '<span style="font-size:12px; color:var(--muted);">Loading locations…</span>';
       return affSectionMapPost('adminList').then(function(res){
         var towns = (res.data && res.data.ok && res.data.towns) || [];
         affModalTownsSnapshot = towns;
         wrap.innerHTML = '';
         if(!towns.length){
           emptyEl.style.display = 'block';
+          toggleBtn.style.display = 'none';
+          updateAffLocationsToggleLabel();
           return;
         }
         emptyEl.style.display = 'none';
+        toggleBtn.style.display = '';
+
+        // Group towns by zone (Area); a town with no zone set lands in a
+        // trailing "Other" group rather than being dropped.
+        var byZone = {};
         towns.forEach(function(t){
-          var label = document.createElement('label');
-          label.style.cssText = 'display:flex; align-items:flex-start; gap:6px; font-weight:400;';
-          var cb = document.createElement('input');
-          cb.type = 'checkbox';
-          cb.className = 'aff-town-cb';
-          cb.value = t.id;
-          cb.checked = !!(existingAffId && t.affId === existingAffId);
-          // The page's global `input{ width:100% }` rule (meant for text
-          // fields) also hits checkboxes — width:auto overrides it, same
-          // fix already used for #missingSiteNrFilterToggle above.
-          cb.style.cssText = 'width:auto; flex:none; margin-top:3px;';
-          label.appendChild(cb);
-          var textSpan = document.createElement('span');
-          textSpan.style.cssText = 'flex:1; min-width:0;';
-          textSpan.textContent = t.name + (t.area ? ' — ' + t.area : '');
-          label.appendChild(textSpan);
-          wrap.appendChild(label);
+          var z = t.zone && AFF_ZONE_ORDER.indexOf(t.zone) > -1 ? t.zone : '';
+          if(!byZone[z]) byZone[z] = [];
+          byZone[z].push(t);
         });
+        var zoneKeys = AFF_ZONE_ORDER.filter(function(z){ return byZone[z]; });
+        if(byZone['']) zoneKeys.push('');
+
+        zoneKeys.forEach(function(zoneKey){
+          var zoneTowns = byZone[zoneKey].slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
+          var zoneWrap = document.createElement('div');
+          zoneWrap.style.cssText = 'margin-bottom:6px;';
+
+          var zoneRow = document.createElement('div');
+          zoneRow.style.cssText = 'display:flex; align-items:center; gap:6px; font-weight:600; padding:4px 0;';
+          var zoneCb = document.createElement('input');
+          zoneCb.type = 'checkbox';
+          zoneCb.className = 'aff-zone-selectall';
+          zoneCb.style.cssText = 'width:auto; flex:none;';
+          var zoneChevron = document.createElement('span');
+          zoneChevron.textContent = '▾';
+          zoneChevron.style.cssText = 'cursor:pointer; font-size:11px; color:var(--muted); width:14px; display:inline-block;';
+          var zoneLabel = document.createElement('span');
+          zoneLabel.style.cssText = 'cursor:pointer; flex:1;';
+          zoneLabel.textContent = zoneKey || 'Other (no area set)';
+          zoneRow.appendChild(zoneCb);
+          zoneRow.appendChild(zoneChevron);
+          zoneRow.appendChild(zoneLabel);
+          zoneWrap.appendChild(zoneRow);
+
+          var townsWrap = document.createElement('div');
+          townsWrap.style.cssText = 'margin-left:20px; display:flex; flex-direction:column; gap:2px;';
+          zoneWrap.appendChild(townsWrap);
+
+          var toggleZoneCollapse = function(){
+            var collapsed = townsWrap.style.display === 'none';
+            townsWrap.style.display = collapsed ? 'flex' : 'none';
+            zoneChevron.textContent = collapsed ? '▾' : '▸';
+          };
+          zoneChevron.addEventListener('click', toggleZoneCollapse);
+          zoneLabel.addEventListener('click', toggleZoneCollapse);
+
+          zoneTowns.forEach(function(t){
+            var hasSuburbs = Array.isArray(t.suburbs) && t.suburbs.length > 0;
+            var townWrap = document.createElement('div');
+            townWrap.style.cssText = 'margin-bottom:2px;';
+
+            var townRow = document.createElement('div');
+            townRow.style.cssText = 'display:flex; align-items:flex-start; gap:6px; padding:2px 0;';
+            var townCb = document.createElement('input');
+            townCb.type = 'checkbox';
+            // The page's global `input{ width:100% }` rule (meant for text
+            // fields) also hits checkboxes — width:auto overrides it, same
+            // fix already used for #missingSiteNrFilterToggle above.
+            townCb.style.cssText = 'width:auto; flex:none; margin-top:2px;';
+            if(hasSuburbs){
+              townCb.className = 'aff-town-selectall';
+            } else {
+              townCb.className = 'aff-town-cb';
+              townCb.value = t.id;
+              townCb.checked = !!(existingAffId && t.affId === existingAffId);
+            }
+            townRow.appendChild(townCb);
+
+            var suburbsWrap = null;
+            var townChevron = null;
+            if(hasSuburbs){
+              townChevron = document.createElement('span');
+              townChevron.textContent = '▸';
+              townChevron.style.cssText = 'cursor:pointer; font-size:11px; color:var(--muted); width:14px; display:inline-block; margin-top:1px;';
+              townRow.appendChild(townChevron);
+            }
+            var townLabel = document.createElement('span');
+            townLabel.style.cssText = 'flex:1; min-width:0;' + (hasSuburbs ? ' cursor:pointer;' : '');
+            townLabel.textContent = t.name + (t.area ? ' — ' + t.area : '') + (hasSuburbs ? ' (' + t.suburbs.length + ' suburbs)' : '');
+            townRow.appendChild(townLabel);
+            townWrap.appendChild(townRow);
+
+            if(hasSuburbs){
+              suburbsWrap = document.createElement('div');
+              suburbsWrap.style.cssText = 'margin-left:20px; display:none; flex-direction:column; gap:2px;';
+              t.suburbs.slice().sort(function(a,b){ return a.name.localeCompare(b.name); }).forEach(function(s){
+                var subLabel = document.createElement('label');
+                subLabel.style.cssText = 'display:flex; align-items:center; gap:6px; font-weight:400;';
+                var subCb = document.createElement('input');
+                subCb.type = 'checkbox';
+                subCb.className = 'aff-suburb-cb';
+                subCb.style.cssText = 'width:auto; flex:none;';
+                subCb.dataset.townId = t.id;
+                subCb.dataset.suburbId = s.id;
+                subCb.checked = !!(existingAffId && s.affId === existingAffId);
+                subLabel.appendChild(subCb);
+                var subText = document.createElement('span');
+                subText.style.cssText = 'flex:1; min-width:0;';
+                subText.textContent = s.name;
+                subLabel.appendChild(subText);
+                suburbsWrap.appendChild(subLabel);
+              });
+              townWrap.appendChild(suburbsWrap);
+
+              var toggleTownCollapse = function(){
+                var collapsed = suburbsWrap.style.display === 'none';
+                suburbsWrap.style.display = collapsed ? 'flex' : 'none';
+                townChevron.textContent = collapsed ? '▾' : '▸';
+              };
+              townChevron.addEventListener('click', toggleTownCollapse);
+              townLabel.addEventListener('click', toggleTownCollapse);
+
+              townCb.addEventListener('change', function(){
+                var checked = townCb.checked;
+                townCb.indeterminate = false;
+                suburbsWrap.querySelectorAll('.aff-suburb-cb').forEach(function(cb){ cb.checked = checked; });
+                updateZoneAggregate(zoneCb, townsWrap);
+                updateAffLocationsToggleLabel();
+              });
+              suburbsWrap.addEventListener('change', function(e){
+                if(!e.target.classList.contains('aff-suburb-cb')) return;
+                updateTownAggregate(townCb, suburbsWrap);
+                updateZoneAggregate(zoneCb, townsWrap);
+                updateAffLocationsToggleLabel();
+              });
+              updateTownAggregate(townCb, suburbsWrap);
+            } else {
+              townCb.addEventListener('change', function(){
+                updateZoneAggregate(zoneCb, townsWrap);
+                updateAffLocationsToggleLabel();
+              });
+            }
+
+            townsWrap.appendChild(townWrap);
+          });
+
+          updateZoneAggregate(zoneCb, townsWrap);
+
+          zoneCb.addEventListener('change', function(){
+            var checked = zoneCb.checked;
+            zoneCb.indeterminate = false;
+            townsWrap.querySelectorAll('.aff-town-selectall, .aff-town-cb, .aff-suburb-cb').forEach(function(cb){ cb.checked = checked; });
+            townsWrap.querySelectorAll('.aff-town-selectall').forEach(function(cb){ cb.indeterminate = false; });
+            updateAffLocationsToggleLabel();
+          });
+
+          wrap.appendChild(zoneWrap);
+        });
+
+        updateAffLocationsToggleLabel();
       }).catch(function(){
         wrap.innerHTML = '';
-        emptyEl.textContent = 'Could not load towns — town allocation unavailable right now.';
+        emptyEl.textContent = 'Could not load locations — allocation unavailable right now.';
         emptyEl.style.display = 'block';
       });
     }
+
+    document.getElementById('affLocationsToggleBtn').addEventListener('click', function(){
+      var wrap = document.getElementById('affTownCheckboxes');
+      var chevron = document.getElementById('affLocationsToggleChevron');
+      var isOpen = wrap.style.display !== 'none';
+      wrap.style.display = isOpen ? 'none' : 'flex';
+      chevron.textContent = isOpen ? '▾' : '▴';
+    });
 
     function openAffiliateModal(existing){
       editingAffId = existing ? existing.affId : null;
@@ -2367,6 +2551,10 @@
       document.getElementById('affStatusInput').value = existing ? (existing.status || 'active') : 'active';
       document.getElementById('affNotesInput').value = existing ? (existing.notes || '') : '';
       document.getElementById('affModalStatus').classList.remove('show');
+      // Closed by default each time the modal opens, per request — the
+      // full tree can get long once locations are auto-discovered.
+      document.getElementById('affTownCheckboxes').style.display = 'none';
+      document.getElementById('affLocationsToggleChevron').textContent = '▾';
       populateAffTownCheckboxes(existing ? existing.affId : null);
       affOverlay.classList.add('show');
     }
@@ -2408,6 +2596,12 @@
       }
 
       var checkedTownIds = Array.prototype.slice.call(document.querySelectorAll('.aff-town-cb:checked')).map(function(cb){ return cb.value; });
+      var checkedSuburbsByTown = {};
+      Array.prototype.slice.call(document.querySelectorAll('.aff-suburb-cb:checked')).forEach(function(cb){
+        var tId = cb.dataset.townId, sId = cb.dataset.suburbId;
+        if(!checkedSuburbsByTown[tId]) checkedSuburbsByTown[tId] = {};
+        checkedSuburbsByTown[tId][sId] = true;
+      });
 
       btn.disabled = true;
       btn.textContent = 'Saving…';
@@ -2418,17 +2612,32 @@
         if(!res.data || !res.data.ok){
           throw { userMessage: (res.data && res.data.error) || 'Could not save affiliate.' };
         }
-        // Reconcile town allocation against the snapshot taken when this
-        // modal opened: newly-checked towns get this affId, towns that were
-        // allocated to this affiliate but got unchecked go back to shared.
+        // Reconcile location allocation against the snapshot taken when this
+        // modal opened: newly-checked locations get this affId, ones that
+        // were allocated to this affiliate but got unchecked go back to
+        // shared. A town with suburbs is allocated at the suburb level;
+        // a town with none is its own leaf, same as before.
         var townUpdates = [];
         affModalTownsSnapshot.forEach(function(t){
-          var nowChecked = checkedTownIds.indexOf(t.id) > -1;
-          var wasThisAff = t.affId === affId;
-          if(nowChecked && !wasThisAff){
-            townUpdates.push(affSectionMapPost('updateTown', { id: t.id, affId: affId }));
-          } else if(!nowChecked && wasThisAff){
-            townUpdates.push(affSectionMapPost('updateTown', { id: t.id, affId: '' }));
+          var hasSuburbs = Array.isArray(t.suburbs) && t.suburbs.length > 0;
+          if(hasSuburbs){
+            t.suburbs.forEach(function(s){
+              var nowChecked = !!(checkedSuburbsByTown[t.id] && checkedSuburbsByTown[t.id][s.id]);
+              var wasThisAff = s.affId === affId;
+              if(nowChecked && !wasThisAff){
+                townUpdates.push(affSectionMapPost('updateSuburb', { townId: t.id, suburbId: s.id, affId: affId }));
+              } else if(!nowChecked && wasThisAff){
+                townUpdates.push(affSectionMapPost('updateSuburb', { townId: t.id, suburbId: s.id, affId: '' }));
+              }
+            });
+          } else {
+            var nowChecked = checkedTownIds.indexOf(t.id) > -1;
+            var wasThisAff = t.affId === affId;
+            if(nowChecked && !wasThisAff){
+              townUpdates.push(affSectionMapPost('updateTown', { id: t.id, affId: affId }));
+            } else if(!nowChecked && wasThisAff){
+              townUpdates.push(affSectionMapPost('updateTown', { id: t.id, affId: '' }));
+            }
           }
         });
         return Promise.all(townUpdates);
@@ -4809,6 +5018,12 @@
         });
         townAffInput.value = current;
       }
+      // The top-level tab-switch handler near the top of the page (a
+      // different <script> block/IIFE — see the mapAdminPost comment
+      // above for why that happens in this file) calls this by name when
+      // the Map & Activities tab is opened, so it needs to be reachable
+      // off `window`, not just this IIFE's own closure.
+      window.populateTownAffiliateOptions = populateTownAffiliateOptions;
 
       function affiliateLabel(affId){
         if(!affId) return 'All affiliates';
@@ -4972,6 +5187,15 @@
           tdArea.textContent = t.area || '—';
           tr.appendChild(tdArea);
 
+          var suburbs = Array.isArray(t.suburbs) ? t.suburbs : [];
+          var tdSuburbs = document.createElement('td');
+          var suburbsToggle = document.createElement('button');
+          suburbsToggle.type = 'button';
+          suburbsToggle.className = 'btn-outline btn-small';
+          suburbsToggle.textContent = suburbs.length ? (suburbs.length + ' suburb' + (suburbs.length === 1 ? '' : 's') + ' ▸') : 'Add suburb';
+          tdSuburbs.appendChild(suburbsToggle);
+          tr.appendChild(tdSuburbs);
+
           var lat = parseFloat(t.latitude);
           var lng = parseFloat(t.longitude);
           var hasCoords = isFinite(lat) && isFinite(lng);
@@ -5092,6 +5316,77 @@
 
           tr.appendChild(tdActions);
           townTableBody.appendChild(tr);
+
+          // Suburbs detail row — collapsed by default, toggled by the
+          // "N suburbs" button in the Suburbs column above.
+          var detailTr = document.createElement('tr');
+          detailTr.style.display = 'none';
+          var detailTd = document.createElement('td');
+          detailTd.colSpan = 8;
+          detailTd.style.cssText = 'background:#fafafa; padding:10px 14px;';
+
+          var chipsWrap = document.createElement('div');
+          chipsWrap.style.cssText = 'display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;';
+          function renderSuburbChips(){
+            chipsWrap.innerHTML = '';
+            suburbs.forEach(function(s){
+              var chip = document.createElement('span');
+              chip.style.cssText = 'display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid #e2e2e2; border-radius:14px; padding:4px 6px 4px 10px; font-size:12px;';
+              var chipText = document.createElement('span');
+              chipText.textContent = s.name + (s.affId ? ' — ' + affiliateLabel(s.affId) : '');
+              chip.appendChild(chipText);
+              var chipDel = document.createElement('button');
+              chipDel.type = 'button';
+              chipDel.textContent = '×';
+              chipDel.title = 'Delete suburb';
+              chipDel.style.cssText = 'width:16px; height:16px; line-height:14px; padding:0; border-radius:50%; border:none; background:#b42318; color:#fff; font-size:11px; cursor:pointer;';
+              chipDel.addEventListener('click', function(){
+                if(!confirm('Delete suburb "' + s.name + '"?')) return;
+                mapAdminPost('deleteSuburb', { townId: t.id, suburbId: s.id }).then(function(){ loadActivities(); });
+              });
+              chip.appendChild(chipDel);
+              chipsWrap.appendChild(chip);
+            });
+            if(!suburbs.length){
+              var noneEl = document.createElement('span');
+              noneEl.style.cssText = 'font-size:12px; color:var(--muted);';
+              noneEl.textContent = 'No suburbs added yet.';
+              chipsWrap.appendChild(noneEl);
+            }
+          }
+          renderSuburbChips();
+          detailTd.appendChild(chipsWrap);
+
+          var addSuburbRow = document.createElement('div');
+          addSuburbRow.style.cssText = 'display:flex; gap:8px; align-items:center; flex-wrap:wrap;';
+          var addSuburbInput = document.createElement('input');
+          addSuburbInput.placeholder = 'New suburb name';
+          addSuburbInput.style.cssText = 'width:auto; flex:1; min-width:160px;';
+          var addSuburbBtn = document.createElement('button');
+          addSuburbBtn.type = 'button';
+          addSuburbBtn.className = 'btn-outline btn-small';
+          addSuburbBtn.textContent = 'Add suburb';
+          addSuburbBtn.addEventListener('click', function(){
+            var name = addSuburbInput.value.trim();
+            if(!name) return;
+            addSuburbBtn.disabled = true;
+            mapAdminPost('addSuburb', { townId: t.id, name: name }).then(function(res){
+              addSuburbBtn.disabled = false;
+              if(res.data && res.data.ok){ addSuburbInput.value = ''; loadActivities(); }
+            });
+          });
+          addSuburbRow.appendChild(addSuburbInput);
+          addSuburbRow.appendChild(addSuburbBtn);
+          detailTd.appendChild(addSuburbRow);
+
+          detailTr.appendChild(detailTd);
+          townTableBody.appendChild(detailTr);
+
+          suburbsToggle.addEventListener('click', function(){
+            var open = detailTr.style.display !== 'none';
+            detailTr.style.display = open ? 'none' : 'table-row';
+            suburbsToggle.textContent = suburbs.length ? (suburbs.length + ' suburb' + (suburbs.length === 1 ? '' : 's') + (open ? ' ▸' : ' ▾')) : (open ? 'Add suburb' : 'Add suburb ▾');
+          });
         });
       }
 
@@ -5151,6 +5446,28 @@
 
       document.getElementById('refreshTownsBtn').addEventListener('click', function(){
         loadActivities();
+      });
+
+      var discoverLocationsBtn = document.getElementById('discoverLocationsBtn');
+      var discoverLocationsStatusEl = document.getElementById('discoverLocationsStatus');
+      discoverLocationsBtn.addEventListener('click', function(){
+        discoverLocationsBtn.disabled = true;
+        discoverLocationsStatusEl.textContent = 'Scanning properties, the resort list and activities…';
+        discoverLocationsStatusEl.className = 'status show';
+        mapAdminPost('discoverLocations', { apply: true }).then(function(res){
+          discoverLocationsBtn.disabled = false;
+          if(res.data && res.data.ok){
+            discoverLocationsStatusEl.textContent = res.data.createdTowns || res.data.createdSuburbs
+              ? ('Added ' + res.data.createdTowns + ' new town' + (res.data.createdTowns === 1 ? '' : 's') + ' and ' + res.data.createdSuburbs + ' new suburb' + (res.data.createdSuburbs === 1 ? '' : 's') + '.')
+              : 'Nothing new found — every location already on file matches what\'s in the source data.';
+            loadActivities();
+          } else {
+            discoverLocationsStatusEl.textContent = (res.data && res.data.error) || 'Could not scan for locations.';
+          }
+        }).catch(function(){
+          discoverLocationsBtn.disabled = false;
+          discoverLocationsStatusEl.textContent = 'Could not scan for locations.';
+        });
       });
 
       var importTownsBtn = document.getElementById('importTownsBtn');
