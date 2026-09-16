@@ -138,6 +138,17 @@ export default async (request, context) => {
         if (newHashtags) record.hashtags = newHashtags;
         else delete record.hashtags;
       }
+      // Which area/town/suburb the property in this hook is in — same
+      // field shape admin-api.js's setDefaultHook persists for the admin's
+      // own default hooks, accepted here too so an affiliate's own
+      // self-managed hook (hub.html's "Property location" picker) can tag
+      // one. Only one of zone/townId/(townId+suburbId) is ever sent by
+      // that UI, but nothing here enforces that — it just stores whatever
+      // arrives, same as booking/landing/caption above.
+      if (typeof body.zone === "string") record.zone = body.zone;
+      if (typeof body.townId === "string") record.townId = body.townId;
+      if (typeof body.suburbId === "string") record.suburbId = body.suburbId;
+      if (typeof body.locationLabel === "string") record.locationLabel = body.locationLabel;
       if (body.mode === "self" || body.mode === "admin") record.mode = body.mode;
       if (!record.mode) record.mode = "admin";
       record.savedAt = new Date().toISOString();
@@ -231,6 +242,7 @@ export default async (request, context) => {
           hashtags: affRecord.hashtags || null,
           galleryCount: affRecord.galleryCount || 0,
           details: affRecord.source || null,
+          location: { zone: affRecord.zone || "", townId: affRecord.townId || "", suburbId: affRecord.suburbId || "", label: affRecord.locationLabel || "" },
           mode: mode,
           source: "self",
           expired: expired,
