@@ -522,7 +522,7 @@
         <span id="affLocationsToggleChevron" aria-hidden="true">▾</span>
       </button>
       <div id="affTownCheckboxes" style="display:none; flex-direction:column; gap:2px; margin-bottom:4px; max-height:280px; overflow-y:auto; padding:8px; border:1px solid #e2e2e2; border-radius:8px;"></div>
-      <p class="modal-sub" id="affTownCheckboxesEmpty" style="margin:-2px 0 8px; display:none;">No towns added yet — add some in the Map &amp; Activities tab first (or use "Discover locations" there).</p>
+      <p class="modal-sub" id="affTownCheckboxesEmpty" style="margin:-2px 0 8px; display:none;">No towns added yet — go to the Map &amp; Activities tab and click "Discover &amp; add new locations" to pull them in from your properties and activities, or add one manually there.</p>
       <p class="modal-sub" style="margin:-2px 0 8px;">Check an area to select every town (and suburb) in it, or a town to select all its suburbs — or tick individual suburbs one at a time. A location checked here shows only on this affiliate's Explore Map (and only they can allocate it in an area hook). Leave unchecked to keep it shared across every affiliate.</p>
       <label>Affiliate type (optional — select all that apply)</label>
       <div class="row" id="affTypeCheckboxes" style="flex-wrap:wrap; gap:8px 16px; margin-bottom:8px;">
@@ -1175,7 +1175,7 @@
 
       <div class="card" style="margin-top:20px;">
         <h3 style="margin-top:0;">StockNetwork resort list</h3>
-        <p style="margin-top:0;">The full StockNetwork inventory (used by the Accommodation Link Builder in the Hub too). Add <code>Latitude</code>/<code>Longitude</code> columns to your usual export and re-upload it here to also get those resorts pinned on the map — everything else about how this list is used stays the same.</p>
+        <p style="margin-top:0;">The full StockNetwork inventory (used by the Accommodation Link Builder in the Hub too, and by "Discover locations" below). The town/city column can be named <code>District</code>, <code>Town</code>, or <code>City</code> — any of those is picked up automatically. Also optional, if your export has them: <code>Suburb</code> (or <code>Area</code>) for suburb-level detail, <code>Zone</code>/<code>Province</code>/<code>State</code> for a more exact area than we can guess from the town name alone, and <code>Latitude</code>/<code>Longitude</code> to get resorts pinned on the map. Re-upload any time your export changes — everything else about how this list is used stays the same.</p>
         <div class="btn-row" style="margin-top:0;">
           <button class="btn-outline" id="resortListUploadBtn">Upload resort list CSV</button>
           <input type="file" id="resortListFileInput" accept=".csv" style="display:none;">
@@ -1364,7 +1364,8 @@
             <table class="data-table">
               <thead>
                 <tr>
-                  <th>Name</th>
+                  <th>Town / City</th>
+                  <th>Zone</th>
                   <th>Area</th>
                   <th>Suburbs</th>
                   <th>Coordinates</th>
@@ -3558,6 +3559,97 @@
         }).catch(function(){ /* best-effort — Auto-build still works by typed text alone */ });
       }
 
+      // Populates each hook card's "Property location" <select> from the
+      // same Zone > Town > Suburb tree the Affiliate modal's location
+      // picker uses (fetched via the same /api/map 'adminList' action) —
+      // one shared list of <option>s, cloned into all 6 selects, grouped
+      // by zone with an explicit "(entire area)" option for the zone
+      // itself plus one option per town and, indented under it, one per
+      // suburb. Values are encoded as 'zone:<zoneName>', 'town:<id>' or
+      // 'suburb:<townId>:<suburbId>' so saveHook can split them back apart
+      // without a second lookup. Loaded once and reused — this tree
+      // doesn't change often enough to justify re-fetching per hook card.
+      function buildLocationOptionsHtml(towns){
+        var byZone = {};
+        towns.forEach(function(t){
+          var z = t.zone && AFF_ZONE_ORDER.indexOf(t.zone) > -1 ? t.zone : '';
+          if(!byZone[z]) byZone[z] = [];
+          byZone[z].push(t);
+        });
+        var zoneKeys = AFF_ZONE_ORDER.filter(function(z){ return byZone[z]; });
+        if(byZone['']) zoneKeys.push('');
+
+        var html = '<option value="">— None selected —</option>';
+        zoneKeys.forEach(function(zoneKey){
+          var label = zoneKey || 'Other (no area set)';
+          html += '<optgroup label="' + escapeHtml(label) + '">';
+          if(zoneKey){
+            html += '<option value="zone:' + escapeHtml(zoneKey) + '">' + escapeHtml(zoneKey) + ' (entire area)</option>';
+          }
+          byZone[zoneKey].slice().sort(function(a,b){ return a.name.localeCompare(b.name); }).forEach(function(t){
+            html += '<option value="town:' + escapeHtml(t.id) + '">' + escapeHtml(t.name) + '</option>';
+            (t.suburbs || []).slice().sort(function(a,b){ return a.name.localeCompare(b.name); }).forEach(function(s){
+              html += '<option value="suburb:' + escapeHtml(t.id) + ':' + escapeHtml(s.id) + '">— ' + escapeHtml(s.name) + '</option>';
+            });
+          });
+          html += '</optgroup>';
+        });
+        return html;
+      }
+
+      var hookLocationOptionsLoaded = false;
+      function loadHookLocationOptions(){
+        if(hookLocationOptionsLoaded) return Promise.resolve();
+        return affSectionMapPost('adminList').then(function(res){
+          var towns = (res.data && res.data.ok && res.data.towns) || [];
+          var optionsHtml = buildLocationOptionsHtml(towns);
+          for(var n = 1; n <= HOOK_COUNT; n++){
+            var sel = document.getElementById('dh' + n + '-locationSelect');
+            if(sel) sel.innerHTML = optionsHtml;
+          }
+          hookLocationOptionsLoaded = true;
+        }).catch(function(){ /* best-effort — the field just stays empty/unset if this fails */ });
+      }
+
+      // Reads a hook card's location select back into the {townId,
+      // suburbId, locationLabel} shape setDefaultHook expects, from its
+      // encoded option value ('', 'zone:<name>', 'town:<id>' or
+      // 'suburb:<townId>:<suburbId>').
+      function readHookLocation(n){
+        var sel = document.getElementById('dh' + n + '-locationSelect');
+        if(!sel || !sel.value) return { zone: '', townId: '', suburbId: '', locationLabel: '' };
+        var opt = sel.options[sel.selectedIndex];
+        var label = opt ? opt.textContent : '';
+        var v = sel.value;
+        if(v.indexOf('suburb:') === 0){
+          var subParts = v.slice(7).split(':');
+          return { zone: '', townId: subParts[0] || '', suburbId: subParts[1] || '', locationLabel: label };
+        }
+        if(v.indexOf('town:') === 0){
+          return { zone: '', townId: v.slice(5), suburbId: '', locationLabel: label };
+        }
+        if(v.indexOf('zone:') === 0){
+          return { zone: v.slice(5), townId: '', suburbId: '', locationLabel: label };
+        }
+        return { zone: '', townId: '', suburbId: '', locationLabel: '' };
+      }
+
+      // Sets a hook card's location select to match saved {zone, townId,
+      // suburbId} fields — the inverse of readHookLocation's value
+      // encoding. Leaves the select at "— None selected —" if nothing
+      // saved matches any option currently loaded (e.g. the town/suburb
+      // was since deleted).
+      function applyHookLocation(n, h){
+        var sel = document.getElementById('dh' + n + '-locationSelect');
+        if(!sel) return;
+        var value = '';
+        if(h.suburbId && h.townId) value = 'suburb:' + h.townId + ':' + h.suburbId;
+        else if(h.townId) value = 'town:' + h.townId;
+        else if(h.zone) value = 'zone:' + h.zone;
+        sel.value = value;
+        if(sel.value !== value) sel.value = ''; // saved location no longer exists in the tree
+      }
+
       function renderAutobuildDraft(n){
         var draft = autobuildDrafts[n];
         var draftBox = document.getElementById('dh' + n + '-autobuildDraft');
@@ -3739,6 +3831,9 @@
             '<div class="status" id="dh' + i + '-imageStatus"></div>' +
             '<div class="hook-updated" id="dh' + i + '-galleryNote" style="display:none;"></div>' +
             '<div class="hook-updated" id="dh' + i + '-sourceNote" style="display:none;"></div>' +
+            '<label for="dh' + i + '-locationSelect">Property location</label>' +
+            '<select id="dh' + i + '-locationSelect"><option value="">— None selected —</option></select>' +
+            '<div class="hint">Tag which area, town/city, or suburb the property in this hook is in — used to match it up with your location tree, separate from who can see it.</div>' +
             '<button type="button" class="btn-outline autobuild-toggle" data-autobuild-toggle="' + i + '">✨ Auto-build from property or area</button>' +
             '<div class="autobuild-box" id="dh' + i + '-autobuildBox">' +
               '<label for="dh' + i + '-autobuildQuery">Property name or area</label>' +
@@ -4142,7 +4237,8 @@
           return;
         }
 
-        adminPost('setDefaultHook', { hook: n, booking: booking, landing: landing, caption: caption }).then(function(res){
+        var loc = readHookLocation(n);
+        adminPost('setDefaultHook', { hook: n, booking: booking, landing: landing, caption: caption, zone: loc.zone, townId: loc.townId, suburbId: loc.suburbId, locationLabel: loc.locationLabel }).then(function(res){
           if(res.data && res.data.ok){
             showToast('Default hook ' + n + ' saved');
             document.getElementById(p + 'updated').textContent = fmtDate(res.data.record && res.data.record.updatedAt);
@@ -4158,7 +4254,8 @@
       }
 
       function loadDefaultHooks(){
-        return adminGet('defaultHooks').then(function(data){
+        return Promise.all([loadHookLocationOptions(), adminGet('defaultHooks')]).then(function(results){
+          var data = results[1];
           if(!data || !data.ok || !data.hooks) return;
           data.hooks.forEach(function(h){
             document.getElementById('dh' + h.hook + '-booking').value = h.booking || '';
@@ -4166,6 +4263,7 @@
             document.getElementById('dh' + h.hook + '-caption').value = h.caption || '';
             document.getElementById('dh' + h.hook + '-updated').textContent = fmtDate(h.updatedAt);
             defaultHookHashtags[h.hook] = h.hashtags || null;
+            applyHookLocation(h.hook, h);
             setImageSrc(h.hook);
             var galleryNote = document.getElementById('dh' + h.hook + '-galleryNote');
             if(h.galleryCount > 0){
@@ -5183,6 +5281,11 @@
           tdName.textContent = t.name || '—';
           tr.appendChild(tdName);
 
+          var tdZone = document.createElement('td');
+          tdZone.textContent = t.zone || '—';
+          tdZone.style.fontSize = '12px';
+          tr.appendChild(tdZone);
+
           var tdArea = document.createElement('td');
           tdArea.textContent = t.area || '—';
           tr.appendChild(tdArea);
@@ -5322,7 +5425,7 @@
           var detailTr = document.createElement('tr');
           detailTr.style.display = 'none';
           var detailTd = document.createElement('td');
-          detailTd.colSpan = 8;
+          detailTd.colSpan = 9;
           detailTd.style.cssText = 'background:#fafafa; padding:10px 14px;';
 
           var chipsWrap = document.createElement('div');
