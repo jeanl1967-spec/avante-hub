@@ -359,6 +359,16 @@ function sanitizeActivity(body, existing) {
   if (typeof body.zone === "string") {
     record.zone = ZONES.includes(body.zone) ? body.zone : "";
   }
+  // Which town/suburb (from the Zone > Town > Suburb tree) this activity
+  // is tagged with — set via admin.html's location tree picker, which
+  // replaced the old flat Zone-only dropdown. Not validated against the
+  // live towns list here (this file's sanitize* helpers don't cross-
+  // reference each other's collections) — same accepted staleness as
+  // sanitizeTown's own affId field: a townId/suburbId that's since been
+  // deleted just means this activity quietly stops matching anything.
+  if (typeof body.townId === "string") record.townId = clean(body.townId, 60);
+  if (typeof body.suburbId === "string") record.suburbId = clean(body.suburbId, 60);
+  if (typeof body.locationLabel === "string") record.locationLabel = clean(body.locationLabel, 160);
   if (typeof body.latitude === "string" || typeof body.latitude === "number") {
     const lat = parseFloat(body.latitude);
     record.latitude = isFinite(lat) ? String(lat) : "";
@@ -439,6 +449,9 @@ function toActivityPin(record) {
     name: record.name || "",
     area: record.area || "",
     zone: record.zone || "",
+    townId: record.townId || "",
+    suburbId: record.suburbId || "",
+    locationLabel: record.locationLabel || "",
     description: (record.description || "").slice(0, 400),
     price: record.price || "",
     contactLink: record.contactLink || "",
