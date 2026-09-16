@@ -200,6 +200,12 @@ export default async (request, context) => {
             hashtags: adminRecord.hashtags || null,
             galleryCount: adminRecord.galleryCount || 0,
             details: adminRecord.source || null,
+            // Which area/town/suburb the property in this hook is in, set
+            // via the admin's Default Hooks location picker (see
+            // setDefaultHook in admin-api.js) — passed through as-is so a
+            // future caller (e.g. hook-landing.html or the Hub's Explore
+            // Map) can match or display it without a second lookup.
+            location: { zone: adminRecord.zone || "", townId: adminRecord.townId || "", suburbId: adminRecord.suburbId || "", label: adminRecord.locationLabel || "" },
             mode: mode,
             source: "admin",
             expired: expired,
