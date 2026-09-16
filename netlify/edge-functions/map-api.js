@@ -99,6 +99,44 @@ function genActivityId() {
   return "A-" + n;
 }
 
+function parseTownsCsv(text) {
+  const lines = text.split(/\r\n|\r|\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return [];
+  const header = parseCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
+  const idx = (name) => header.indexOf(name);
+  const cols = {
+    id: idx("id"),
+    name: idx("name"),
+    area: idx("area"),
+    zone: idx("zone"),
+    description: idx("description"),
+    latitude: idx("latitude"),
+    longitude: idx("longitude"),
+  };
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const fields = parseCsvLine(lines[i]);
+    const get = (key) => (cols[key] > -1 ? (fields[cols[key]] || "").trim() : "");
+    const name = get("name");
+    if (!name) continue;
+    rows.push({
+      id: get("id"),
+      name: name,
+      area: get("area"),
+      zone: get("zone"),
+      description: get("description"),
+      latitude: get("latitude"),
+      longitude: get("longitude"),
+    });
+  }
+  return rows;
+}
+
+function genTownId() {
+  const n = Math.floor(Math.random() * 900000) + 100000;
+  return "T-" + n;
+}
+
 // Netlify Edge Functions have a very small (documented: 50ms) CPU-time
 // budget per request, and — critically — Netlify Blobs' list() only ever
 // returns keys, never the stored value, so reading N activities always
@@ -124,6 +162,32 @@ function genUniqueActivityId(existingIds) {
   let id = genActivityId();
   while (existingIds.has(id)) {
     id = genActivityId();
+  }
+  return id;
+}
+
+// Towns — same one-blob-collection pattern as activities above (see the
+// comment on ACTIVITIES_KEY for why). A town can optionally be allocated
+// to one affiliate (affId) so it's available to that affiliate's area
+// hooks specifically, not just tagged with a broad zone the way
+// affiliates themselves are — see sanitizeTown / toTownPin. A town with
+// no affId set is treated as shared/unallocated and visible to every
+// affiliate's Explore Map and area-hook picker.
+const TOWNS_KEY = "all";
+
+async function loadTowns(townsStore) {
+  const data = await townsStore.get(TOWNS_KEY, { type: "json" });
+  return Array.isArray(data) ? data : [];
+}
+
+async function saveTowns(townsStore, list) {
+  await townsStore.setJSON(TOWNS_KEY, list);
+}
+
+function genTownUniqueId(existingIds) {
+  let id = genTownId();
+  while (existingIds.has(id)) {
+    id = genTownId();
   }
   return id;
 }
@@ -251,6 +315,60 @@ function sanitizeActivity(body, existing) {
   return record;
 }
 
+function sanitizeTown(body, existing) {
+  const record = existing ? Object.assign({}, existing) : {};
+  const fields = ["name", "area", "description"];
+  fields.forEach((f) => {
+    if (typeof body[f] === "string") {
+      record[f] = clean(body[f], f === "description" ? 2000 : 300);
+    }
+  });
+  if (typeof body.zone === "string") {
+    record.zone = ZONES.includes(body.zone) ? body.zone : "";
+  }
+  // affId: which affiliate this town is allocated to. Empty string means
+  // shared/unallocated — every affiliate's Explore Map and area-hook
+  // picker can use it. Not validated against the affiliate-profiles store
+  // here (this file doesn't otherwise read that store) — an affId that no
+  // longer exists just means the town quietly stops matching anyone,
+  // same failure mode as a stale zone value above.
+  if (typeof body.affId === "string") {
+    record.affId = clean(body.affId, 60);
+  }
+  if (typeof body.latitude === "string" || typeof body.latitude === "number") {
+    const lat = parseFloat(body.latitude);
+    record.latitude = isFinite(lat) ? String(lat) : "";
+  }
+  if (typeof body.longitude === "string" || typeof body.longitude === "number") {
+    const lng = parseFloat(body.longitude);
+    record.longitude = isFinite(lng) ? String(lng) : "";
+  }
+  if (typeof body.visible === "boolean") record.visible = body.visible;
+  if (record.visible === undefined) record.visible = true;
+  return record;
+}
+
+function toTownPin(record) {
+  const lat = parseFloat(record.latitude);
+  const lng = parseFloat(record.longitude);
+  const keys = Array.isArray(record.photoKeys) ? record.photoKeys : record.photoKey ? [record.photoKey] : [];
+  const photos = keys.map((k) => "/api/property-file?key=" + encodeURIComponent(k));
+  return {
+    kind: "town",
+    id: record.id,
+    name: record.name || "",
+    area: record.area || "",
+    zone: record.zone || "",
+    affId: record.affId || "",
+    description: (record.description || "").slice(0, 400),
+    photo: photos[0] || "",
+    photos: photos,
+    latitude: isFinite(lat) ? lat : null,
+    longitude: isFinite(lng) ? lng : null,
+    hidden: record.visible === false,
+  };
+}
+
 function toActivityPin(record) {
   const lat = parseFloat(record.latitude);
   const lng = parseFloat(record.longitude);
@@ -318,6 +436,7 @@ export default async (request, context) => {
 
   const listingsStore = getStore({ name: "property-listings", consistency: "strong" });
   const activitiesStore = getStore({ name: "map-activities", consistency: "strong" });
+  const townsStore = getStore({ name: "map-towns", consistency: "strong" });
   const visibilityStore = getStore({ name: "map-visibility", consistency: "strong" });
   const resortListStore = getStore({ name: "resort-list", consistency: "strong" });
 
@@ -350,7 +469,18 @@ export default async (request, context) => {
         .filter((r) => r && r.visible !== false)
         .map(toActivityPin);
 
-      return json({ ok: true, properties, activities });
+      // A town allocated to one affiliate (affId set) only appears for that
+      // affiliate's own Explore Map / area-hook picker. ?aff=<id> on the
+      // request scopes this; omitting it (or the admin's own unfiltered
+      // view) returns every visible town, allocated or not. Properties and
+      // activities are unaffected — they aren't affiliate-scoped.
+      const requestedAff = new URL(request.url).searchParams.get("aff") || "";
+      const towns = (await loadTowns(townsStore))
+        .filter((r) => r && r.visible !== false)
+        .filter((r) => !r.affId || !requestedAff || r.affId === requestedAff)
+        .map(toTownPin);
+
+      return json({ ok: true, properties, activities, towns });
     }
 
     if (request.method !== "POST") {
@@ -410,8 +540,9 @@ export default async (request, context) => {
       const properties = onboardedProperties.concat(resortProperties);
 
       const activities = await loadActivities(activitiesStore);
+      const towns = await loadTowns(townsStore);
 
-      return json({ ok: true, properties, activities: activities.filter(Boolean), missingCoordinates, resortStats });
+      return json({ ok: true, properties, activities: activities.filter(Boolean), towns: towns.filter(Boolean), missingCoordinates, resortStats });
     }
 
     if (action === "importPropertyCoordinatesCsv") {
@@ -494,6 +625,112 @@ export default async (request, context) => {
       await saveActivities(activitiesStore, Array.from(byId.values()));
 
       return json({ ok: true, created: created, updated: updated });
+    }
+
+    if (action === "importTownsCsv") {
+      const csvText = typeof body.csv === "string" ? body.csv : "";
+      if (!csvText.trim()) return json({ error: "Uploaded file was empty." }, 400);
+      const rows = parseTownsCsv(csvText);
+      if (!rows.length) return json({ error: "Could not find any town rows (need at least a 'name' column)." }, 400);
+
+      const existingRecords = await loadTowns(townsStore);
+      const byId = new Map(existingRecords.map((r) => [r.id, r]));
+      const byName = new Map(existingRecords.map((r) => [(r.name || "").toLowerCase(), r]));
+      const existingIds = new Set(byId.keys());
+
+      let created = 0;
+      let updated = 0;
+      for (const row of rows) {
+        const matchExisting = (row.id && byId.get(row.id)) || byName.get(row.name.toLowerCase());
+        const record = sanitizeTown(row, matchExisting || {});
+        if (matchExisting) {
+          record.id = matchExisting.id;
+          record.updatedAt = new Date().toISOString();
+          updated++;
+        } else {
+          record.id = genTownUniqueId(existingIds);
+          existingIds.add(record.id);
+          record.createdAt = new Date().toISOString();
+          record.updatedAt = record.createdAt;
+          created++;
+        }
+        byId.set(record.id, record);
+        byName.set((record.name || "").toLowerCase(), record);
+      }
+
+      await saveTowns(townsStore, Array.from(byId.values()));
+
+      return json({ ok: true, created: created, updated: updated });
+    }
+
+    if (action === "addTown") {
+      const all = await loadTowns(townsStore);
+      const id = genTownUniqueId(new Set(all.map((r) => r.id)));
+      const record = sanitizeTown(body, {});
+      record.id = id;
+      record.createdAt = new Date().toISOString();
+      record.updatedAt = record.createdAt;
+      if (!record.name) return json({ error: "Town name is required." }, 400);
+      all.push(record);
+      await saveTowns(townsStore, all);
+      return json({ ok: true, town: record });
+    }
+
+    if (action === "updateTown") {
+      const id = clean(body.id, 20);
+      if (!id) return json({ error: "missing id" }, 400);
+      const all = await loadTowns(townsStore);
+      const idx = all.findIndex((r) => r.id === id);
+      if (idx === -1) return json({ error: "not found" }, 404);
+      const record = sanitizeTown(body, all[idx]);
+      record.updatedAt = new Date().toISOString();
+      all[idx] = record;
+      await saveTowns(townsStore, all);
+      return json({ ok: true, town: record });
+    }
+
+    if (action === "deleteTown") {
+      const id = clean(body.id, 20);
+      if (!id) return json({ error: "missing id" }, 400);
+      const all = await loadTowns(townsStore);
+      await saveTowns(townsStore, all.filter((r) => r.id !== id));
+      return json({ ok: true });
+    }
+
+    if (action === "addTownPhoto") {
+      const id = clean(body.id, 20);
+      const photoKey = clean(body.photoKey, 300);
+      if (!id || !photoKey) return json({ error: "missing id or photoKey" }, 400);
+      const all = await loadTowns(townsStore);
+      const idx = all.findIndex((r) => r.id === id);
+      if (idx === -1) return json({ error: "not found" }, 404);
+      const existing = all[idx];
+      const keys = Array.isArray(existing.photoKeys) ? existing.photoKeys.slice() : existing.photoKey ? [existing.photoKey] : [];
+      if (keys.length >= 12) return json({ error: "Maximum 12 photos per town." }, 400);
+      keys.push(photoKey);
+      existing.photoKeys = keys;
+      delete existing.photoKey;
+      existing.updatedAt = new Date().toISOString();
+      all[idx] = existing;
+      await saveTowns(townsStore, all);
+      return json({ ok: true, town: existing });
+    }
+
+    if (action === "removeTownPhoto") {
+      const id = clean(body.id, 20);
+      const photoKey = clean(body.photoKey, 300);
+      if (!id || !photoKey) return json({ error: "missing id or photoKey" }, 400);
+      const all = await loadTowns(townsStore);
+      const idx = all.findIndex((r) => r.id === id);
+      if (idx === -1) return json({ error: "not found" }, 404);
+      const existing = all[idx];
+      const keys = Array.isArray(existing.photoKeys) ? existing.photoKeys.slice() : existing.photoKey ? [existing.photoKey] : [];
+      existing.photoKeys = keys.filter((k) => k !== photoKey);
+      delete existing.photoKey;
+      existing.updatedAt = new Date().toISOString();
+      all[idx] = existing;
+      await saveTowns(townsStore, all);
+      return json({ ok: true, town: existing });
     }
 
     if (action === "addActivity") {
