@@ -3020,6 +3020,9 @@
             '</div>' +
             '<div class="status" id="h' + i + '-pdfStatus"></div>' +
             '<div class="hint">We\'ll automatically tag this with your affiliate ID (taken from the end of your booking link) so you can tell who sent the traffic.</div>' +
+            '<label for="h' + i + '-locationSelect">Property location</label>' +
+            '<select id="h' + i + '-locationSelect"><option value="">— None selected —</option></select>' +
+            '<div class="hint">Tag which area, town/city, or suburb the property in this hook is in.</div>' +
             '<label for="h' + i + '-caption">Caption</label>' +
             '<textarea id="h' + i + '-caption" placeholder="Ready-to-paste caption for this promo"></textarea>' +
             '</div>' +
@@ -3562,6 +3565,111 @@
         });
       }
 
+      // ---- Property location (area/town/suburb tag) ----
+      // Same Zone > Town > Suburb tree the admin's Default Hooks picker
+      // uses, fetched from the public, unfiltered GET /api/map (no ?aff=
+      // — this tags where the property actually is, not which locations
+      // are allocated to this affiliate, so the full tree is offered
+      // regardless of allocation). Built with DOM APIs rather than HTML
+      // string concatenation so town/suburb names never need manual
+      // escaping.
+      var HOOK_ZONE_ORDER = ['Western Cape (Cape Town & Winelands)', 'Eastern Cape & Garden Route', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng & North West', 'Mpumalanga', 'Limpopo'];
+
+      function buildLocationOptionsFragment(towns){
+        var frag = document.createDocumentFragment();
+        var noneOpt = document.createElement('option');
+        noneOpt.value = '';
+        noneOpt.textContent = '— None selected —';
+        frag.appendChild(noneOpt);
+
+        var byZone = {};
+        towns.forEach(function(t){
+          var z = t.zone && HOOK_ZONE_ORDER.indexOf(t.zone) > -1 ? t.zone : '';
+          if(!byZone[z]) byZone[z] = [];
+          byZone[z].push(t);
+        });
+        var zoneKeys = HOOK_ZONE_ORDER.filter(function(z){ return byZone[z]; });
+        if(byZone['']) zoneKeys.push('');
+
+        zoneKeys.forEach(function(zoneKey){
+          var group = document.createElement('optgroup');
+          group.label = zoneKey || 'Other (no area set)';
+          if(zoneKey){
+            var zoneOpt = document.createElement('option');
+            zoneOpt.value = 'zone:' + zoneKey;
+            zoneOpt.textContent = zoneKey + ' (entire area)';
+            group.appendChild(zoneOpt);
+          }
+          byZone[zoneKey].slice().sort(function(a,b){ return a.name.localeCompare(b.name); }).forEach(function(t){
+            var townOpt = document.createElement('option');
+            townOpt.value = 'town:' + t.id;
+            townOpt.textContent = t.name;
+            group.appendChild(townOpt);
+            (t.suburbs || []).slice().sort(function(a,b){ return a.name.localeCompare(b.name); }).forEach(function(s){
+              var subOpt = document.createElement('option');
+              subOpt.value = 'suburb:' + t.id + ':' + s.id;
+              subOpt.textContent = '— ' + s.name;
+              group.appendChild(subOpt);
+            });
+          });
+          frag.appendChild(group);
+        });
+        return frag;
+      }
+
+      var hookLocationOptionsLoaded = false;
+      function loadHookLocationOptions(){
+        if(hookLocationOptionsLoaded) return Promise.resolve();
+        return fetch('/api/map').then(function(r){ return r.json(); }).then(function(data){
+          var towns = (data && data.ok && data.towns) || [];
+          var frag = buildLocationOptionsFragment(towns);
+          for(var n = 1; n <= HOOK_COUNT; n++){
+            var sel = document.getElementById('h' + n + '-locationSelect');
+            if(!sel) continue;
+            sel.innerHTML = '';
+            sel.appendChild(frag.cloneNode(true));
+          }
+          hookLocationOptionsLoaded = true;
+        }).catch(function(){ /* best-effort — the field just stays empty if this fails */ });
+      }
+
+      // Reads a hook card's location select back into {zone, townId,
+      // suburbId, locationLabel}, from its encoded option value ('',
+      // 'zone:<name>', 'town:<id>' or 'suburb:<townId>:<suburbId>').
+      function readHookLocation(n){
+        var sel = document.getElementById('h' + n + '-locationSelect');
+        if(!sel || !sel.value) return { zone: '', townId: '', suburbId: '', locationLabel: '' };
+        var opt = sel.options[sel.selectedIndex];
+        var label = opt ? opt.textContent : '';
+        var v = sel.value;
+        if(v.indexOf('suburb:') === 0){
+          var subParts = v.slice(7).split(':');
+          return { zone: '', townId: subParts[0] || '', suburbId: subParts[1] || '', locationLabel: label };
+        }
+        if(v.indexOf('town:') === 0){
+          return { zone: '', townId: v.slice(5), suburbId: '', locationLabel: label };
+        }
+        if(v.indexOf('zone:') === 0){
+          return { zone: v.slice(5), townId: '', suburbId: '', locationLabel: label };
+        }
+        return { zone: '', townId: '', suburbId: '', locationLabel: '' };
+      }
+
+      // Sets a hook card's location select from saved {zone, townId,
+      // suburbId} — the inverse of readHookLocation's encoding. Leaves it
+      // at "— None selected —" if nothing saved matches any currently
+      // loaded option (e.g. the town/suburb was since deleted).
+      function applyHookLocation(n, h){
+        var sel = document.getElementById('h' + n + '-locationSelect');
+        if(!sel) return;
+        var value = '';
+        if(h.suburbId && h.townId) value = 'suburb:' + h.townId + ':' + h.suburbId;
+        else if(h.townId) value = 'town:' + h.townId;
+        else if(h.zone) value = 'zone:' + h.zone;
+        sel.value = value;
+        if(sel.value !== value) sel.value = ''; // saved location no longer exists in the tree
+      }
+
       function saveHook(n){
         var p = 'h' + n + '-';
         var booking = document.getElementById(p + 'booking').value.trim();
@@ -3606,9 +3714,14 @@
         }
 
         document.getElementById(p + 'linkBox').classList.add('show');
+        var loc = readHookLocation(n);
         affSave('hook' + n + 'booking', booking);
         affSave('hook' + n + 'landing', landing);
         affSave('hook' + n + 'caption', caption);
+        affSave('hook' + n + 'zone', loc.zone);
+        affSave('hook' + n + 'townId', loc.townId);
+        affSave('hook' + n + 'suburbId', loc.suburbId);
+        affSave('hook' + n + 'locationLabel', loc.locationLabel);
 
         // Give this affiliate a single client-facing URL for this hook — a
         // read-only page their customers can open on any device. Requires an
@@ -3624,7 +3737,7 @@
           fetch('/api/hook?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ booking: booking, landing: landing, caption: caption })
+            body: JSON.stringify({ booking: booking, landing: landing, caption: caption, zone: loc.zone, townId: loc.townId, suburbId: loc.suburbId, locationLabel: loc.locationLabel })
           }).catch(function(){ /* saved to this browser regardless; backend sync is best-effort */ });
         }else{
           clientRow.style.display = 'none';
@@ -3635,30 +3748,39 @@
 
       // Pre-fill every hook from what this affiliate saved last time (or, for
       // the booking link, derive it from their ID even on a first visit) and
-      // show the saved result immediately.
-      for(var hi = 1; hi <= HOOK_COUNT; hi++){
-        var bEl = document.getElementById('h' + hi + '-booking');
-        var lEl = document.getElementById('h' + hi + '-landing');
-        var cEl = document.getElementById('h' + hi + '-caption');
-        var savedB = affLoad('hook' + hi + 'booking');
-        var savedL = affLoad('hook' + hi + 'landing');
-        var savedC = affLoad('hook' + hi + 'caption');
-        if(savedB){
-          bEl.value = savedB;
-        }else if(AFF_ID){
-          bEl.value = STOCKNETWORK_BASE + AFF_ID;
+      // show the saved result immediately. Waits for the location <select>s
+      // to be populated first — saveHook() below reads whatever's currently
+      // selected, so firing it before the saved zone/town/suburb is applied
+      // would silently save an empty location over a previously-saved one.
+      loadHookLocationOptions().then(function(){
+        for(var hi = 1; hi <= HOOK_COUNT; hi++){
+          var bEl = document.getElementById('h' + hi + '-booking');
+          var lEl = document.getElementById('h' + hi + '-landing');
+          var cEl = document.getElementById('h' + hi + '-caption');
+          var savedB = affLoad('hook' + hi + 'booking');
+          var savedL = affLoad('hook' + hi + 'landing');
+          var savedC = affLoad('hook' + hi + 'caption');
+          var savedZone = affLoad('hook' + hi + 'zone');
+          var savedTownId = affLoad('hook' + hi + 'townId');
+          var savedSuburbId = affLoad('hook' + hi + 'suburbId');
+          applyHookLocation(hi, { zone: savedZone, townId: savedTownId, suburbId: savedSuburbId });
+          if(savedB){
+            bEl.value = savedB;
+          }else if(AFF_ID){
+            bEl.value = STOCKNETWORK_BASE + AFF_ID;
+          }
+          if(savedL) lEl.value = savedL;
+          if(savedC) cEl.value = savedC;
+          if(savedB || savedL || savedC || savedZone || savedTownId){
+            saveHook(hi);
+          }else{
+            var affIdForImage = AFF_ID || (bEl.value.trim() ? extractAffiliateId(bEl.value.trim()) : '');
+            setHookImageSrc(hi, affIdForImage);
+          }
+          var affIdForMode = AFF_ID || (bEl.value.trim() ? extractAffiliateId(bEl.value.trim()) : '');
+          loadHookMode(hi, affIdForMode);
         }
-        if(savedL) lEl.value = savedL;
-        if(savedC) cEl.value = savedC;
-        if(savedB || savedL || savedC){
-          saveHook(hi);
-        }else{
-          var affIdForImage = AFF_ID || (bEl.value.trim() ? extractAffiliateId(bEl.value.trim()) : '');
-          setHookImageSrc(hi, affIdForImage);
-        }
-        var affIdForMode = AFF_ID || (bEl.value.trim() ? extractAffiliateId(bEl.value.trim()) : '');
-        loadHookMode(hi, affIdForMode);
-      }
+      });
 
       grid.addEventListener('click', function(e){
         var saveN = e.target.getAttribute('data-hook-save');
