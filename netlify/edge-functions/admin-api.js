@@ -353,6 +353,17 @@ export default async (request, context) => {
             hashtags: (rec && rec.hashtags) || null,
             galleryCount: (rec && rec.galleryCount) || 0,
             source: (rec && rec.source) || null,
+            // Which area/town/suburb the property in this hook is in —
+            // set via setDefaultHook below from the admin's location-tree
+            // picker in the Default Hooks UI. zone/townId/suburbId are the
+            // ids to match against the location tree; locationLabel is a
+            // snapshot of the picked option's display text at save time,
+            // shown as a fallback if that zone/town/suburb is later
+            // renamed or deleted.
+            zone: (rec && rec.zone) || "",
+            townId: (rec && rec.townId) || "",
+            suburbId: (rec && rec.suburbId) || "",
+            locationLabel: (rec && rec.locationLabel) || "",
             updatedAt: (rec && rec.updatedAt) || null,
           });
         }
@@ -1122,6 +1133,16 @@ export default async (request, context) => {
       const landingRaw = typeof body.landing === "string" ? body.landing.trim() : "";
       const landing = landingRaw && landingRaw === booking && isShortLink(booking) ? "" : landingRaw;
       const caption = typeof body.caption === "string" ? body.caption.trim() : "";
+      // Which area/town/suburb the property in this hook is in, from the
+      // admin's location-tree picker — all optional, and mutually
+      // exclusive in practice (the UI only ever sends one of zone alone,
+      // townId alone, or townId+suburbId together), but stored plainly
+      // rather than enforced here so a hand-crafted request can't corrupt
+      // anything worse than showing an odd combination back in the form.
+      const zone = typeof body.zone === "string" ? body.zone.trim() : "";
+      const townId = typeof body.townId === "string" ? body.townId.trim() : "";
+      const suburbId = typeof body.suburbId === "string" ? body.suburbId.trim() : "";
+      const locationLabel = typeof body.locationLabel === "string" ? body.locationLabel.trim() : "";
       // Regenerate platform hashtags whenever the default hook is saved.
       // Best-effort: a failed/unavailable AI call just clears the cached
       // set rather than blocking the save.
@@ -1141,6 +1162,10 @@ export default async (request, context) => {
         landing: landing,
         caption: caption,
         hashtags: hashtags,
+        zone: zone,
+        townId: townId,
+        suburbId: suburbId,
+        locationLabel: locationLabel,
         updatedAt: new Date().toISOString(),
       };
       await hookStore.setJSON("__admin__:" + n, record);
