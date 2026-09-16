@@ -516,6 +516,10 @@
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Limpopo" class="aff-zone-cb"> Limpopo</label>
       </div>
       <p class="modal-sub" style="margin:-2px 0 8px;">This affiliate's Explore Map tab in the Hub auto-filters to their first assigned zone by default (they can still switch to another area from the dropdown there).</p>
+      <label>Towns (optional — allocate specific towns to this affiliate)</label>
+      <div class="row" id="affTownCheckboxes" style="flex-wrap:wrap; gap:8px 16px; margin-bottom:4px; max-height:180px; overflow-y:auto;"></div>
+      <p class="modal-sub" id="affTownCheckboxesEmpty" style="margin:-2px 0 8px; display:none;">No towns added yet — add some in the Map &amp; Activities tab first.</p>
+      <p class="modal-sub" style="margin:-2px 0 8px;">A town checked here shows only on this affiliate's Explore Map (and only they can allocate it in an area hook). Leave a town unchecked to keep it shared across every affiliate.</p>
       <label>Affiliate type (optional — select all that apply)</label>
       <div class="row" id="affTypeCheckboxes" style="flex-wrap:wrap; gap:8px 16px; margin-bottom:8px;">
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="franchise" id="affTypeFranchise"> Franchise Affiliate</label>
@@ -2279,6 +2283,42 @@
     // ---------- Add / Edit affiliate modal ----------
     var editingAffId = null;
     var affOverlay = document.getElementById('affModalOverlay');
+    var affModalTownsSnapshot = []; // towns as fetched when this modal was opened, used to reconcile allocation on save
+
+    function populateAffTownCheckboxes(existingAffId){
+      var wrap = document.getElementById('affTownCheckboxes');
+      var emptyEl = document.getElementById('affTownCheckboxesEmpty');
+      wrap.innerHTML = '<span style="font-size:12px; color:var(--muted);">Loading towns…</span>';
+      // mapAdminPost is defined further down the page but, like every
+      // top-level function/var in a classic (non-module) <script> block,
+      // it's attached to the shared window scope — fine to call from here.
+      return mapAdminPost('adminList').then(function(res){
+        var towns = (res.data && res.data.ok && res.data.towns) || [];
+        affModalTownsSnapshot = towns;
+        wrap.innerHTML = '';
+        if(!towns.length){
+          emptyEl.style.display = 'block';
+          return;
+        }
+        emptyEl.style.display = 'none';
+        towns.forEach(function(t){
+          var label = document.createElement('label');
+          label.style.cssText = 'display:flex; align-items:center; gap:6px; font-weight:400;';
+          var cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.className = 'aff-town-cb';
+          cb.value = t.id;
+          cb.checked = !!(existingAffId && t.affId === existingAffId);
+          label.appendChild(cb);
+          label.appendChild(document.createTextNode(t.name + (t.area ? ' — ' + t.area : '')));
+          wrap.appendChild(label);
+        });
+      }).catch(function(){
+        wrap.innerHTML = '';
+        emptyEl.textContent = 'Could not load towns — town allocation unavailable right now.';
+        emptyEl.style.display = 'block';
+      });
+    }
 
     function openAffiliateModal(existing){
       editingAffId = existing ? existing.affId : null;
@@ -2306,6 +2346,7 @@
       document.getElementById('affStatusInput').value = existing ? (existing.status || 'active') : 'active';
       document.getElementById('affNotesInput').value = existing ? (existing.notes || '') : '';
       document.getElementById('affModalStatus').classList.remove('show');
+      populateAffTownCheckboxes(existing ? existing.affId : null);
       affOverlay.classList.add('show');
     }
     function closeAffiliateModal(){ affOverlay.classList.remove('show'); }
@@ -2345,25 +2386,42 @@
         return;
       }
 
+      var checkedTownIds = Array.prototype.slice.call(document.querySelectorAll('.aff-town-cb:checked')).map(function(cb){ return cb.value; });
+
       btn.disabled = true;
       btn.textContent = 'Saving…';
       adminPost('upsertAffiliate', {
         affId: affId, name: name, email: email, siteNr: siteNr, zones: zones, types: types,
         revenueShare: revenueShare, bank: bank, status: status, notes: notes
       }).then(function(res){
-        btn.disabled = false;
-        btn.textContent = 'Save Affiliate';
-        if(res.data && res.data.ok){
-          showToast('Affiliate saved');
-          closeAffiliateModal();
-          loadAffiliates();
-        }else{
-          statusEl.textContent = (res.data && res.data.error) || 'Could not save affiliate.';
-          statusEl.classList.add('show');
+        if(!res.data || !res.data.ok){
+          throw { userMessage: (res.data && res.data.error) || 'Could not save affiliate.' };
         }
-      }).catch(function(){
+        // Reconcile town allocation against the snapshot taken when this
+        // modal opened: newly-checked towns get this affId, towns that were
+        // allocated to this affiliate but got unchecked go back to shared.
+        var townUpdates = [];
+        affModalTownsSnapshot.forEach(function(t){
+          var nowChecked = checkedTownIds.indexOf(t.id) > -1;
+          var wasThisAff = t.affId === affId;
+          if(nowChecked && !wasThisAff){
+            townUpdates.push(mapAdminPost('updateTown', { id: t.id, affId: affId }));
+          } else if(!nowChecked && wasThisAff){
+            townUpdates.push(mapAdminPost('updateTown', { id: t.id, affId: '' }));
+          }
+        });
+        return Promise.all(townUpdates);
+      }).then(function(){
         btn.disabled = false;
         btn.textContent = 'Save Affiliate';
+        showToast('Affiliate saved');
+        closeAffiliateModal();
+        loadAffiliates();
+      }).catch(function(err){
+        btn.disabled = false;
+        btn.textContent = 'Save Affiliate';
+        statusEl.textContent = (err && err.userMessage) || 'Could not save affiliate.';
+        statusEl.classList.add('show');
       });
     });
 
