@@ -27,30 +27,43 @@ function parseCsvLine(line) {
   return result;
 }
 
-// Parses the resort master CSV into { name, district, siteId, resortId,
-// latitude, longitude } per row. name/district/siteId/resortId are looked
-// up by header name so the parser doesn't break if StockNetwork reorders
+// Parses the resort master CSV into { name, district, suburb, zoneHint,
+// siteId, resortId, latitude, longitude } per row. Every field is looked up
+// by header name so the parser doesn't break if StockNetwork reorders
 // columns; siteId/resortId fall back to the last two columns (their known
-// position) if the headers aren't found by name. Latitude/Longitude are
-// optional — most CSV exports from StockNetwork won't have them, so a row
-// missing either just gets "" for that field and this file's own callers
-// keep working exactly as before. Rows are kept even if they share a name
-// with another row — different physical properties can share a name, and
-// each needs its own SiteID/ResortID for the Resort Info Link to work.
-// Only exact duplicate rows (same name + siteId + resortId) are collapsed.
+// position) if the headers aren't found by name. The "town" field accepts
+// a few different header spellings, since different StockNetwork exports
+// have called this column District, Town, or City — first one found wins.
+// suburb/area and zone/province are all optional finer-grained columns:
+// present on some exports, absent on others, and only used (by
+// map-api.js's location-discovery feature) when they're there — a row
+// missing any of them just gets "" for that field and every existing
+// caller of this file keeps working exactly as before. Latitude/Longitude
+// are likewise optional. Rows are kept even if they share a name with
+// another row — different physical properties can share a name, and each
+// needs its own SiteID/ResortID for the Resort Info Link to work. Only
+// exact duplicate rows (same name + siteId + resortId) are collapsed.
 function parseResortsFromCsv(text) {
   const lines = text.split(/\r\n|\r|\n/).filter((l) => l.trim().length > 0);
   if (lines.length === 0) return [];
 
   const header = parseCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
-  const findCol = (name) => header.findIndex((h) => h === name);
+  const findCol = (names) => {
+    for (const name of names) {
+      const idx = header.findIndex((h) => h === name);
+      if (idx > -1) return idx;
+    }
+    return -1;
+  };
 
-  let nameIdx = findCol("resort");
-  let districtIdx = findCol("district");
-  let siteIdIdx = findCol("siteid");
-  let resortIdIdx = findCol("resortid");
-  const latIdx = findCol("latitude");
-  const lngIdx = findCol("longitude");
+  let nameIdx = findCol(["resort"]);
+  const districtIdx = findCol(["district", "town", "town/city", "city"]);
+  const suburbIdx = findCol(["suburb", "area"]);
+  const zoneHintIdx = findCol(["zone", "province", "state", "stateprovince", "state/province"]);
+  let siteIdIdx = findCol(["siteid"]);
+  let resortIdIdx = findCol(["resortid"]);
+  const latIdx = findCol(["latitude"]);
+  const lngIdx = findCol(["longitude"]);
   if (nameIdx === -1) nameIdx = 0;
   if (resortIdIdx === -1) resortIdIdx = header.length - 1;
   if (siteIdIdx === -1) siteIdIdx = header.length - 2;
@@ -63,6 +76,8 @@ function parseResortsFromCsv(text) {
     if (!name) continue;
 
     const district = districtIdx > -1 ? (fields[districtIdx] || "").trim() : "";
+    const suburb = suburbIdx > -1 ? (fields[suburbIdx] || "").trim() : "";
+    const zoneHint = zoneHintIdx > -1 ? (fields[zoneHintIdx] || "").trim() : "";
     const siteId = siteIdIdx > -1 ? (fields[siteIdIdx] || "").trim() : "";
     const resortId = resortIdIdx > -1 ? (fields[resortIdIdx] || "").trim() : "";
     const latitude = latIdx > -1 ? (fields[latIdx] || "").trim() : "";
@@ -71,7 +86,7 @@ function parseResortsFromCsv(text) {
     const key = name.toLowerCase() + "|" + siteId + "|" + resortId;
     if (seen.has(key)) continue;
     seen.add(key);
-    resorts.push({ name, district, siteId, resortId, latitude, longitude });
+    resorts.push({ name, district, suburb, zoneHint, siteId, resortId, latitude, longitude });
   }
 
   resorts.sort((a, b) => a.name.localeCompare(b.name) || a.district.localeCompare(b.district));
