@@ -1262,6 +1262,7 @@
           </select>
           <label style="margin:0;"><input type="checkbox" id="em-showProperties" checked> Properties</label>
           <label style="margin:0;"><input type="checkbox" id="em-showActivities" checked> Activities</label>
+          <label style="margin:0;"><input type="checkbox" id="em-showTowns" checked> Towns</label>
         </div>
         <div class="status" id="em-status"></div>
         <div id="exploreMapEl"></div>
@@ -4146,6 +4147,7 @@
       var areaFilterEl = document.getElementById('em-areaFilter');
       var showPropsEl = document.getElementById('em-showProperties');
       var showActsEl = document.getElementById('em-showActivities');
+      var showTownsEl = document.getElementById('em-showTowns');
       if(!document.getElementById(mapElId)) return;
 
       var leafletMap = null;
@@ -4156,7 +4158,7 @@
       function popupContent(item){
         var wrap = document.createElement('div');
 
-        var photos = item.kind === 'activity' && Array.isArray(item.photos) && item.photos.length
+        var photos = (item.kind === 'activity' || item.kind === 'town') && Array.isArray(item.photos) && item.photos.length
           ? item.photos
           : (item.photo ? [item.photo] : []);
 
@@ -4245,8 +4247,9 @@
         var zone = areaFilterEl.value;
         var showProps = showPropsEl.checked;
         var showActs = showActsEl.checked;
+        var showTowns = showTownsEl ? showTownsEl.checked : true;
         markers.forEach(function(m){
-          var kindOk = (m.kind === 'property' && showProps) || (m.kind === 'activity' && showActs);
+          var kindOk = (m.kind === 'property' && showProps) || (m.kind === 'activity' && showActs) || (m.kind === 'town' && showTowns);
           var zoneOk = !zone || m.zone === zone;
           if(kindOk && zoneOk){
             if(!clusterGroup.hasLayer(m.marker)) clusterGroup.addLayer(m.marker);
@@ -4285,8 +4288,9 @@
         clusterGroup = L.markerClusterGroup({ maxClusterRadius: 50 });
         leafletMap.addLayer(clusterGroup);
 
+        var mapUrl = '/api/map' + (AFF_ID ? ('?aff=' + encodeURIComponent(AFF_ID)) : '');
         Promise.all([
-          fetch('/api/map').then(function(r){ return r.json(); }),
+          fetch(mapUrl).then(function(r){ return r.json(); }),
           fetchAffiliateZone()
         ]).then(function(results){
           var res = results[0];
@@ -4300,7 +4304,8 @@
           }
           var properties = (res.properties || []).map(function(p){ p.kind = 'property'; return p; });
           var activities = (res.activities || []).map(function(a){ a.kind = 'activity'; return a; });
-          var all = properties.concat(activities);
+          var towns = (res.towns || []).map(function(t){ t.kind = 'town'; return t; });
+          var all = properties.concat(activities).concat(towns);
 
           if(!all.length){
             statusEl.textContent = 'No properties or activities are on the map yet.';
@@ -4309,9 +4314,8 @@
 
           all.forEach(function(item){
             if(typeof item.latitude !== 'number' || typeof item.longitude !== 'number') return;
-            var icon = item.kind === 'activity'
-              ? L.divIcon({ className: '', html: '<div style="background:#0e7c66; width:14px; height:14px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 2px rgba(0,0,0,.4);"></div>', iconSize: [14,14] })
-              : L.divIcon({ className: '', html: '<div style="background:#1a4d7a; width:14px; height:14px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 2px rgba(0,0,0,.4);"></div>', iconSize: [14,14] });
+            var dotColor = item.kind === 'activity' ? '#0e7c66' : (item.kind === 'town' ? '#a3672d' : '#1a4d7a');
+            var icon = L.divIcon({ className: '', html: '<div style="background:' + dotColor + '; width:14px; height:14px; border-radius:50%; border:2px solid #fff; box-shadow:0 0 2px rgba(0,0,0,.4);"></div>', iconSize: [14,14] });
             var marker = L.marker([item.latitude, item.longitude], { icon: icon });
             marker.bindPopup(popupContent(item), { maxWidth: 260 });
             markers.push({ marker: marker, kind: item.kind, zone: item.zone || '' });
@@ -4338,6 +4342,7 @@
       areaFilterEl.addEventListener('change', applyFilters);
       showPropsEl.addEventListener('change', applyFilters);
       showActsEl.addEventListener('change', applyFilters);
+      if(showTownsEl) showTownsEl.addEventListener('change', applyFilters);
 
       var mapTab = document.querySelector('.tab[data-panel="exploreMap"]');
       if(mapTab){

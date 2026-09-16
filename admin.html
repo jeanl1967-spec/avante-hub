@@ -1159,6 +1159,7 @@
         <div class="map-filter-row" style="display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin-bottom:12px;">
           <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#1a4d7a; display:inline-block;"></span> Property (shown)</label>
           <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#0e7c66; display:inline-block;"></span> Activity (shown)</label>
+          <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#a3672d; display:inline-block;"></span> Town (shown)</label>
           <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#b7b7ae; display:inline-block;"></span> Hidden</label>
         </div>
         <div id="adminMapEl" style="width:100%; height:460px; border-radius:10px;"></div>
@@ -1277,6 +1278,88 @@
             </table>
           </div>
           <div class="empty-state" id="activitiesEmpty" style="display:none;">No activities added yet.</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h3 style="margin-top:0;">Bulk import towns from CSV</h3>
+        <p style="margin-top:0;">Columns: <code>name, area, zone, description, latitude, longitude, affiliateId</code>. <code>affiliateId</code> is optional — leave it blank to make the town available to every affiliate's Explore Map and area hooks; set it to one affiliate's ID to allocate that town to them specifically. Matches existing towns by name (case-insensitive) and updates them; anything new is added. An optional <code>id</code> column forces an exact match instead.</p>
+        <div class="btn-row" style="margin-top:0;">
+          <button class="btn-outline" id="importTownsBtn">Upload CSV</button>
+          <input type="file" id="importTownsFileInput" accept=".csv" style="display:none;">
+          <button class="btn-outline" id="exportTownsBtn">Download current towns as CSV</button>
+          <button class="btn-outline" id="templateTownsBtn">Download blank template</button>
+        </div>
+        <div class="status" id="importTownsStatus"></div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h3 id="townFormTitle" style="margin-top:0;">Add a popular tourist town</h3>
+        <p style="margin-top:0;">These are the destinations shown as their own pin on the Explore Map and offered as the destination picker for area hooks — separate from bookable properties and activities.</p>
+        <input type="hidden" id="townIdInput">
+        <div class="btn-row" style="flex-wrap:wrap; gap:10px;">
+          <div><label for="townNameInput">Town name</label><input id="townNameInput" placeholder="e.g. Hermanus"></div>
+          <div><label for="townAreaInput">Area (optional)</label><input id="townAreaInput" placeholder="e.g. Cape Whale Coast"></div>
+          <div><label for="townZoneInput">Zone (optional)</label>
+            <select id="townZoneInput">
+              <option value="">— No zone —</option>
+              <option value="Western Cape (Cape Town &amp; Winelands)">Western Cape (Cape Town &amp; Winelands)</option>
+              <option value="Eastern Cape &amp; Garden Route">Eastern Cape &amp; Garden Route</option>
+              <option value="Northern Cape">Northern Cape</option>
+              <option value="Free State">Free State</option>
+              <option value="KwaZulu-Natal">KwaZulu-Natal</option>
+              <option value="Gauteng &amp; North West">Gauteng &amp; North West</option>
+              <option value="Mpumalanga">Mpumalanga</option>
+              <option value="Limpopo">Limpopo</option>
+            </select>
+          </div>
+          <div><label for="townAffInput">Allocate to affiliate (optional)</label>
+            <select id="townAffInput">
+              <option value="">— All affiliates (shared) —</option>
+            </select>
+          </div>
+        </div>
+        <div class="btn-row" style="flex-wrap:wrap; gap:10px; margin-top:10px;">
+          <div><label for="townLatInput">Latitude</label><input id="townLatInput" placeholder="e.g. -34.4187"></div>
+          <div><label for="townLngInput">Longitude</label><input id="townLngInput" placeholder="e.g. 19.2345"></div>
+        </div>
+        <label for="townDescInput" style="margin-top:10px; display:block;">Description</label>
+        <textarea id="townDescInput" rows="3" style="width:100%;" placeholder="Short blurb for the map popup and area-hook picker"></textarea>
+        <label style="margin-top:14px; display:block;">Photos (up to 12)</label>
+        <div id="townFormPhotos" style="display:flex; flex-wrap:wrap; gap:8px; margin:6px 0;"></div>
+        <input type="file" id="townPhotoInput" accept="image/*" multiple style="display:block;">
+        <p id="townPhotoHint" style="margin:6px 0 0; font-size:12px; color:var(--muted);">For a new town, save it first — photos then upload automatically right after.</p>
+        <div class="btn-row" style="margin-top:10px;">
+          <button class="primary" id="saveTownBtn">Save town</button>
+          <button class="btn-outline" id="cancelTownEditBtn" style="display:none;">Cancel edit</button>
+        </div>
+        <div class="status" id="townFormStatus"></div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <div class="btn-row" style="margin-top:0;">
+          <button class="btn-outline" id="refreshTownsBtn">Refresh</button>
+        </div>
+        <div class="status" id="townsStatus"></div>
+        <div style="margin-top:18px;">
+          <p class="table-scroll-hint">&larr; Scroll sideways to see Photo, Affiliate and Visible &mdash; Actions stays visible on the right</p>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Area</th>
+                  <th>Coordinates</th>
+                  <th>Photo</th>
+                  <th>Affiliate</th>
+                  <th>Visible</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="townsTableBody"></tbody>
+            </table>
+          </div>
+          <div class="empty-state" id="townsEmpty" style="display:none;">No towns added yet.</div>
         </div>
       </div>
 
@@ -1488,6 +1571,10 @@
         if(btn.dataset.panel === 'bookings'){
           var ensureAff = affiliatesCache.length ? Promise.resolve() : loadAffiliates();
           ensureAff.then(loadBookingStats).then(renderBookingsPanel);
+        }
+        if(btn.dataset.panel === 'mapActivities'){
+          var ensureAffForTowns = affiliatesCache.length ? Promise.resolve() : loadAffiliates();
+          ensureAffForTowns.then(populateTownAffiliateOptions);
         }
       });
     });
@@ -4608,6 +4695,448 @@
         photoInput.value = '';
       });
 
+      var townTableBody = document.getElementById('townsTableBody');
+      var townEmptyEl = document.getElementById('townsEmpty');
+      var townStatusEl = document.getElementById('townsStatus');
+      var townFormStatusEl = document.getElementById('townFormStatus');
+      var townFormTitleEl = document.getElementById('townFormTitle');
+      var townIdInput = document.getElementById('townIdInput');
+      var townNameInput = document.getElementById('townNameInput');
+      var townAreaInput = document.getElementById('townAreaInput');
+      var townZoneInput = document.getElementById('townZoneInput');
+      var townAffInput = document.getElementById('townAffInput');
+      var townLatInput = document.getElementById('townLatInput');
+      var townLngInput = document.getElementById('townLngInput');
+      var townDescInput = document.getElementById('townDescInput');
+      var cancelTownEditBtn = document.getElementById('cancelTownEditBtn');
+      var townFormPhotosEl = document.getElementById('townFormPhotos');
+      var townPhotoInput = document.getElementById('townPhotoInput');
+      var townPhotoHintEl = document.getElementById('townPhotoHint');
+      var currentTownFormPhotoKeys = [];
+      var pendingTownPhotoFiles = []; // { file, objectUrl } — only used before a new town has an id
+      var townAffOptionsPopulated = false;
+
+      function populateTownAffiliateOptions(){
+        // affiliatesCache comes from the Affiliates tab's own loadAffiliates()
+        // (shared global — see near the top of this script). Re-populate
+        // every time this tab is opened in case affiliates changed since.
+        var current = townAffInput.value;
+        townAffInput.innerHTML = '<option value="">— All affiliates (shared) —</option>';
+        affiliatesCache.forEach(function(a){
+          var opt = document.createElement('option');
+          opt.value = a.affId;
+          opt.textContent = a.name || a.affId;
+          townAffInput.appendChild(opt);
+        });
+        townAffInput.value = current;
+      }
+
+      function affiliateLabel(affId){
+        if(!affId) return 'All affiliates';
+        var match = affiliatesCache.filter(function(a){ return a.affId === affId; })[0];
+        return match ? (match.name || match.affId) : affId;
+      }
+
+      function renderTownFormPhotoThumbs(){
+        townFormPhotosEl.innerHTML = '';
+        currentTownFormPhotoKeys.forEach(function(key){
+          var wrap = document.createElement('div');
+          wrap.style.position = 'relative';
+          var img = document.createElement('img');
+          img.src = '/api/property-file?key=' + encodeURIComponent(key);
+          img.style.cssText = 'width:56px; height:56px; object-fit:cover; border-radius:4px;';
+          wrap.appendChild(img);
+          var rm = document.createElement('button');
+          rm.type = 'button';
+          rm.textContent = '×';
+          rm.title = 'Remove photo';
+          rm.style.cssText = 'position:absolute; top:-6px; right:-6px; width:18px; height:18px; line-height:16px; padding:0; border-radius:50%; border:none; background:#b42318; color:#fff; font-size:12px; cursor:pointer;';
+          rm.addEventListener('click', function(){
+            var id = townIdInput.value.trim();
+            if(!id) return;
+            mapAdminPost('removeTownPhoto', { id: id, photoKey: key }).then(function(){
+              currentTownFormPhotoKeys = currentTownFormPhotoKeys.filter(function(k){ return k !== key; });
+              renderTownFormPhotoThumbs();
+              loadActivities();
+            });
+          });
+          wrap.appendChild(rm);
+          townFormPhotosEl.appendChild(wrap);
+        });
+        pendingTownPhotoFiles.forEach(function(p, i){
+          var wrap = document.createElement('div');
+          wrap.style.position = 'relative';
+          var img = document.createElement('img');
+          img.src = p.objectUrl;
+          img.style.cssText = 'width:56px; height:56px; object-fit:cover; border-radius:4px; opacity:0.6;';
+          wrap.appendChild(img);
+          var badge = document.createElement('span');
+          badge.textContent = 'pending';
+          badge.style.cssText = 'position:absolute; bottom:2px; left:2px; right:2px; font-size:9px; text-align:center; background:rgba(0,0,0,.6); color:#fff; border-radius:3px;';
+          wrap.appendChild(badge);
+          var rm = document.createElement('button');
+          rm.type = 'button';
+          rm.textContent = '×';
+          rm.title = 'Remove';
+          rm.style.cssText = 'position:absolute; top:-6px; right:-6px; width:18px; height:18px; line-height:16px; padding:0; border-radius:50%; border:none; background:#b42318; color:#fff; font-size:12px; cursor:pointer;';
+          rm.addEventListener('click', function(){
+            URL.revokeObjectURL(p.objectUrl);
+            pendingTownPhotoFiles.splice(i, 1);
+            renderTownFormPhotoThumbs();
+          });
+          wrap.appendChild(rm);
+          townFormPhotosEl.appendChild(wrap);
+        });
+      }
+
+      function uploadOneTownPhoto(townId, file){
+        var params = new URLSearchParams({
+          listingId: 'town-' + townId,
+          kind: 'image',
+          label: 'town',
+          fileName: file.name
+        });
+        return fetch('/api/property-file?' + params.toString(), {
+          method: 'POST',
+          headers: { 'content-type': file.type || 'application/octet-stream' },
+          body: file
+        }).then(function(r){ return r.json(); }).then(function(res){
+          if(!res || !res.ok) throw new Error((res && res.error) || 'Upload failed.');
+          return mapAdminPost('addTownPhoto', { id: townId, photoKey: res.key });
+        });
+      }
+
+      function uploadTownPhotosSequentially(townId, files, onEach){
+        var queue = files.slice();
+        function next(){
+          if(!queue.length) return Promise.resolve();
+          var file = queue.shift();
+          return uploadOneTownPhoto(townId, file).then(function(){
+            if(onEach) onEach();
+            return next();
+          });
+        }
+        return next();
+      }
+
+      townPhotoInput.addEventListener('change', function(){
+        if(!townPhotoInput.files || !townPhotoInput.files.length) return;
+        var newFiles = Array.prototype.slice.call(townPhotoInput.files);
+        var totalAfter = currentTownFormPhotoKeys.length + pendingTownPhotoFiles.length + newFiles.length;
+        if(totalAfter > 12){
+          townFormStatusEl.textContent = 'Maximum 12 photos per town.';
+          townFormStatusEl.className = 'status show';
+          townPhotoInput.value = '';
+          return;
+        }
+        var id = townIdInput.value.trim();
+        if(id){
+          townFormStatusEl.textContent = 'Uploading photo…';
+          townFormStatusEl.className = 'status show';
+          uploadTownPhotosSequentially(id, newFiles).then(function(){
+            return mapAdminPost('adminList');
+          }).then(function(res){
+            var match = res.data && res.data.ok && (res.data.towns || []).find(function(t){ return t.id === id; });
+            currentTownFormPhotoKeys = match ? (match.photoKeys || (match.photoKey ? [match.photoKey] : [])) : currentTownFormPhotoKeys;
+            renderTownFormPhotoThumbs();
+            townFormStatusEl.textContent = 'Photos saved.';
+            loadActivities();
+          }).catch(function(err){
+            townFormStatusEl.textContent = err.message || 'Could not upload photo.';
+            townFormStatusEl.className = 'status show';
+          });
+        } else {
+          newFiles.forEach(function(file){
+            pendingTownPhotoFiles.push({ file: file, objectUrl: URL.createObjectURL(file) });
+          });
+          renderTownFormPhotoThumbs();
+        }
+        townPhotoInput.value = '';
+      });
+
+      function resetTownForm(){
+        townIdInput.value = '';
+        townNameInput.value = '';
+        townAreaInput.value = '';
+        townZoneInput.value = '';
+        townAffInput.value = '';
+        townLatInput.value = '';
+        townLngInput.value = '';
+        townDescInput.value = '';
+        townFormTitleEl.textContent = 'Add a popular tourist town';
+        cancelTownEditBtn.style.display = 'none';
+        currentTownFormPhotoKeys = [];
+        pendingTownPhotoFiles.forEach(function(p){ URL.revokeObjectURL(p.objectUrl); });
+        pendingTownPhotoFiles = [];
+        townPhotoInput.value = '';
+        townPhotoHintEl.textContent = 'For a new town, save it first — photos then upload automatically right after.';
+        renderTownFormPhotoThumbs();
+      }
+
+      cancelTownEditBtn.addEventListener('click', resetTownForm);
+
+      function renderTownsTable(towns){
+        townTableBody.innerHTML = '';
+        if(!towns.length){
+          townEmptyEl.style.display = 'block';
+          return;
+        }
+        townEmptyEl.style.display = 'none';
+        towns.forEach(function(t){
+          var tr = document.createElement('tr');
+
+          var tdName = document.createElement('td');
+          tdName.textContent = t.name || '—';
+          tr.appendChild(tdName);
+
+          var tdArea = document.createElement('td');
+          tdArea.textContent = t.area || '—';
+          tr.appendChild(tdArea);
+
+          var lat = parseFloat(t.latitude);
+          var lng = parseFloat(t.longitude);
+          var hasCoords = isFinite(lat) && isFinite(lng);
+          var tdCoords = document.createElement('td');
+          tdCoords.textContent = hasCoords ? (lat.toFixed(4) + ', ' + lng.toFixed(4)) : 'Missing';
+          tdCoords.style.fontSize = '12px';
+          if(!hasCoords){
+            tdCoords.style.color = '#b42318';
+            tdCoords.style.fontWeight = '600';
+          }
+          tr.appendChild(tdCoords);
+
+          var tdPhoto = document.createElement('td');
+          var photoWrap = document.createElement('div');
+          photoWrap.style.display = 'flex';
+          photoWrap.style.flexWrap = 'wrap';
+          photoWrap.style.gap = '4px';
+          photoWrap.style.maxWidth = '180px';
+          (t.photoKeys || (t.photoKey ? [t.photoKey] : [])).forEach(function(key){
+            var thumbWrap = document.createElement('div');
+            thumbWrap.style.position = 'relative';
+            var thumb = document.createElement('img');
+            thumb.src = '/api/property-file?key=' + encodeURIComponent(key);
+            thumb.style.width = '40px';
+            thumb.style.height = '40px';
+            thumb.style.objectFit = 'cover';
+            thumb.style.borderRadius = '4px';
+            thumbWrap.appendChild(thumb);
+            var rmBtn = document.createElement('button');
+            rmBtn.type = 'button';
+            rmBtn.textContent = '×';
+            rmBtn.title = 'Remove photo';
+            rmBtn.style.cssText = 'position:absolute; top:-6px; right:-6px; width:16px; height:16px; line-height:14px; padding:0; border-radius:50%; border:none; background:#b42318; color:#fff; font-size:11px; cursor:pointer;';
+            rmBtn.addEventListener('click', function(){
+              mapAdminPost('removeTownPhoto', { id: t.id, photoKey: key }).then(function(){ loadActivities(); });
+            });
+            thumbWrap.appendChild(rmBtn);
+            photoWrap.appendChild(thumbWrap);
+          });
+          tdPhoto.appendChild(photoWrap);
+
+          var fileInput = document.createElement('input');
+          fileInput.type = 'file';
+          fileInput.accept = 'image/*';
+          fileInput.multiple = true;
+          fileInput.style.maxWidth = '160px';
+          fileInput.style.marginTop = '6px';
+          fileInput.style.display = 'block';
+          fileInput.addEventListener('change', function(){
+            if(!fileInput.files || !fileInput.files.length) return;
+            var files = Array.prototype.slice.call(fileInput.files);
+            townStatusEl.textContent = 'Uploading photo…';
+            townStatusEl.className = 'status show';
+            uploadTownPhotosSequentially(t.id, files).then(function(){
+              townStatusEl.textContent = 'Photos saved.';
+              loadActivities();
+            }).catch(function(err){
+              townStatusEl.textContent = err.message || 'Could not upload photo.';
+              townStatusEl.className = 'status show';
+            });
+          });
+          tdPhoto.appendChild(fileInput);
+          tr.appendChild(tdPhoto);
+
+          var tdAff = document.createElement('td');
+          tdAff.textContent = affiliateLabel(t.affId);
+          tdAff.style.fontSize = '12px';
+          tr.appendChild(tdAff);
+
+          var tdVisible = document.createElement('td');
+          var visCheck = document.createElement('input');
+          visCheck.type = 'checkbox';
+          visCheck.checked = t.visible !== false;
+          visCheck.addEventListener('change', function(){
+            mapAdminPost('updateTown', { id: t.id, visible: visCheck.checked }).then(function(res){
+              if(!res.data || !res.data.ok){ visCheck.checked = !visCheck.checked; }
+            });
+          });
+          tdVisible.appendChild(visCheck);
+          tr.appendChild(tdVisible);
+
+          var tdActions = document.createElement('td');
+          var editBtn = document.createElement('button');
+          editBtn.type = 'button';
+          editBtn.className = 'btn-outline btn-small';
+          editBtn.textContent = 'Edit';
+          editBtn.addEventListener('click', function(){
+            townIdInput.value = t.id;
+            townNameInput.value = t.name || '';
+            townAreaInput.value = t.area || '';
+            townZoneInput.value = t.zone || '';
+            if(!townAffOptionsPopulated){ populateTownAffiliateOptions(); townAffOptionsPopulated = true; }
+            townAffInput.value = t.affId || '';
+            townLatInput.value = t.latitude || '';
+            townLngInput.value = t.longitude || '';
+            townDescInput.value = t.description || '';
+            townFormTitleEl.textContent = 'Edit town';
+            cancelTownEditBtn.style.display = 'inline-block';
+            currentTownFormPhotoKeys = (t.photoKeys || (t.photoKey ? [t.photoKey] : [])).slice();
+            pendingTownPhotoFiles.forEach(function(p){ URL.revokeObjectURL(p.objectUrl); });
+            pendingTownPhotoFiles = [];
+            townPhotoHintEl.textContent = 'Add more photos below — they upload immediately.';
+            renderTownFormPhotoThumbs();
+            window.scrollTo({ top: document.getElementById('townFormTitle').offsetTop - 20, behavior: 'smooth' });
+          });
+          tdActions.appendChild(editBtn);
+
+          var delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'btn-outline btn-small';
+          delBtn.style.marginLeft = '8px';
+          delBtn.textContent = 'Delete';
+          delBtn.addEventListener('click', function(){
+            if(!confirm('Delete "' + (t.name || 'this town') + '"? This cannot be undone.')) return;
+            mapAdminPost('deleteTown', { id: t.id }).then(function(){ loadActivities(); });
+          });
+          tdActions.appendChild(delBtn);
+
+          tr.appendChild(tdActions);
+          townTableBody.appendChild(tr);
+        });
+      }
+
+      document.getElementById('saveTownBtn').addEventListener('click', function(){
+        var name = townNameInput.value.trim();
+        if(!name){
+          townFormStatusEl.textContent = 'Town name is required.';
+          townFormStatusEl.className = 'status show';
+          return;
+        }
+        var payload = {
+          name: name,
+          area: townAreaInput.value.trim(),
+          zone: townZoneInput.value,
+          affId: townAffInput.value,
+          latitude: townLatInput.value.trim(),
+          longitude: townLngInput.value.trim(),
+          description: townDescInput.value.trim()
+        };
+        townFormStatusEl.textContent = 'Saving…';
+        townFormStatusEl.className = 'status show';
+        var id = townIdInput.value.trim();
+        var action = id ? 'updateTown' : 'addTown';
+        if(id) payload.id = id;
+        mapAdminPost(action, payload).then(function(res){
+          if(res.data && res.data.ok){
+            var newId = res.data.town && res.data.town.id;
+            if(newId && pendingTownPhotoFiles.length){
+              townFormStatusEl.textContent = 'Saved. Uploading photos…';
+              var files = pendingTownPhotoFiles.map(function(p){ return p.file; });
+              pendingTownPhotoFiles.forEach(function(p){ URL.revokeObjectURL(p.objectUrl); });
+              pendingTownPhotoFiles = [];
+              uploadTownPhotosSequentially(newId, files).then(function(){
+                townFormStatusEl.textContent = 'Saved.';
+                resetTownForm();
+                loadActivities();
+              }).catch(function(err){
+                townFormStatusEl.textContent = 'Town saved, but a photo failed to upload: ' + (err.message || err);
+                townFormStatusEl.className = 'status show';
+                resetTownForm();
+                loadActivities();
+              });
+            } else {
+              townFormStatusEl.textContent = 'Saved.';
+              resetTownForm();
+              loadActivities();
+            }
+          } else {
+            townFormStatusEl.textContent = (res.data && res.data.error) || 'Could not save town.';
+            townFormStatusEl.className = 'status show';
+          }
+        }).catch(function(){
+          townFormStatusEl.textContent = 'Could not save town.';
+          townFormStatusEl.className = 'status show';
+        });
+      });
+
+      document.getElementById('refreshTownsBtn').addEventListener('click', function(){
+        loadActivities();
+      });
+
+      var importTownsBtn = document.getElementById('importTownsBtn');
+      var importTownsFileInput = document.getElementById('importTownsFileInput');
+      var importTownsStatusEl = document.getElementById('importTownsStatus');
+      importTownsBtn.addEventListener('click', function(){ importTownsFileInput.click(); });
+      importTownsFileInput.addEventListener('change', function(){
+        if(!importTownsFileInput.files || !importTownsFileInput.files[0]) return;
+        var file = importTownsFileInput.files[0];
+        var reader = new FileReader();
+        reader.onload = function(){
+          importTownsStatusEl.textContent = 'Importing…';
+          importTownsStatusEl.className = 'status show';
+          mapAdminPost('importTownsCsv', { csv: reader.result }).then(function(res){
+            if(res.data && res.data.ok){
+              importTownsStatusEl.textContent = 'Imported: ' + res.data.created + ' added, ' + res.data.updated + ' updated.';
+              loadActivities();
+            } else {
+              importTownsStatusEl.textContent = (res.data && res.data.error) || 'Could not import CSV.';
+            }
+            importTownsStatusEl.className = 'status show';
+          }).catch(function(){
+            importTownsStatusEl.textContent = 'Could not import CSV.';
+            importTownsStatusEl.className = 'status show';
+          });
+        };
+        reader.readAsText(file);
+        importTownsFileInput.value = '';
+      });
+
+      document.getElementById('templateTownsBtn').addEventListener('click', function(){
+        downloadCsv('avante-towns-template.csv', ['name', 'area', 'zone', 'description', 'latitude', 'longitude', 'affiliateId'], {
+          name: 'e.g. Hermanus',
+          area: 'e.g. Cape Whale Coast',
+          zone: 'Eastern Cape & Garden Route',
+          description: 'Short blurb for the map popup and area-hook picker',
+          latitude: '-34.4187',
+          longitude: '19.2345',
+          affiliateId: '(leave blank to share with every affiliate)'
+        });
+      });
+
+      document.getElementById('exportTownsBtn').addEventListener('click', function(){
+        mapAdminPost('adminList').then(function(res){
+          if(!res.data || !res.data.ok) return;
+          var cols = ['id', 'name', 'area', 'zone', 'description', 'latitude', 'longitude', 'affiliateId', 'visible'];
+          var lines = [cols.join(',')];
+          (res.data.towns || []).forEach(function(t){
+            lines.push(cols.map(function(c){
+              var v = c === 'visible' ? (t.visible === false ? 'N' : 'Y') : (c === 'affiliateId' ? t.affId : t[c]);
+              return csvEscape(v);
+            }).join(','));
+          });
+          var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+          var url = URL.createObjectURL(blob);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = 'avante-towns.csv';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        });
+      });
+
       var propTableBody = document.getElementById('mapPropertiesTableBody');
       var propEmptyEl = document.getElementById('mapPropertiesEmpty');
       var loadedMapAdmin = false;
@@ -4632,7 +5161,7 @@
 
       var adminClusterGroup = null;
 
-      function renderAdminMap(properties, activities){
+      function renderAdminMap(properties, activities, towns){
         initAdminMap();
         if(!adminLeafletMap) return;
         if(adminClusterGroup) adminLeafletMap.removeLayer(adminClusterGroup);
@@ -4690,6 +5219,46 @@
           toggleBtn.textContent = hidden ? 'Show on map' : 'Hide from map';
           toggleBtn.addEventListener('click', function(){
             mapAdminPost('updateActivity', { id: a.id, visible: hidden }).then(function(){
+              loadActivities();
+            });
+          });
+          content.appendChild(toggleBtn);
+          marker.bindPopup(content);
+          adminClusterGroup.addLayer(marker);
+          allMarkers.push(marker);
+        });
+
+        (towns || []).forEach(function(t){
+          var lat = parseFloat(t.latitude);
+          var lng = parseFloat(t.longitude);
+          if(!isFinite(lat) || !isFinite(lng)) return;
+          var hidden = t.visible === false || t.hidden === true;
+          var color = hidden ? '#b7b7ae' : '#a3672d';
+          var marker = L.marker([lat, lng], { icon: dotIcon(color) });
+          var content = document.createElement('div');
+          var title = document.createElement('div');
+          title.style.fontWeight = '600';
+          title.textContent = t.name || 'Untitled';
+          content.appendChild(title);
+          if(t.area){
+            var sub = document.createElement('div');
+            sub.style.cssText = 'font-size:12px; color:#777;';
+            sub.textContent = t.area;
+            content.appendChild(sub);
+          }
+          if(t.affId){
+            var affLine = document.createElement('div');
+            affLine.style.cssText = 'font-size:12px; color:#777;';
+            affLine.textContent = 'Affiliate: ' + affiliateLabel(t.affId);
+            content.appendChild(affLine);
+          }
+          var toggleBtn = document.createElement('button');
+          toggleBtn.type = 'button';
+          toggleBtn.className = 'btn-outline btn-small';
+          toggleBtn.style.marginTop = '6px';
+          toggleBtn.textContent = hidden ? 'Show on map' : 'Hide from map';
+          toggleBtn.addEventListener('click', function(){
+            mapAdminPost('updateTown', { id: t.id, visible: hidden }).then(function(){
               loadActivities();
             });
           });
@@ -4987,7 +5556,8 @@
             var onboardedProps = (res.data.properties || []).filter(function(p){ return p.source !== 'resort-list'; });
             renderActivitiesTable(res.data.activities || []);
             renderMapPropertiesTable(onboardedProps);
-            renderAdminMap(res.data.properties || [], res.data.activities || []);
+            renderTownsTable(res.data.towns || []);
+            renderAdminMap(res.data.properties || [], res.data.activities || [], res.data.towns || []);
             renderMissingCoordsTable(res.data.missingCoordinates || []);
             renderMissingCoordsSummary(res.data.missingCoordinates || [], res.data.activities || []);
             renderResortListStatus(res.data.resortStats || null);
