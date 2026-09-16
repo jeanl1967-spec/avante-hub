@@ -665,6 +665,9 @@
       <h2 id="propertyDetailsModalTitle">Property Listing</h2>
       <p class="modal-sub">Edit the listing details below, set commission &amp; agreement terms, then save. Send the agreement to the owner/affiliate for acceptance before marking a listing as Listed.</p>
       <div id="propertyDetailsModalBody"></div>
+      <label for="propertyLocationSelect">Location (area / town / suburb)</label>
+      <select id="propertyLocationSelect"><option value="">— None selected —</option></select>
+      <div class="hint" style="margin-top:-6px;">Tag this property with its real location from your location tree — separate from the Suburb/City/State fields above, which are as submitted by the owner/agent.</div>
       <label for="propCommissionInput" style="margin-top:14px;">Commission / Revenue Share</label>
       <input id="propCommissionInput" placeholder="e.g. 15% of booking value">
       <label for="propDurationInput">Listing Duration</label>
@@ -1228,22 +1231,15 @@
         <input type="hidden" id="activityIdInput">
         <div class="btn-row" style="flex-wrap:wrap; gap:10px;">
           <div><label for="activityNameInput">Name</label><input id="activityNameInput" placeholder="e.g. Bloukrans Bungy"></div>
-          <div><label for="activityAreaInput">Area</label><input id="activityAreaInput" placeholder="e.g. Plettenberg Bay"></div>
-          <div><label for="activityZoneInput">Zone (optional)</label>
-            <select id="activityZoneInput">
-              <option value="">— No zone —</option>
-              <option value="Western Cape (Cape Town &amp; Winelands)">Western Cape (Cape Town &amp; Winelands)</option>
-              <option value="Eastern Cape &amp; Garden Route">Eastern Cape &amp; Garden Route</option>
-              <option value="Northern Cape">Northern Cape</option>
-              <option value="Free State">Free State</option>
-              <option value="KwaZulu-Natal">KwaZulu-Natal</option>
-              <option value="Gauteng &amp; North West">Gauteng &amp; North West</option>
-              <option value="Mpumalanga">Mpumalanga</option>
-              <option value="Limpopo">Limpopo</option>
-            </select>
-          </div>
+          <div><label for="activityAreaInput">Area (free text)</label><input id="activityAreaInput" placeholder="e.g. Plettenberg Bay"></div>
           <div><label for="activityPriceInput">Price</label><input id="activityPriceInput" placeholder="e.g. R2,800 pp"></div>
         </div>
+        <div class="btn-row" style="flex-wrap:wrap; gap:10px; margin-top:10px;">
+          <div><label for="activityLocationSelect">Location (area / town / suburb)</label>
+            <select id="activityLocationSelect"><option value="">— None selected —</option></select>
+          </div>
+        </div>
+        <div class="hint" style="margin-top:-6px;">Tag this activity with a location from your location tree — used for the map's Zone filter and for Discover locations. Separate from the free-text Area field above.</div>
         <div class="btn-row" style="flex-wrap:wrap; gap:10px; margin-top:10px;">
           <div><label for="activityLatInput">Latitude</label><input id="activityLatInput" placeholder="e.g. -34.0033"></div>
           <div><label for="activityLngInput">Longitude</label><input id="activityLngInput" placeholder="e.g. 23.3833"></div>
@@ -1275,6 +1271,7 @@
                 <tr>
                   <th>Name</th>
                   <th>Area</th>
+                  <th>Location</th>
                   <th>Coordinates</th>
                   <th>Price</th>
                   <th>Photo</th>
@@ -2343,6 +2340,125 @@
     }
 
     var AFF_ZONE_ORDER = ['Western Cape (Cape Town & Winelands)', 'Eastern Cape & Garden Route', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng & North West', 'Mpumalanga', 'Limpopo'];
+
+    // ---- Shared Zone/Town/Suburb location-tree <select> builder ----
+    // Used by every "which area/town/suburb is this in" picker across the
+    // admin panel (Default Hooks, Activities, Property Listings review) —
+    // deliberately kept top-level (not inside any section's own IIFE) so
+    // every one of those sections, each wrapped in its own IIFE further
+    // down this same <script> block, can call it directly without an
+    // explicit `window.` export. See the "Bugs found and fixed" note in
+    // the project's towns-layer-implementation doc for why that matters
+    // here: a function defined *inside* one section's IIFE is invisible
+    // to code in a different IIFE, even one later in the same file — but
+    // everything at the top level of this <script> tag is visible to all
+    // of them, since they're just nested functions closing over it.
+    var _locationTreeTownsPromise = null;
+    var _locationTreeTowns = [];
+    function fetchLocationTreeTowns(){
+      if(_locationTreeTownsPromise) return _locationTreeTownsPromise;
+      _locationTreeTownsPromise = affSectionMapPost('adminList').then(function(res){
+        _locationTreeTowns = (res.data && res.data.ok && res.data.towns) || [];
+        return _locationTreeTowns;
+      }).catch(function(){
+        _locationTreeTowns = [];
+        return _locationTreeTowns;
+      });
+      return _locationTreeTownsPromise;
+    }
+
+    function buildLocationSelectOptionsHtml(towns){
+      var byZone = {};
+      towns.forEach(function(t){
+        var z = t.zone && AFF_ZONE_ORDER.indexOf(t.zone) > -1 ? t.zone : '';
+        if(!byZone[z]) byZone[z] = [];
+        byZone[z].push(t);
+      });
+      var zoneKeys = AFF_ZONE_ORDER.filter(function(z){ return byZone[z]; });
+      if(byZone['']) zoneKeys.push('');
+
+      var html = '<option value="">— None selected —</option>';
+      zoneKeys.forEach(function(zoneKey){
+        var label = zoneKey || 'Other (no area set)';
+        html += '<optgroup label="' + escapeHtml(label) + '">';
+        if(zoneKey){
+          html += '<option value="zone:' + escapeHtml(zoneKey) + '">' + escapeHtml(zoneKey) + ' (entire area)</option>';
+        }
+        byZone[zoneKey].slice().sort(function(a,b){ return a.name.localeCompare(b.name); }).forEach(function(t){
+          html += '<option value="town:' + escapeHtml(t.id) + '">' + escapeHtml(t.name) + '</option>';
+          (t.suburbs || []).slice().sort(function(a,b){ return a.name.localeCompare(b.name); }).forEach(function(s){
+            html += '<option value="suburb:' + escapeHtml(t.id) + ':' + escapeHtml(s.id) + '">— ' + escapeHtml(s.name) + '</option>';
+          });
+        });
+        html += '</optgroup>';
+      });
+      return html;
+    }
+
+    // Populates one or more <select> elements (by id) with the shared
+    // location tree — fetches + builds the option HTML once no matter how
+    // many callers/tabs ask for it, so opening Default Hooks, Activities
+    // and Property Listings in one admin session only costs one /api/map
+    // 'adminList' round trip in total, not one per tab.
+    var _locationSelectOptionsHtml = null;
+    function populateLocationSelects(selectIds){
+      var ready = _locationSelectOptionsHtml
+        ? Promise.resolve(_locationSelectOptionsHtml)
+        : fetchLocationTreeTowns().then(function(towns){
+            _locationSelectOptionsHtml = buildLocationSelectOptionsHtml(towns);
+            return _locationSelectOptionsHtml;
+          });
+      return ready.then(function(optionsHtml){
+        selectIds.forEach(function(id){
+          var sel = document.getElementById(id);
+          if(sel) sel.innerHTML = optionsHtml;
+        });
+      });
+    }
+
+    // Reads a location <select>'s current value into {zone, townId,
+    // suburbId, locationLabel}, from its encoded value ('', 'zone:<name>',
+    // 'town:<id>' or 'suburb:<townId>:<suburbId>').
+    function readLocationSelect(sel){
+      if(!sel || !sel.value) return { zone: '', townId: '', suburbId: '', locationLabel: '' };
+      var opt = sel.options[sel.selectedIndex];
+      var label = opt ? opt.textContent : '';
+      var v = sel.value;
+      if(v.indexOf('suburb:') === 0){
+        var subParts = v.slice(7).split(':');
+        return { zone: '', townId: subParts[0] || '', suburbId: subParts[1] || '', locationLabel: label };
+      }
+      if(v.indexOf('town:') === 0){
+        return { zone: '', townId: v.slice(5), suburbId: '', locationLabel: label };
+      }
+      if(v.indexOf('zone:') === 0){
+        return { zone: v.slice(5), townId: '', suburbId: '', locationLabel: label };
+      }
+      return { zone: '', townId: '', suburbId: '', locationLabel: '' };
+    }
+
+    // Sets a location <select> to match saved {zone, townId, suburbId} —
+    // the inverse of readLocationSelect's encoding. Leaves it at "— None
+    // selected —" if nothing saved matches a currently loaded option
+    // (e.g. the town/suburb was since deleted).
+    function applyLocationSelect(sel, saved){
+      if(!sel) return;
+      var value = '';
+      if(saved.suburbId && saved.townId) value = 'suburb:' + saved.townId + ':' + saved.suburbId;
+      else if(saved.townId) value = 'town:' + saved.townId;
+      else if(saved.zone) value = 'zone:' + saved.zone;
+      sel.value = value;
+      if(sel.value !== value) sel.value = ''; // saved location no longer exists in the tree
+    }
+
+    // Looks up a town's own zone from the cached tree — used where a
+    // consumer (Activities) needs to derive the legacy flat `zone` field
+    // from a town/suburb pick, for older filtering code that still keys
+    // off zone alone and has no idea townId/suburbId exist.
+    function lookupTownZone(townId){
+      var t = _locationTreeTowns.filter(function(t){ return t.id === townId; })[0];
+      return (t && t.zone) || '';
+    }
 
     function populateAffTownCheckboxes(existingAffId){
       var wrap = document.getElementById('affTownCheckboxes');
@@ -3559,95 +3675,20 @@
         }).catch(function(){ /* best-effort — Auto-build still works by typed text alone */ });
       }
 
-      // Populates each hook card's "Property location" <select> from the
-      // same Zone > Town > Suburb tree the Affiliate modal's location
-      // picker uses (fetched via the same /api/map 'adminList' action) —
-      // one shared list of <option>s, cloned into all 6 selects, grouped
-      // by zone with an explicit "(entire area)" option for the zone
-      // itself plus one option per town and, indented under it, one per
-      // suburb. Values are encoded as 'zone:<zoneName>', 'town:<id>' or
-      // 'suburb:<townId>:<suburbId>' so saveHook can split them back apart
-      // without a second lookup. Loaded once and reused — this tree
-      // doesn't change often enough to justify re-fetching per hook card.
-      function buildLocationOptionsHtml(towns){
-        var byZone = {};
-        towns.forEach(function(t){
-          var z = t.zone && AFF_ZONE_ORDER.indexOf(t.zone) > -1 ? t.zone : '';
-          if(!byZone[z]) byZone[z] = [];
-          byZone[z].push(t);
-        });
-        var zoneKeys = AFF_ZONE_ORDER.filter(function(z){ return byZone[z]; });
-        if(byZone['']) zoneKeys.push('');
-
-        var html = '<option value="">— None selected —</option>';
-        zoneKeys.forEach(function(zoneKey){
-          var label = zoneKey || 'Other (no area set)';
-          html += '<optgroup label="' + escapeHtml(label) + '">';
-          if(zoneKey){
-            html += '<option value="zone:' + escapeHtml(zoneKey) + '">' + escapeHtml(zoneKey) + ' (entire area)</option>';
-          }
-          byZone[zoneKey].slice().sort(function(a,b){ return a.name.localeCompare(b.name); }).forEach(function(t){
-            html += '<option value="town:' + escapeHtml(t.id) + '">' + escapeHtml(t.name) + '</option>';
-            (t.suburbs || []).slice().sort(function(a,b){ return a.name.localeCompare(b.name); }).forEach(function(s){
-              html += '<option value="suburb:' + escapeHtml(t.id) + ':' + escapeHtml(s.id) + '">— ' + escapeHtml(s.name) + '</option>';
-            });
-          });
-          html += '</optgroup>';
-        });
-        return html;
-      }
-
-      var hookLocationOptionsLoaded = false;
+      // Thin wrappers over the shared top-level location-select helpers
+      // (see their definitions, above the Affiliate-modal section, for
+      // why these live at the top level instead of in here) — these just
+      // supply this section's own '#dh<n>-locationSelect' element ids.
       function loadHookLocationOptions(){
-        if(hookLocationOptionsLoaded) return Promise.resolve();
-        return affSectionMapPost('adminList').then(function(res){
-          var towns = (res.data && res.data.ok && res.data.towns) || [];
-          var optionsHtml = buildLocationOptionsHtml(towns);
-          for(var n = 1; n <= HOOK_COUNT; n++){
-            var sel = document.getElementById('dh' + n + '-locationSelect');
-            if(sel) sel.innerHTML = optionsHtml;
-          }
-          hookLocationOptionsLoaded = true;
-        }).catch(function(){ /* best-effort — the field just stays empty/unset if this fails */ });
+        var ids = [];
+        for(var n = 1; n <= HOOK_COUNT; n++) ids.push('dh' + n + '-locationSelect');
+        return populateLocationSelects(ids);
       }
-
-      // Reads a hook card's location select back into the {townId,
-      // suburbId, locationLabel} shape setDefaultHook expects, from its
-      // encoded option value ('', 'zone:<name>', 'town:<id>' or
-      // 'suburb:<townId>:<suburbId>').
       function readHookLocation(n){
-        var sel = document.getElementById('dh' + n + '-locationSelect');
-        if(!sel || !sel.value) return { zone: '', townId: '', suburbId: '', locationLabel: '' };
-        var opt = sel.options[sel.selectedIndex];
-        var label = opt ? opt.textContent : '';
-        var v = sel.value;
-        if(v.indexOf('suburb:') === 0){
-          var subParts = v.slice(7).split(':');
-          return { zone: '', townId: subParts[0] || '', suburbId: subParts[1] || '', locationLabel: label };
-        }
-        if(v.indexOf('town:') === 0){
-          return { zone: '', townId: v.slice(5), suburbId: '', locationLabel: label };
-        }
-        if(v.indexOf('zone:') === 0){
-          return { zone: v.slice(5), townId: '', suburbId: '', locationLabel: label };
-        }
-        return { zone: '', townId: '', suburbId: '', locationLabel: '' };
+        return readLocationSelect(document.getElementById('dh' + n + '-locationSelect'));
       }
-
-      // Sets a hook card's location select to match saved {zone, townId,
-      // suburbId} fields — the inverse of readHookLocation's value
-      // encoding. Leaves the select at "— None selected —" if nothing
-      // saved matches any option currently loaded (e.g. the town/suburb
-      // was since deleted).
       function applyHookLocation(n, h){
-        var sel = document.getElementById('dh' + n + '-locationSelect');
-        if(!sel) return;
-        var value = '';
-        if(h.suburbId && h.townId) value = 'suburb:' + h.townId + ':' + h.suburbId;
-        else if(h.townId) value = 'town:' + h.townId;
-        else if(h.zone) value = 'zone:' + h.zone;
-        sel.value = value;
-        if(sel.value !== value) sel.value = ''; // saved location no longer exists in the tree
+        applyLocationSelect(document.getElementById('dh' + n + '-locationSelect'), h);
       }
 
       function renderAutobuildDraft(n){
@@ -4625,6 +4666,13 @@
       var modalStatusEl = document.getElementById('propertyDetailsModalStatus');
       var currentListingId = '';
       var loadedSettings = false;
+      // True once the location <select>'s options have loaded AND the
+      // saved zone/town/suburb has been applied to it for the listing
+      // currently open — guards Save Changes against reading a select
+      // that's still showing its unpopulated default (a fast click right
+      // after opening the modal, before the /api/map fetch resolves)
+      // and silently overwriting a previously-saved location with empty.
+      var propertyLocationReady = false;
 
       function fmtPropDate(iso){
         if(!iso) return '\u2014';
@@ -4683,7 +4731,11 @@
           tr.appendChild(tdSubmitter);
 
           var tdLoc = document.createElement('td');
-          tdLoc.textContent = [l.city, l.country].filter(Boolean).join(', ') || '\u2014';
+          // Prefer the admin-tagged location (from the tree picker in the
+          // review modal) once set \u2014 it's the curated, matched-to-the-
+          // location-tree value; fall back to the owner/agent's own free-
+          // text city/country from onboarding when nothing's been tagged yet.
+          tdLoc.textContent = l.locationLabel || [l.city, l.country].filter(Boolean).join(', ') || '\u2014';
           tr.appendChild(tdLoc);
 
           var tdStatus = document.createElement('td');
@@ -4776,6 +4828,7 @@
 
       function openPropertyDetailsModal(listingId){
         currentListingId = listingId;
+        propertyLocationReady = false;
         modalStatusEl.textContent = '';
         modalStatusEl.className = 'modal-status';
         bodyEl.innerHTML = 'Loading\u2026';
@@ -4805,6 +4858,16 @@
             }
           });
           bodyEl.innerHTML = html;
+
+          populateLocationSelects(['propertyLocationSelect']).then(function(){
+            // A newer openPropertyDetailsModal call may have fired while
+            // this fetch was in flight (admin clicked View on a different
+            // row before this one loaded) — only apply/arm if we're still
+            // looking at the listing this fetch was actually for.
+            if(currentListingId !== listingId) return;
+            applyLocationSelect(document.getElementById('propertyLocationSelect'), { zone: l.zone || '', townId: l.townId || '', suburbId: l.suburbId || '' });
+            propertyLocationReady = true;
+          });
 
           document.getElementById('propCommissionInput').value = l.commissionRate || '';
           document.getElementById('propDurationInput').value = l.listingDuration || '';
@@ -4840,6 +4903,18 @@
         EDIT_FIELDS.forEach(function(f){
           listingPayload[f.key] = document.getElementById('propField_' + f.key).value;
         });
+        // Only include the location fields if the select actually finished
+        // loading/applying for this listing (see propertyLocationReady) —
+        // omitting them here means updateListing leaves whatever was
+        // already saved untouched, rather than us sending an empty
+        // overwrite from a not-yet-populated select.
+        if(propertyLocationReady){
+          var loc = readLocationSelect(document.getElementById('propertyLocationSelect'));
+          listingPayload.zone = loc.zone;
+          listingPayload.townId = loc.townId;
+          listingPayload.suburbId = loc.suburbId;
+          listingPayload.locationLabel = loc.locationLabel;
+        }
 
         propAdminPost('updateListing', listingPayload).then(function(updRes){
           if(!updRes.data || !updRes.data.ok){
@@ -4951,7 +5026,7 @@
       var idInput = document.getElementById('activityIdInput');
       var nameInput = document.getElementById('activityNameInput');
       var areaInput = document.getElementById('activityAreaInput');
-      var zoneInput = document.getElementById('activityZoneInput');
+      var locationSelect = document.getElementById('activityLocationSelect');
       var priceInput = document.getElementById('activityPriceInput');
       var latInput = document.getElementById('activityLatInput');
       var lngInput = document.getElementById('activityLngInput');
@@ -5779,7 +5854,7 @@
         idInput.value = '';
         nameInput.value = '';
         areaInput.value = '';
-        zoneInput.value = '';
+        locationSelect.value = '';
         priceInput.value = '';
         latInput.value = '';
         lngInput.value = '';
@@ -5814,6 +5889,11 @@
           var tdArea = document.createElement('td');
           tdArea.textContent = a.area || '\u2014';
           tr.appendChild(tdArea);
+
+          var tdLocation = document.createElement('td');
+          tdLocation.textContent = a.locationLabel || a.zone || '\u2014';
+          tdLocation.style.fontSize = '12px';
+          tr.appendChild(tdLocation);
 
           var lat = parseFloat(a.latitude);
           var lng = parseFloat(a.longitude);
@@ -5925,7 +6005,7 @@
             idInput.value = a.id;
             nameInput.value = a.name || '';
             areaInput.value = a.area || '';
-            zoneInput.value = a.zone || '';
+            applyLocationSelect(locationSelect, { zone: a.zone || '', townId: a.townId || '', suburbId: a.suburbId || '' });
             priceInput.value = a.price || '';
             latInput.value = a.latitude || '';
             lngInput.value = a.longitude || '';
@@ -6077,10 +6157,24 @@
           formStatusEl.className = 'status show';
           return;
         }
+        // zone stays a plain top-level field (existing filtering — the
+        // Explore Map's Zone dropdown, discoverLocationTree's activity
+        // scan — reads record.zone directly and has no idea townId/
+        // suburbId exist) but is now *derived* from the tree pick rather
+        // than set directly: picking a bare Area keeps its own zone name;
+        // picking a Town or Suburb looks up that town's own zone from the
+        // cached tree, so existing zone-based filtering keeps working
+        // exactly as before even though the form no longer has its own
+        // flat Zone dropdown.
+        var loc = readLocationSelect(locationSelect);
+        var derivedZone = loc.zone || (loc.townId ? lookupTownZone(loc.townId) : '');
         var payload = {
           name: name,
           area: areaInput.value.trim(),
-          zone: zoneInput.value,
+          zone: derivedZone,
+          townId: loc.townId,
+          suburbId: loc.suburbId,
+          locationLabel: loc.locationLabel,
           price: priceInput.value.trim(),
           latitude: latInput.value.trim(),
           longitude: lngInput.value.trim(),
@@ -6303,6 +6397,7 @@
       document.querySelectorAll('.tab').forEach(function(btn){
         if(btn.dataset.panel === 'mapActivities'){
           btn.addEventListener('click', function(){
+            populateLocationSelects(['activityLocationSelect']);
             if(!loadedMapAdmin){ loadedMapAdmin = true; loadActivities(); }
             else loadActivities();
             setTimeout(function(){ if(adminLeafletMap) adminLeafletMap.invalidateSize(); }, 150);
