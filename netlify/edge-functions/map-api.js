@@ -334,10 +334,10 @@ function toResortPin(record, hidden) {
     listingId: resortPinId(record),
     source: "resort-list",
     name: record.name || "",
-    area: record.district || "",
+    area: record.suburb || record.district || "",
     city: "",
     country: "South Africa",
-    zone: districtToZone(record.district),
+    zone: provinceToZone(record.zoneHint) || districtToZone(record.district),
     description: "",
     latitude: lat,
     longitude: lng,
@@ -540,10 +540,20 @@ async function discoverLocationTree({ listingsStore, resortListStore, activities
   resortList.forEach((r) => {
     const townName = clean(r.district || "", 120);
     if (!townName) return;
-    const zoneName = districtToZone(r.district) || "";
+    // zoneHint and suburb are optional columns some StockNetwork exports
+    // include (see resorts-api.js) — use them when present for a more
+    // precise zone and a Suburb-level node; fall back to the district-only
+    // behavior (zone guessed from district, no suburb) when they're not.
+    const zoneName = provinceToZone(r.zoneHint) || districtToZone(r.district) || "";
     const town = townNode(zoneBucket(zoneName), townName);
     town.propertyCount++;
     addCoord(town, r.latitude, r.longitude);
+    const suburbName = clean(r.suburb || "", 120);
+    if (suburbName && suburbName.toLowerCase() !== townName.toLowerCase()) {
+      const sub = suburbNode(town, suburbName);
+      sub.count++;
+      addCoord(sub, r.latitude, r.longitude);
+    }
   });
 
   const activities = await loadActivities(activitiesStore);
@@ -781,6 +791,18 @@ export default async (request, context) => {
               townRecord.updatedAt = townRecord.createdAt;
               existingIds.add(townRecord.id);
               all.push(townRecord);
+            } else {
+              // Backfill only what's currently blank on an already-existing
+              // town — an admin edit (or a value set on an earlier, less
+              // detailed run of this same scan) always wins. This is what
+              // lets re-running Discover after uploading a richer export
+              // (e.g. one that now has a Zone/Province/State column) fill
+              // in the zone/coordinates on towns that were created before
+              // that column was available, without touching anything the
+              // admin has since changed by hand.
+              if (!townRecord.zone && ZONES.includes(zoneEntry.zone)) townRecord.zone = zoneEntry.zone;
+              if (!townRecord.latitude && t.latitude != null) townRecord.latitude = String(t.latitude);
+              if (!townRecord.longitude && t.longitude != null) townRecord.longitude = String(t.longitude);
             }
             if (!Array.isArray(townRecord.suburbs)) townRecord.suburbs = [];
             const existingSuburbNames = new Set(townRecord.suburbs.map((s) => (s.name || "").toLowerCase()));
