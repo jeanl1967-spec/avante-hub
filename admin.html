@@ -277,6 +277,38 @@
   @media (max-width: 900px){
     .table-scroll-hint{ display:block; }
   }
+
+  /* ---- collapsible + paginated tables (e.g. Towns) ---- */
+  details.collapsible-table > summary{
+    cursor:pointer; font-weight:700; color:var(--teal-dark); list-style:none;
+    padding:10px 14px; background:var(--mint); border:1.5px solid #bfe6e2; border-radius:8px;
+    font-size:13px; user-select:none;
+  }
+  details.collapsible-table > summary::-webkit-details-marker{ display:none; }
+  details.collapsible-table > summary::before{ content:'▸  '; }
+  details.collapsible-table[open] > summary::before{ content:'▾  '; }
+  details.collapsible-table > summary:hover{ background:#e6f6f4; }
+  details.collapsible-table > .collapsible-table-body{ margin-top:14px; }
+  .pagination-bar{
+    display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between;
+    gap:10px; margin-bottom:10px; font-size:12.5px; color:var(--ink);
+  }
+  .pagination-controls{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .pagination-controls label{
+    display:inline; text-transform:none; font-weight:400; font-size:12.5px;
+    color:var(--ink); margin:0; letter-spacing:normal;
+  }
+  .pagination-bar select{ width:auto; padding:6px 8px; font-size:12.5px; }
+  .pagination-controls button:disabled{ opacity:0.45; cursor:not-allowed; }
+
+  /* Visually-hidden native file input — a styled button triggers it via
+     .click(), so we never rely on the browser's own "Choose file" control
+     (which inherits the global input{width:100%} rule and gets squeezed
+     illegibly inside a narrow table cell). */
+  .visually-hidden-file-input{
+    position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+    overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+  }
   .badge{
     display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:0.04em;
     text-transform:uppercase; padding:3px 9px; border-radius:100px;
@@ -1394,28 +1426,46 @@
           <button class="btn-outline" id="refreshTownsBtn">Refresh</button>
         </div>
         <div class="status" id="townsStatus"></div>
-        <div style="margin-top:18px;">
-          <p class="table-scroll-hint">&larr; Scroll sideways to see Photo, Affiliate and Visible &mdash; Actions stays visible on the right</p>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Town / City</th>
-                  <th>Zone</th>
-                  <th>Area</th>
-                  <th>Suburbs</th>
-                  <th>Coordinates</th>
-                  <th>Photo</th>
-                  <th>Affiliate</th>
-                  <th>Visible</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="townsTableBody"></tbody>
-            </table>
+        <details class="collapsible-table" id="townsTableDetails" style="margin-top:18px;">
+          <summary id="townsTableSummary">Show towns table</summary>
+          <div class="collapsible-table-body">
+            <p class="table-scroll-hint">&larr; Scroll sideways to see Photo, Affiliate and Visible &mdash; Actions stays visible on the right</p>
+            <div class="pagination-bar" id="townsPaginationBar">
+              <span id="townsRangeInfo"></span>
+              <div class="pagination-controls">
+                <label for="townsPageSizeSelect">Rows per page</label>
+                <select id="townsPageSizeSelect">
+                  <option value="25">25</option>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                  <option value="all">Show all</option>
+                </select>
+                <button type="button" class="btn-outline btn-small" id="townsPrevPageBtn">&larr; Prev</button>
+                <span id="townsPageInfo"></span>
+                <button type="button" class="btn-outline btn-small" id="townsNextPageBtn">Next &rarr;</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Town / City</th>
+                    <th>Zone</th>
+                    <th>Area</th>
+                    <th>Suburbs</th>
+                    <th>Coordinates</th>
+                    <th>Photo</th>
+                    <th>Affiliate</th>
+                    <th>Visible</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="townsTableBody"></tbody>
+              </table>
+            </div>
+            <div class="empty-state" id="townsEmpty" style="display:none;">No towns added yet.</div>
           </div>
-          <div class="empty-state" id="townsEmpty" style="display:none;">No towns added yet.</div>
-        </div>
+        </details>
       </div>
 
       <div class="card" style="margin-top:20px;">
@@ -5383,6 +5433,16 @@
       var townTableBody = document.getElementById('townsTableBody');
       var townEmptyEl = document.getElementById('townsEmpty');
       var townStatusEl = document.getElementById('townsStatus');
+      var townsTableSummaryEl = document.getElementById('townsTableSummary');
+      var townsPaginationBarEl = document.getElementById('townsPaginationBar');
+      var townsRangeInfoEl = document.getElementById('townsRangeInfo');
+      var townsPageInfoEl = document.getElementById('townsPageInfo');
+      var townsPageSizeSelect = document.getElementById('townsPageSizeSelect');
+      var townsPrevPageBtn = document.getElementById('townsPrevPageBtn');
+      var townsNextPageBtn = document.getElementById('townsNextPageBtn');
+      var townsFullCache = [];
+      var townsPageSize = 25; // matches the default-selected <option> below
+      var townsCurrentPage = 1;
       var townFormStatusEl = document.getElementById('townFormStatus');
       var townFormTitleEl = document.getElementById('townFormTitle');
       var townIdInput = document.getElementById('townIdInput');
@@ -5567,13 +5627,59 @@
       cancelTownEditBtn.addEventListener('click', resetTownForm);
 
       function renderTownsTable(towns){
+        townsFullCache = towns || [];
+        townsCurrentPage = 1;
+        renderTownsPage();
+      }
+
+      function updateTownsSummaryText(count){
+        var label = count ? (count.toLocaleString() + ' town' + (count === 1 ? '' : 's')) : 'no towns yet';
+        townsTableSummaryEl.textContent = 'Towns table (' + label + ')';
+      }
+
+      function renderTownsPage(){
         townTableBody.innerHTML = '';
+        var towns = townsFullCache;
+        updateTownsSummaryText(towns.length);
         if(!towns.length){
           townEmptyEl.style.display = 'block';
+          townsPaginationBarEl.style.display = 'none';
           return;
         }
         townEmptyEl.style.display = 'none';
-        towns.forEach(function(t){
+        townsPaginationBarEl.style.display = 'flex';
+
+        var pageSize = townsPageSize === 'all' ? towns.length : townsPageSize;
+        var totalPages = Math.max(1, Math.ceil(towns.length / pageSize));
+        if(townsCurrentPage > totalPages) townsCurrentPage = totalPages;
+        if(townsCurrentPage < 1) townsCurrentPage = 1;
+        var startIdx = (townsCurrentPage - 1) * pageSize;
+        var pageTowns = towns.slice(startIdx, startIdx + pageSize);
+
+        townsRangeInfoEl.textContent = 'Showing ' + (startIdx + 1) + '–' + (startIdx + pageTowns.length) + ' of ' + towns.length.toLocaleString();
+        townsPageInfoEl.textContent = 'Page ' + townsCurrentPage + ' of ' + totalPages;
+        townsPrevPageBtn.disabled = townsCurrentPage <= 1;
+        townsNextPageBtn.disabled = townsCurrentPage >= totalPages;
+
+        pageTowns.forEach(function(t){ renderTownRow(t); });
+      }
+
+      townsPageSizeSelect.addEventListener('change', function(){
+        var val = townsPageSizeSelect.value;
+        townsPageSize = val === 'all' ? 'all' : parseInt(val, 10);
+        townsCurrentPage = 1;
+        renderTownsPage();
+      });
+      townsPrevPageBtn.addEventListener('click', function(){
+        townsCurrentPage -= 1;
+        renderTownsPage();
+      });
+      townsNextPageBtn.addEventListener('click', function(){
+        townsCurrentPage += 1;
+        renderTownsPage();
+      });
+
+      function renderTownRow(t){
           var tr = document.createElement('tr');
 
           var tdName = document.createElement('td');
@@ -5643,22 +5749,35 @@
           fileInput.type = 'file';
           fileInput.accept = 'image/*';
           fileInput.multiple = true;
-          fileInput.style.maxWidth = '160px';
-          fileInput.style.marginTop = '6px';
-          fileInput.style.display = 'block';
+          fileInput.className = 'visually-hidden-file-input';
+
+          var fileBtn = document.createElement('button');
+          fileBtn.type = 'button';
+          fileBtn.className = 'btn-outline btn-small';
+          fileBtn.style.marginTop = '6px';
+          fileBtn.textContent = '+ Add photo';
+          fileBtn.addEventListener('click', function(){ fileInput.click(); });
+
           fileInput.addEventListener('change', function(){
             if(!fileInput.files || !fileInput.files.length) return;
             var files = Array.prototype.slice.call(fileInput.files);
+            var origLabel = fileBtn.textContent;
+            fileBtn.disabled = true;
+            fileBtn.textContent = 'Uploading…';
             townStatusEl.textContent = 'Uploading photo…';
             townStatusEl.className = 'status show';
             uploadTownPhotosSequentially(t.id, files).then(function(){
               townStatusEl.textContent = 'Photos saved.';
               loadActivities();
             }).catch(function(err){
+              fileBtn.disabled = false;
+              fileBtn.textContent = origLabel;
+              fileInput.value = '';
               townStatusEl.textContent = err.message || 'Could not upload photo.';
               townStatusEl.className = 'status show';
             });
           });
+          tdPhoto.appendChild(fileBtn);
           tdPhoto.appendChild(fileInput);
           tr.appendChild(tdPhoto);
 
@@ -5789,7 +5908,6 @@
             detailTr.style.display = open ? 'none' : 'table-row';
             suburbsToggle.textContent = suburbs.length ? (suburbs.length + ' suburb' + (suburbs.length === 1 ? '' : 's') + (open ? ' ▸' : ' ▾')) : (open ? 'Add suburb' : 'Add suburb ▾');
           });
-        });
       }
 
       document.getElementById('saveTownBtn').addEventListener('click', function(){
