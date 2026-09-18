@@ -5904,6 +5904,7 @@
         checkGeocodeBtn.disabled = true;
         var totalTagged = 0, totalTowns = 0, totalSuburbs = 0, totalFailed = 0, iterations = 0;
         var MAX_ITERATIONS = 30;
+        var googleFailureReason = '', googleFailureMessage = '';
 
         function finish(summary){
           startGeocodeBtn.disabled = false;
@@ -5942,6 +5943,10 @@
             totalTowns += res.data.addedTowns || 0;
             totalSuburbs += res.data.addedSuburbs || 0;
             totalFailed += batchFailed;
+            if(!googleFailureReason && res.data.googleFailureReason){
+              googleFailureReason = res.data.googleFailureReason;
+              googleFailureMessage = res.data.googleFailureMessage || '';
+            }
 
             // Every coordinate attempted this round failed outright (e.g. a
             // bad API key or billing not enabled) — stop instead of retrying
@@ -5954,7 +5959,13 @@
               var summary = 'Done — tagged ' + totalTagged + ' record' + (totalTagged === 1 ? '' : 's') +
                 ', added ' + totalTowns + ' new town' + (totalTowns === 1 ? '' : 's') + ' and ' + totalSuburbs + ' new suburb' + (totalSuburbs === 1 ? '' : 's') + '.';
               if(totalFailed){
-                summary += ' ' + totalFailed + ' location' + (totalFailed === 1 ? '' : 's') + ' couldn’t be resolved (often a sign the API key or billing needs checking) — run this again to retry them.';
+                summary += ' ' + totalFailed + ' location' + (totalFailed === 1 ? '' : 's') + ' couldn’t be resolved';
+                if(googleFailureReason){
+                  summary += ' — Google said: ' + googleFailureReason + (googleFailureMessage ? (' (' + googleFailureMessage + ')') : '');
+                } else {
+                  summary += ' (often a sign the API key or billing needs checking)';
+                }
+                summary += ' — run this again to retry them.';
               }
               finish(summary);
             }
