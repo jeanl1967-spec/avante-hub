@@ -5974,7 +5974,14 @@
               summary += ', added ' + totalTowns + ' new town' + (totalTowns === 1 ? '' : 's') + ' and ' + totalSuburbs + ' new suburb' + (totalSuburbs === 1 ? '' : 's') + '.';
               if(totalFailed){
                 summary += ' ' + totalFailed + ' location' + (totalFailed === 1 ? '' : 's') + ' couldn’t be resolved';
-                if(googleFailureReason){
+                if(googleFailureReason === 'no_town_in_result'){
+                  // Not something Google reported as an error — Google DID
+                  // match the coordinate, it just had no town-level detail
+                  // to use, and no existing town was close enough to guess
+                  // from either. Phrased separately from the "Google said"
+                  // cases below so it doesn't read as a Google error.
+                  summary += ' — no usable town at that exact point, and nothing close enough nearby to guess from.';
+                } else if(googleFailureReason){
                   summary += ' — Google said: ' + googleFailureReason + (googleFailureMessage ? (' (' + googleFailureMessage + ')') : '') + '.';
                 } else {
                   summary += ' (often a sign the API key or billing needs checking).';
