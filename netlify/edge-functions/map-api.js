@@ -1074,7 +1074,20 @@ export default async (request, context) => {
         const noUsableTown = geo && ((geo.ok && !geo.town) || (!geo.ok && geo.reason === "ZERO_RESULTS"));
 
         if (geo && geo.ok && geo.town) {
-          const zone = provinceToZone(geo.province) || districtToZone(geo.town) || "";
+          // districtToZone(geo.town) checked FIRST, not provinceToZone(geo.province):
+          // Google's province for a Garden Route town (Knysna, George, Plettenberg
+          // Bay, Mossel Bay, Wilderness, Sedgefield, and the smaller places around
+          // them — e.g. Boggoms Bay, Buffels Bay, Brenton-on-Sea) is genuinely
+          // "Western Cape" (that's the real province), but this business's zone
+          // scheme deliberately splits Garden Route out into its own
+          // "Eastern Cape & Garden Route" zone regardless of province. Checking
+          // province first silently overrode that split for every Garden Route
+          // town, because provinceToZone("Western Cape") matches before
+          // districtToZone(geo.town) ever gets a chance to recognise the town by
+          // name via TOWN_ZONE_KEYWORDS (lib/zones.js). Town-name match is strictly
+          // more specific, so it wins when it hits; province is still the fallback
+          // for everywhere the keyword list doesn't cover.
+          const zone = districtToZone(geo.town) || provinceToZone(geo.province) || "";
           result = ensureTownAndSuburb(allTowns, existingIds, geo.town, zone, geo.suburb, lat, lng);
           if (result) {
             if (result.createdTown) addedTowns++;
