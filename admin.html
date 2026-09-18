@@ -5921,7 +5921,13 @@
           }
           geocodeStatusEl.textContent = 'Geocoding… (' + totalTagged + ' tagged so far)';
           geocodeStatusEl.className = 'status show';
-          mapAdminPost('geocodeLocations', { dryRun: false, limit: 40 }).then(function(res){
+          // Kept deliberately small (rather than the higher cap map-api.js
+          // allows) so one round-trip comfortably finishes inside the Edge
+          // Function's own time limit even under slow real-world Google
+          // response times — this run just makes more, faster round-trips
+          // instead of fewer, riskier ones. See lib/geocode.js for the
+          // matching per-lookup timeout.
+          mapAdminPost('geocodeLocations', { dryRun: false, limit: 12 }).then(function(res){
             if(!(res.data && res.data.ok)){
               startGeocodeBtn.disabled = false;
               checkGeocodeBtn.disabled = false;
@@ -5953,9 +5959,14 @@
               finish(summary);
             }
           }).catch(function(){
+            // Lands here when the response wasn't valid JSON — almost
+            // always a timed-out or crashed request rather than a real
+            // "can't geocode" error, and safe to just continue from: this
+            // batch's own coordinates are still untagged, so the next
+            // "Start geocoding" click picks up right where this left off.
             startGeocodeBtn.disabled = false;
             checkGeocodeBtn.disabled = false;
-            geocodeStatusEl.textContent = 'Could not geocode.';
+            geocodeStatusEl.textContent = 'Tagged ' + totalTagged + ' so far, then that request timed out or failed — click Start geocoding again to continue with what’s left.';
             geocodeStatusEl.className = 'status show';
           });
         }
