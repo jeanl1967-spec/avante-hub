@@ -981,7 +981,14 @@ export default async (request, context) => {
         return json({ ok: true, dryRun: true, totalRecords: targets.length, uniqueCoordinates: groups.size });
       }
 
-      const limit = Math.max(1, Math.min(parseInt(body.limit, 10) || 40, 100));
+      // Capped at 20 rather than the original 100: with concurrency 8 below,
+      // a batch this size still comfortably finishes inside the Edge
+      // Function's own time limit even under slow real-world Google
+      // response times. The admin UI's client loop asks for 12 at a time by
+      // default and just makes more round-trips instead of fewer, riskier
+      // ones — this cap is a backstop against a larger value ever being
+      // passed in, not the normal case.
+      const limit = Math.max(1, Math.min(parseInt(body.limit, 10) || 12, 20));
       const groupKeys = Array.from(groups.keys()).slice(0, limit);
       const remainingCoordinates = Math.max(0, groups.size - groupKeys.length);
 
