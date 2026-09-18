@@ -1163,7 +1163,36 @@
         <p>Manage what shows up as a pin on the affiliate hub's Explore Map — add local activities/experiences, and choose which listed properties appear.</p>
       </div>
 
+      <style>
+        .loc-tree-country{ font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); padding:2px 4px 8px; border-bottom:1px solid var(--line); margin-bottom:6px; }
+        .loc-tree-node{ border-radius:8px; }
+        .loc-tree-node > summary{ list-style:none; display:flex; align-items:center; gap:9px; padding:6px 4px; cursor:pointer; border-radius:6px; }
+        .loc-tree-node > summary::-webkit-details-marker{ display:none; }
+        .loc-tree-node > summary:hover{ background:var(--mint); }
+        .loc-tree-indent{ padding-left:22px; }
+        .loc-tree-flatrow{
+          display:flex; align-items:center; gap:9px; padding:6px 4px 6px 34px; border-radius:6px; cursor:pointer;
+          /* .loc-tree-flatrow is a <label> so its cascading checkbox click
+             target works, but the page's global label{} rule (uppercase,
+             bold, teal, margin — meant for form-field captions) leaks
+             through onto its text unless reset here. */
+          font-size:14px; font-weight:400; text-transform:none; letter-spacing:normal; color:var(--navy); margin:0;
+        }
+        .loc-tree-flatrow:hover{ background:var(--mint); }
+        .loc-tree-empty{ padding:6px 4px; color:var(--muted); font-size:13px; }
+        .loc-tree-label{ font-size:14px; }
+        .loc-tree-summary{ font-size:12.5px; color:var(--muted); margin-bottom:8px; }
+      </style>
+
       <div class="card">
+        <h3 style="margin-top:0;">Browse by location</h3>
+        <p style="margin-top:0;">Tick a region, town, or suburb to narrow the master map below to just that area — cascades down (ticking a region ticks everything under it) the same way the affiliate allocation picker does. Leave nothing ticked to see everything.</p>
+        <div class="loc-tree-country">South Africa</div>
+        <div class="loc-tree-summary" id="mapLocTreeSummary"></div>
+        <div id="mapLocationTree"></div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
         <h3 style="margin-top:0;">Master map</h3>
         <p style="margin-top:0;">Every property and activity, including hidden ones (shown dimmed). Click a pin to show/hide it on the affiliate-facing map.</p>
         <div class="status" id="missingCoordsSummary" style="margin-top:0;"></div>
@@ -1348,6 +1377,16 @@
           <button class="btn-outline" id="discoverLocationsBtn">Discover &amp; add new locations</button>
         </div>
         <div class="status" id="discoverLocationsStatus"></div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h3 style="margin-top:0;">Geocode locations from coordinates</h3>
+        <p style="margin-top:0;">Automatically places every property, StockNetwork resort-list row, and activity that has a latitude/longitude but no location tag yet, using Google's Geocoding API &mdash; no manual entry needed. Never touches anything already tagged, whether that was set by hand or by an earlier run of this.</p>
+        <div class="btn-row" style="margin-top:0;">
+          <button class="btn-outline" id="checkGeocodeBtn">Check how many need geocoding</button>
+          <button class="primary" id="startGeocodeBtn">Start geocoding</button>
+        </div>
+        <div class="status" id="geocodeStatus"></div>
       </div>
 
       <div class="card" style="margin-top:20px;">
@@ -2458,6 +2497,191 @@
     function lookupTownZone(townId){
       var t = _locationTreeTowns.filter(function(t){ return t.id === townId; })[0];
       return (t && t.zone) || '';
+    }
+
+    // Cascading multi-select browse tree — the checkbox drill-down used on
+    // the Map & Activities master map (and, on the same pattern, the Hub's
+    // Explore Map). Distinct from the single-select <select> pickers above:
+    // this narrows *what's shown* rather than tagging one location onto one
+    // record, so it needs its own checkbox-tree renderer instead of an
+    // <option> list. Kept top-level for the same cross-IIFE reason as the
+    // rest of this block. `towns` is the same {id,name,zone,suburbs:[...]}
+    // shape _locationTreeTowns already uses.
+    function createLocationBrowseTree(containerEl, towns){
+      var checkedLeaves = new Set(); // 'suburb:<townId>:<suburbId>' or 'town:<townId>' (towns with no suburbs)
+      var listeners = [];
+
+      function townLeafKeys(town){
+        var subs = town.suburbs || [];
+        if(!subs.length) return ['town:' + town.id];
+        return subs.map(function(s){ return 'suburb:' + town.id + ':' + s.id; });
+      }
+      function isTownChecked(town){
+        var keys = townLeafKeys(town);
+        return keys.every(function(k){ return checkedLeaves.has(k); });
+      }
+      function isTownIndeterminate(town){
+        var keys = townLeafKeys(town);
+        if(keys.length < 2) return false;
+        var n = keys.filter(function(k){ return checkedLeaves.has(k); }).length;
+        return n > 0 && n < keys.length;
+      }
+      function regionTowns(zone){
+        return towns.filter(function(t){ return (t.zone || '') === zone; });
+      }
+      function isRegionChecked(zone){
+        var rt = regionTowns(zone);
+        return rt.length > 0 && rt.every(isTownChecked);
+      }
+      function isRegionIndeterminate(zone){
+        var rt = regionTowns(zone);
+        if(!rt.length) return false;
+        var anyOn = rt.some(function(t){ return isTownChecked(t) || isTownIndeterminate(t); });
+        return anyOn && !isRegionChecked(zone);
+      }
+      function toggleKeys(keys, forceState){
+        var allOn = keys.every(function(k){ return checkedLeaves.has(k); });
+        var turnOn = forceState !== undefined ? forceState : !allOn;
+        keys.forEach(function(k){ turnOn ? checkedLeaves.add(k) : checkedLeaves.delete(k); });
+      }
+      function toggleTown(town){ toggleKeys(townLeafKeys(town)); }
+      function toggleRegion(zone){
+        var keys = [];
+        regionTowns(zone).forEach(function(t){ keys = keys.concat(townLeafKeys(t)); });
+        toggleKeys(keys);
+      }
+      function toggleSuburb(town, sub){ toggleKeys(['suburb:' + town.id + ':' + sub.id]); }
+
+      function fire(){ listeners.forEach(function(fn){ fn(); }); }
+
+      function render(){
+        var openZones = Array.prototype.map.call(containerEl.querySelectorAll('details.loc-tree-node[data-zone][open]'), function(d){ return d.dataset.zone; });
+        var openTowns = Array.prototype.map.call(containerEl.querySelectorAll('details.loc-tree-node[data-town][open]'), function(d){ return d.dataset.town; });
+        containerEl.innerHTML = '';
+
+        AFF_ZONE_ORDER.forEach(function(zone){
+          var zoneTowns = regionTowns(zone).slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
+          if(!zoneTowns.length){
+            var empty = document.createElement('div');
+            empty.className = 'loc-tree-empty';
+            empty.textContent = zone + ' — no locations yet';
+            containerEl.appendChild(empty);
+            return;
+          }
+
+          var det = document.createElement('details');
+          det.className = 'loc-tree-node';
+          det.dataset.zone = zone;
+          if(openZones.indexOf(zone) !== -1) det.open = true;
+
+          var summary = document.createElement('summary');
+          var cb = document.createElement('input');
+          cb.type = 'checkbox';
+          // The page's global `input{ width:100% }` rule (meant for text
+          // fields) also hits checkboxes — width:auto overrides it, same
+          // fix already used elsewhere in this file (e.g. #missingSiteNrFilterToggle).
+          cb.style.cssText = 'width:auto; flex:none;';
+          cb.checked = isRegionChecked(zone);
+          cb.indeterminate = isRegionIndeterminate(zone);
+          cb.addEventListener('click', function(e){ e.stopPropagation(); toggleRegion(zone); render(); fire(); });
+          var label = document.createElement('span');
+          label.className = 'loc-tree-label';
+          label.textContent = zone;
+          summary.appendChild(cb);
+          summary.appendChild(label);
+          det.appendChild(summary);
+
+          var body = document.createElement('div');
+          body.className = 'loc-tree-indent';
+
+          zoneTowns.forEach(function(town){
+            var subs = (town.suburbs || []).slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
+            if(!subs.length){
+              var trow = document.createElement('label');
+              trow.className = 'loc-tree-flatrow';
+              var tcb = document.createElement('input');
+              tcb.type = 'checkbox';
+              tcb.style.cssText = 'width:auto; flex:none;';
+              tcb.checked = isTownChecked(town);
+              tcb.addEventListener('change', function(){ toggleTown(town); render(); fire(); });
+              var tlabel = document.createElement('span');
+              tlabel.textContent = town.name;
+              trow.appendChild(tcb);
+              trow.appendChild(tlabel);
+              body.appendChild(trow);
+              return;
+            }
+
+            var tdet = document.createElement('details');
+            tdet.className = 'loc-tree-node';
+            tdet.dataset.town = town.id;
+            if(openTowns.indexOf(town.id) !== -1) tdet.open = true;
+
+            var tsum = document.createElement('summary');
+            var tcb2 = document.createElement('input');
+            tcb2.type = 'checkbox';
+            tcb2.style.cssText = 'width:auto; flex:none;';
+            tcb2.checked = isTownChecked(town);
+            tcb2.indeterminate = isTownIndeterminate(town);
+            tcb2.addEventListener('click', function(e){ e.stopPropagation(); toggleTown(town); render(); fire(); });
+            var tlabel2 = document.createElement('span');
+            tlabel2.className = 'loc-tree-label';
+            tlabel2.textContent = town.name;
+            tsum.appendChild(tcb2);
+            tsum.appendChild(tlabel2);
+            tdet.appendChild(tsum);
+
+            var tbody = document.createElement('div');
+            tbody.className = 'loc-tree-indent';
+            subs.forEach(function(sub){
+              var srow = document.createElement('label');
+              srow.className = 'loc-tree-flatrow';
+              var scb = document.createElement('input');
+              scb.type = 'checkbox';
+              scb.style.cssText = 'width:auto; flex:none;';
+              scb.checked = checkedLeaves.has('suburb:' + town.id + ':' + sub.id);
+              scb.addEventListener('change', function(){ toggleSuburb(town, sub); render(); fire(); });
+              var slabel = document.createElement('span');
+              slabel.textContent = sub.name;
+              srow.appendChild(scb);
+              srow.appendChild(slabel);
+              tbody.appendChild(srow);
+            });
+            tdet.appendChild(tbody);
+            body.appendChild(tdet);
+          });
+
+          det.appendChild(body);
+          containerEl.appendChild(det);
+        });
+      }
+
+      // Whether a property/activity/town pin — {zone, townId, suburbId} —
+      // falls inside the current selection. Nothing ticked anywhere means
+      // no filter is applied (matches the master map's existing default of
+      // showing everything), same as "All zones" used to.
+      function matches(item){
+        if(checkedLeaves.size === 0) return true;
+        if(item.townId && item.suburbId){
+          return checkedLeaves.has('suburb:' + item.townId + ':' + item.suburbId);
+        }
+        if(item.townId){
+          var town = towns.filter(function(t){ return t.id === item.townId; })[0];
+          return town ? isTownChecked(town) : false;
+        }
+        if(item.zone){
+          return isRegionChecked(item.zone);
+        }
+        return false;
+      }
+
+      render();
+      return {
+        onChange: function(fn){ listeners.push(fn); },
+        matches: matches,
+        selectionCount: function(){ return checkedLeaves.size; },
+        setTowns: function(newTowns){ towns = newTowns || []; render(); }
+      };
     }
 
     function populateAffTownCheckboxes(existingAffId){
@@ -5648,6 +5872,96 @@
         });
       });
 
+      var checkGeocodeBtn = document.getElementById('checkGeocodeBtn');
+      var startGeocodeBtn = document.getElementById('startGeocodeBtn');
+      var geocodeStatusEl = document.getElementById('geocodeStatus');
+
+      checkGeocodeBtn.addEventListener('click', function(){
+        checkGeocodeBtn.disabled = true;
+        geocodeStatusEl.textContent = 'Checking…';
+        geocodeStatusEl.className = 'status show';
+        mapAdminPost('geocodeLocations', { dryRun: true }).then(function(res){
+          checkGeocodeBtn.disabled = false;
+          if(res.data && res.data.ok){
+            geocodeStatusEl.textContent = res.data.totalRecords === 0
+              ? 'Nothing to geocode — every property, resort and activity with coordinates is already tagged.'
+              : (res.data.totalRecords + ' record' + (res.data.totalRecords === 1 ? '' : 's') + ' need geocoding, across ' +
+                 res.data.uniqueCoordinates + ' distinct coordinate' + (res.data.uniqueCoordinates === 1 ? '' : 's') +
+                 ' — several records at the same address only ever cost one Google lookup between them. Google gives 10,000 free geocoding requests a month, so this is likely free unless you’ve already used a lot of that allowance this month.');
+          } else {
+            geocodeStatusEl.textContent = (res.data && res.data.error) || 'Could not check.';
+          }
+          geocodeStatusEl.className = 'status show';
+        }).catch(function(){
+          checkGeocodeBtn.disabled = false;
+          geocodeStatusEl.textContent = 'Could not check.';
+          geocodeStatusEl.className = 'status show';
+        });
+      });
+
+      startGeocodeBtn.addEventListener('click', function(){
+        startGeocodeBtn.disabled = true;
+        checkGeocodeBtn.disabled = true;
+        var totalTagged = 0, totalTowns = 0, totalSuburbs = 0, totalFailed = 0, iterations = 0;
+        var MAX_ITERATIONS = 30;
+
+        function finish(summary){
+          startGeocodeBtn.disabled = false;
+          checkGeocodeBtn.disabled = false;
+          geocodeStatusEl.textContent = summary;
+          geocodeStatusEl.className = 'status show';
+          loadActivities();
+        }
+
+        function runBatch(){
+          iterations++;
+          if(iterations > MAX_ITERATIONS){
+            finish('Stopped after a large batch (tagged ' + totalTagged + ' so far) — click Start geocoding again to continue with what’s left.');
+            return;
+          }
+          geocodeStatusEl.textContent = 'Geocoding… (' + totalTagged + ' tagged so far)';
+          geocodeStatusEl.className = 'status show';
+          mapAdminPost('geocodeLocations', { dryRun: false, limit: 40 }).then(function(res){
+            if(!(res.data && res.data.ok)){
+              startGeocodeBtn.disabled = false;
+              checkGeocodeBtn.disabled = false;
+              geocodeStatusEl.textContent = (res.data && res.data.error) || 'Could not geocode.';
+              geocodeStatusEl.className = 'status show';
+              return;
+            }
+            var batchTagged = res.data.taggedRecords || 0;
+            var batchFailed = res.data.geocodeFailures || 0;
+            var batchProcessed = res.data.processedCoordinates || 0;
+            totalTagged += batchTagged;
+            totalTowns += res.data.addedTowns || 0;
+            totalSuburbs += res.data.addedSuburbs || 0;
+            totalFailed += batchFailed;
+
+            // Every coordinate attempted this round failed outright (e.g. a
+            // bad API key or billing not enabled) — stop instead of retrying
+            // the same failures forever.
+            var noProgress = batchTagged === 0 && batchProcessed > 0 && batchFailed >= batchProcessed;
+
+            if(res.data.remainingCoordinates > 0 && !noProgress){
+              runBatch();
+            } else {
+              var summary = 'Done — tagged ' + totalTagged + ' record' + (totalTagged === 1 ? '' : 's') +
+                ', added ' + totalTowns + ' new town' + (totalTowns === 1 ? '' : 's') + ' and ' + totalSuburbs + ' new suburb' + (totalSuburbs === 1 ? '' : 's') + '.';
+              if(totalFailed){
+                summary += ' ' + totalFailed + ' location' + (totalFailed === 1 ? '' : 's') + ' couldn’t be resolved (often a sign the API key or billing needs checking) — run this again to retry them.';
+              }
+              finish(summary);
+            }
+          }).catch(function(){
+            startGeocodeBtn.disabled = false;
+            checkGeocodeBtn.disabled = false;
+            geocodeStatusEl.textContent = 'Could not geocode.';
+            geocodeStatusEl.className = 'status show';
+          });
+        }
+        runBatch();
+      });
+
       var importTownsBtn = document.getElementById('importTownsBtn');
       var importTownsFileInput = document.getElementById('importTownsFileInput');
       var importTownsStatusEl = document.getElementById('importTownsStatus');
@@ -6125,6 +6439,33 @@
         });
       }
 
+      var mapLocTree = null;
+      var lastMapProperties = [];
+      var lastMapActivities = [];
+      var lastMapTowns = [];
+
+      function updateMapLocTreeSummary(){
+        var el = document.getElementById('mapLocTreeSummary');
+        if(!el || !mapLocTree) return;
+        var n = mapLocTree.selectionCount();
+        el.textContent = n === 0 ? 'Showing everything \u2014 nothing ticked yet.' : (n + ' location' + (n === 1 ? '' : 's') + ' selected.');
+      }
+
+      // Filters the cached properties/activities/towns down to whatever the
+      // browse tree currently has ticked, then re-renders the master map
+      // from that \u2014 no network round trip needed on every checkbox click.
+      function applyMapLocationFilter(){
+        updateMapLocTreeSummary();
+        if(!mapLocTree){
+          renderAdminMap(lastMapProperties, lastMapActivities, lastMapTowns);
+          return;
+        }
+        var properties = lastMapProperties.filter(function(p){ return mapLocTree.matches(p); });
+        var activities = lastMapActivities.filter(function(a){ return mapLocTree.matches(a); });
+        var towns = lastMapTowns.filter(function(t){ return mapLocTree.matches({ zone: t.zone, townId: t.id, suburbId: '' }); });
+        renderAdminMap(properties, activities, towns);
+      }
+
       function loadActivities(){
         actStatusEl.textContent = 'Loading\u2026';
         actStatusEl.className = 'status show';
@@ -6136,7 +6477,21 @@
             renderActivitiesTable(res.data.activities || []);
             renderMapPropertiesTable(onboardedProps);
             renderTownsTable(res.data.towns || []);
-            renderAdminMap(res.data.properties || [], res.data.activities || [], res.data.towns || []);
+
+            lastMapProperties = res.data.properties || [];
+            lastMapActivities = res.data.activities || [];
+            lastMapTowns = res.data.towns || [];
+            var treeEl = document.getElementById('mapLocationTree');
+            if(treeEl){
+              if(!mapLocTree){
+                mapLocTree = createLocationBrowseTree(treeEl, lastMapTowns);
+                mapLocTree.onChange(applyMapLocationFilter);
+              } else {
+                mapLocTree.setTowns(lastMapTowns);
+              }
+            }
+            applyMapLocationFilter();
+
             renderMissingCoordsTable(res.data.missingCoordinates || []);
             renderMissingCoordsSummary(res.data.missingCoordinates || [], res.data.activities || []);
             renderResortListStatus(res.data.resortStats || null);
