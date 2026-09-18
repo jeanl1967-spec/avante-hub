@@ -5904,7 +5904,7 @@
         checkGeocodeBtn.disabled = true;
         var totalTagged = 0, totalTowns = 0, totalSuburbs = 0, totalFailed = 0, iterations = 0;
         var MAX_ITERATIONS = 30;
-        var googleFailureReason = '', googleFailureMessage = '';
+        var googleFailureReason = '', googleFailureMessage = '', exampleFailedCoordinates = [];
 
         function finish(summary){
           startGeocodeBtn.disabled = false;
@@ -5947,6 +5947,11 @@
               googleFailureReason = res.data.googleFailureReason;
               googleFailureMessage = res.data.googleFailureMessage || '';
             }
+            if(exampleFailedCoordinates.length < 5 && Array.isArray(res.data.exampleFailedCoordinates)){
+              res.data.exampleFailedCoordinates.forEach(function(c){
+                if(exampleFailedCoordinates.length < 5) exampleFailedCoordinates.push(c);
+              });
+            }
 
             // Every coordinate attempted this round failed outright (e.g. a
             // bad API key or billing not enabled) — stop instead of retrying
@@ -5961,9 +5966,12 @@
               if(totalFailed){
                 summary += ' ' + totalFailed + ' location' + (totalFailed === 1 ? '' : 's') + ' couldn’t be resolved';
                 if(googleFailureReason){
-                  summary += ' — Google said: ' + googleFailureReason + (googleFailureMessage ? (' (' + googleFailureMessage + ')') : '');
+                  summary += ' — Google said: ' + googleFailureReason + (googleFailureMessage ? (' (' + googleFailureMessage + ')') : '') + '.';
                 } else {
-                  summary += ' (often a sign the API key or billing needs checking)';
+                  summary += ' (often a sign the API key or billing needs checking).';
+                }
+                if(exampleFailedCoordinates.length){
+                  summary += ' Example coordinates that failed: ' + exampleFailedCoordinates.join('; ') + '.';
                 }
                 summary += ' — run this again to retry them.';
               }
