@@ -5902,7 +5902,7 @@
       startGeocodeBtn.addEventListener('click', function(){
         startGeocodeBtn.disabled = true;
         checkGeocodeBtn.disabled = true;
-        var totalTagged = 0, totalTowns = 0, totalSuburbs = 0, totalFailed = 0, iterations = 0;
+        var totalTagged = 0, totalFallback = 0, totalTowns = 0, totalSuburbs = 0, totalFailed = 0, iterations = 0;
         var MAX_ITERATIONS = 30;
         var googleFailureReason = '', googleFailureMessage = '', exampleFailedCoordinates = [];
 
@@ -5940,6 +5940,7 @@
             var batchFailed = res.data.geocodeFailures || 0;
             var batchProcessed = res.data.processedCoordinates || 0;
             totalTagged += batchTagged;
+            totalFallback += res.data.fallbackTagged || 0;
             totalTowns += res.data.addedTowns || 0;
             totalSuburbs += res.data.addedSuburbs || 0;
             totalFailed += batchFailed;
@@ -5961,8 +5962,16 @@
             if(res.data.remainingCoordinates > 0 && !noProgress){
               runBatch();
             } else {
-              var summary = 'Done — tagged ' + totalTagged + ' record' + (totalTagged === 1 ? '' : 's') +
-                ', added ' + totalTowns + ' new town' + (totalTowns === 1 ? '' : 's') + ' and ' + totalSuburbs + ' new suburb' + (totalSuburbs === 1 ? '' : 's') + '.';
+              var totalPrecise = totalTagged - totalFallback;
+              var summary = 'Done — tagged ' + totalTagged + ' record' + (totalTagged === 1 ? '' : 's');
+              if(totalFallback){
+                // Some records couldn't be matched to an exact address (e.g.
+                // remote lodges/farms) and were instead placed in their
+                // nearest existing town, with no suburb — see totalPrecise
+                // vs totalFallback below for the breakdown.
+                summary += ' (' + totalPrecise + ' precisely, ' + totalFallback + ' to their nearest existing town, no suburb)';
+              }
+              summary += ', added ' + totalTowns + ' new town' + (totalTowns === 1 ? '' : 's') + ' and ' + totalSuburbs + ' new suburb' + (totalSuburbs === 1 ? '' : 's') + '.';
               if(totalFailed){
                 summary += ' ' + totalFailed + ' location' + (totalFailed === 1 ? '' : 's') + ' couldn’t be resolved';
                 if(googleFailureReason){
