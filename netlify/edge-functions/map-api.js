@@ -1,5 +1,6 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { ZONES, provinceToZone, districtToZone } from "./lib/zones.js";
+import { reverseGeocode } from "./lib/geocode.js";
 
 // Backs the new "Map & Activities" admin tab and the new "Explore Map" hub
 // tab. Two data sources feed one shared response:
@@ -294,7 +295,15 @@ function toPropertyPin(record, hidden) {
     area: record.area || record.district || "",
     city: record.city || "",
     country: record.country || "",
-    zone: provinceToZone(record.stateProvince),
+    // Prefer a location explicitly tagged on the listing (set by an admin
+    // via the Property Listings review picker, or auto-filled by the
+    // geocodeLocations action below) over the live province guess, so a
+    // property once tagged shows up correctly in the location tree filter
+    // instead of only ever being findable by its loose province match.
+    zone: record.zone || provinceToZone(record.stateProvince),
+    townId: record.townId || "",
+    suburbId: record.suburbId || "",
+    locationLabel: record.locationLabel || "",
     description: (record.description || "").slice(0, 400),
     latitude: lat,
     longitude: lng,
@@ -337,7 +346,14 @@ function toResortPin(record, hidden) {
     area: record.suburb || record.district || "",
     city: "",
     country: "South Africa",
-    zone: provinceToZone(record.zoneHint) || districtToZone(record.district),
+    // Same preference order as toPropertyPin above: a location the
+    // geocodeLocations action already resolved for this exact resort row
+    // wins over the CSV-column guess, since it's tied to the property's
+    // real coordinates rather than a district-name keyword match.
+    zone: record.zone || provinceToZone(record.zoneHint) || districtToZone(record.district),
+    townId: record.townId || "",
+    suburbId: record.suburbId || "",
+    locationLabel: record.locationLabel || "",
     description: "",
     latitude: lat,
     longitude: lng,
@@ -609,6 +625,69 @@ async function discoverLocationTree({ listingsStore, resortListStore, activities
   return result;
 }
 
+// Finds (or creates) the Town / Suburb a geocoded coordinate resolves to,
+// following the exact same "never overwrite what's already set" rule as
+// discoverLocations' apply step above — matched by name (case-insensitive)
+// rather than creating a duplicate, and a blank zone/coordinate is filled
+// in but a value an admin (or an earlier run) already set never is.
+// Mutates `allTowns` in place and returns the ids to tag onto whichever
+// property/activity/resort row this coordinate came from.
+function ensureTownAndSuburb(allTowns, existingIds, townName, zoneName, suburbName, lat, lng) {
+  const cleanTown = clean(townName, 120);
+  if (!cleanTown) return null;
+  const zone = ZONES.includes(zoneName) ? zoneName : "";
+
+  let town = allTowns.find((t) => (t.name || "").toLowerCase() === cleanTown.toLowerCase());
+  let createdTown = false;
+  if (!town) {
+    town = {
+      id: genTownUniqueId(existingIds),
+      name: cleanTown,
+      area: "",
+      zone: zone,
+      affId: "",
+      description: "",
+      latitude: lat != null ? String(lat) : "",
+      longitude: lng != null ? String(lng) : "",
+      visible: true,
+      suburbs: [],
+      createdAt: new Date().toISOString(),
+    };
+    town.updatedAt = town.createdAt;
+    existingIds.add(town.id);
+    allTowns.push(town);
+    createdTown = true;
+  } else {
+    if (!town.zone && zone) town.zone = zone;
+    if (!town.latitude && lat != null) town.latitude = String(lat);
+    if (!town.longitude && lng != null) town.longitude = String(lng);
+  }
+  if (!Array.isArray(town.suburbs)) town.suburbs = [];
+
+  const cleanSuburb = clean(suburbName, 120);
+  let suburbId = "";
+  let createdSuburb = false;
+  if (cleanSuburb && cleanSuburb.toLowerCase() !== cleanTown.toLowerCase()) {
+    let suburb = town.suburbs.find((s) => (s.name || "").toLowerCase() === cleanSuburb.toLowerCase());
+    if (!suburb) {
+      suburb = {
+        id: genSuburbUniqueId(allSuburbIds(allTowns)),
+        name: cleanSuburb,
+        affId: "",
+        latitude: lat != null ? String(lat) : "",
+        longitude: lng != null ? String(lng) : "",
+        visible: true,
+      };
+      town.suburbs.push(suburb);
+      createdSuburb = true;
+    }
+    suburbId = suburb.id;
+  }
+
+  const locationLabel = suburbId ? (cleanSuburb + ", " + cleanTown) : cleanTown;
+  return { zone: town.zone || zone, townId: town.id, suburbId, locationLabel, createdTown, createdSuburb };
+}
+
 export default async (request, context) => {
   const cors = {
     "access-control-allow-origin": "*",
@@ -839,6 +918,148 @@ export default async (request, context) => {
       }
 
       return json({ ok: true, applied: false, tree, newTowns, newSuburbs });
+    }
+
+    if (action === "geocodeLocations") {
+      // Builds the location tree straight from coordinates instead of
+      // relying on district/city text columns — reverse-geocodes every
+      // property, resort-list row, and activity that has a lat/long but no
+      // location tag yet (checked via locationLabel, so a manually-picked
+      // "whole zone" tag — which leaves townId/suburbId blank on purpose —
+      // is never mistaken for "untagged" and re-geocoded over the top of).
+      //
+      // dryRun:true costs nothing and no Google calls are made — it just
+      // reports how many records and how many distinct coordinates (several
+      // records at the same address only ever cost one lookup between
+      // them) would be geocoded, so the admin can see the real number
+      // before spending anything.
+      //
+      // Without dryRun, processes up to `limit` distinct coordinates (default
+      // 40) per call and reports how many are left — the admin UI calls this
+      // repeatedly until remainingCoordinates is 0, so one run never risks
+      // timing out the function on a large batch.
+      const apiKey = Deno.env.get("GOOGLE_GEOCODING_API_KEY") || "";
+      if (!apiKey) {
+        return json({ error: "GOOGLE_GEOCODING_API_KEY isn't set in this site's environment variables yet." }, 400);
+      }
+
+      const { blobs: listingBlobs } = await listingsStore.list();
+      const listings = await mapWithConcurrency(listingBlobs, 25, (b) => listingsStore.get(b.key, { type: "json" }));
+      const resortRecord = await resortListStore.get("current", { type: "json" });
+      const resortList = (resortRecord && Array.isArray(resortRecord.resorts)) ? resortRecord.resorts : [];
+      const activities = await loadActivities(activitiesStore);
+
+      function usable(r) {
+        const lat = parseFloat(r.latitude);
+        const lng = parseFloat(r.longitude);
+        return isFinite(lat) && isFinite(lng) && !r.locationLabel;
+      }
+
+      const targets = [];
+      listings.forEach((r) => {
+        if (r && r.status === "Listed" && usable(r)) {
+          targets.push({ source: "listing", key: r.listingId, lat: parseFloat(r.latitude), lng: parseFloat(r.longitude) });
+        }
+      });
+      resortList.forEach((r, i) => {
+        if (usable(r)) targets.push({ source: "resort", key: i, lat: parseFloat(r.latitude), lng: parseFloat(r.longitude) });
+      });
+      activities.forEach((r) => {
+        if (r && usable(r)) targets.push({ source: "activity", key: r.id, lat: parseFloat(r.latitude), lng: parseFloat(r.longitude) });
+      });
+
+      // Round to 4 decimal places (~11m) so records sharing — or nearly
+      // sharing — a coordinate only ever cost one Google lookup between them.
+      const groups = new Map();
+      targets.forEach((t) => {
+        const k = t.lat.toFixed(4) + "," + t.lng.toFixed(4);
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(t);
+      });
+
+      if (body.dryRun) {
+        return json({ ok: true, dryRun: true, totalRecords: targets.length, uniqueCoordinates: groups.size });
+      }
+
+      const limit = Math.max(1, Math.min(parseInt(body.limit, 10) || 40, 100));
+      const groupKeys = Array.from(groups.keys()).slice(0, limit);
+      const remainingCoordinates = Math.max(0, groups.size - groupKeys.length);
+
+      const allTowns = await loadTowns(townsStore);
+      const existingIds = new Set(allTowns.map((t) => t.id));
+
+      let addedTowns = 0, addedSuburbs = 0, taggedRecords = 0, geocodeFailures = 0;
+      let resortListChanged = false;
+      let activitiesChanged = false;
+      const listingUpdates = [];
+
+      await mapWithConcurrency(groupKeys, 8, async (key) => {
+        const parts = key.split(",");
+        const lat = parseFloat(parts[0]);
+        const lng = parseFloat(parts[1]);
+        const geo = await reverseGeocode(lat, lng, apiKey);
+        if (!geo || !geo.town) { geocodeFailures++; return; }
+
+        const zone = provinceToZone(geo.province) || districtToZone(geo.town) || "";
+        const result = ensureTownAndSuburb(allTowns, existingIds, geo.town, zone, geo.suburb, lat, lng);
+        if (!result) { geocodeFailures++; return; }
+        if (result.createdTown) addedTowns++;
+        if (result.createdSuburb) addedSuburbs++;
+
+        (groups.get(key) || []).forEach((t) => {
+          taggedRecords++;
+          if (t.source === "listing") {
+            const rec = listings.find((r) => r.listingId === t.key);
+            if (rec) {
+              rec.zone = result.zone;
+              rec.townId = result.townId;
+              rec.suburbId = result.suburbId;
+              rec.locationLabel = result.locationLabel;
+              listingUpdates.push(rec);
+            }
+          } else if (t.source === "resort") {
+            const rec = resortList[t.key];
+            if (rec) {
+              rec.zone = result.zone;
+              rec.townId = result.townId;
+              rec.suburbId = result.suburbId;
+              rec.locationLabel = result.locationLabel;
+              resortListChanged = true;
+            }
+          } else if (t.source === "activity") {
+            const rec = activities.find((r) => r.id === t.key);
+            if (rec) {
+              rec.zone = result.zone;
+              rec.townId = result.townId;
+              rec.suburbId = result.suburbId;
+              rec.locationLabel = result.locationLabel;
+              activitiesChanged = true;
+            }
+          }
+        });
+      });
+
+      await saveTowns(townsStore, allTowns);
+      if (listingUpdates.length) {
+        await mapWithConcurrency(listingUpdates, 10, (rec) => listingsStore.setJSON(rec.listingId, rec));
+      }
+      if (resortListChanged) {
+        await resortListStore.setJSON("current", Object.assign({}, resortRecord, { resorts: resortList }));
+      }
+      if (activitiesChanged) {
+        await saveActivities(activitiesStore, activities);
+      }
+
+      return json({
+        ok: true,
+        dryRun: false,
+        processedCoordinates: groupKeys.length,
+        remainingCoordinates,
+        taggedRecords,
+        addedTowns,
+        addedSuburbs,
+        geocodeFailures,
+      });
     }
 
     if (action === "importPropertyCoordinatesCsv") {
