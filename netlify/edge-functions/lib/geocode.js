@@ -8,11 +8,18 @@
 // administrative hierarchy in its own address_components, so there's no
 // need to merge across entries.
 //
-// Returns null on any failure (bad key, zero results, network error, rate
-// limit, or a slow response — see the timeout below) rather than throwing —
-// callers treat a null the same as "couldn't geocode this one, leave it for
-// a retry" and move on to the rest of the batch instead of failing the
-// whole request.
+// Returns { ok: true, country, province, town, suburb } on success, or
+// { ok: false, reason, message } on any failure — bad key, zero results,
+// network error, rate limit, or a slow response (see the timeout below).
+// `reason` is Google's own status string (e.g. "REQUEST_DENIED",
+// "OVER_QUERY_LIMIT", "ZERO_RESULTS") when Google actually responded, or
+// "network"/"timeout"/"bad_response" when it didn't. Callers move on to the
+// rest of the batch on any failure rather than stopping — but they also
+// surface `reason`/`message` back to the admin UI, because "every single
+// coordinate failed" almost always means a Google Cloud setup problem (API
+// not enabled, billing not enabled, or an API-key restriction blocking
+// server-side calls) rather than anything wrong with the coordinates
+// themselves, and that's undiagnosable from a silent null.
 //
 // A per-call timeout matters here specifically because this runs inside a
 // batch of concurrent lookups on a Netlify Edge Function, which has its own
@@ -23,7 +30,7 @@
 const FETCH_TIMEOUT_MS = 8000;
 
 export async function reverseGeocode(lat, lng, apiKey) {
-  if (!apiKey) return null;
+  if (!apiKey) return { ok: false, reason: "no_api_key", message: "" };
   const url =
     "https://maps.googleapis.com/maps/api/geocode/json?latlng=" +
     encodeURIComponent(lat) + "," + encodeURIComponent(lng) +
@@ -39,18 +46,23 @@ export async function reverseGeocode(lat, lng, apiKey) {
       clearTimeout(timer);
     }
   } catch (e) {
-    return null;
+    const timedOut = e && (e.name === "AbortError");
+    return { ok: false, reason: timedOut ? "timeout" : "network", message: String((e && e.message) || e) };
   }
-  if (!res.ok) return null;
+  if (!res.ok) return { ok: false, reason: "bad_response", message: "HTTP " + res.status };
 
   let data;
   try {
     data = await res.json();
   } catch (e) {
-    return null;
+    return { ok: false, reason: "bad_response", message: "Response wasn't valid JSON" };
   }
   if (!data || data.status !== "OK" || !Array.isArray(data.results) || !data.results.length) {
-    return null;
+    return {
+      ok: false,
+      reason: (data && data.status) || "unknown",
+      message: (data && data.error_message) || "",
+    };
   }
 
   const comps = data.results[0].address_components || [];
@@ -63,6 +75,7 @@ export async function reverseGeocode(lat, lng, apiKey) {
   }
 
   return {
+    ok: true,
     country: find("country"),
     province: find("administrative_area_level_1"),
     town: find("locality", "postal_town", "administrative_area_level_2"),
