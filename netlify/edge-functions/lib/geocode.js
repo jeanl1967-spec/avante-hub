@@ -9,9 +9,19 @@
 // need to merge across entries.
 //
 // Returns null on any failure (bad key, zero results, network error, rate
-// limit) rather than throwing — callers treat a null the same as "couldn't
-// geocode this one, leave it for a retry" and move on to the rest of the
-// batch instead of failing the whole request.
+// limit, or a slow response — see the timeout below) rather than throwing —
+// callers treat a null the same as "couldn't geocode this one, leave it for
+// a retry" and move on to the rest of the batch instead of failing the
+// whole request.
+//
+// A per-call timeout matters here specifically because this runs inside a
+// batch of concurrent lookups on a Netlify Edge Function, which has its own
+// execution time limit. Without it, one slow or hung Google response could
+// stall its whole batch until the *function itself* got killed — producing
+// a non-JSON error response that the admin UI can't parse, which is what
+// caused the generic "Could not geocode." message instead of a real error.
+const FETCH_TIMEOUT_MS = 8000;
+
 export async function reverseGeocode(lat, lng, apiKey) {
   if (!apiKey) return null;
   const url =
@@ -21,7 +31,13 @@ export async function reverseGeocode(lat, lng, apiKey) {
 
   let res;
   try {
-    res = await fetch(url);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      res = await fetch(url, { signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
   } catch (e) {
     return null;
   }
