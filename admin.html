@@ -1420,6 +1420,15 @@
           <button class="primary" id="startGeocodeBtn">Start geocoding</button>
         </div>
         <div class="status" id="geocodeStatus"></div>
+
+        <div style="margin-top:18px; padding-top:16px; border-top:1.5px solid var(--line);">
+          <h4 style="margin:0 0 6px; font-size:13.5px;">Re-check zones on everything already tagged</h4>
+          <p style="margin:0 0 12px; font-size:13px; color:var(--muted);">Re-sends every coordinate through Google again &mdash; including records already tagged &mdash; and corrects the zone wherever it comes back different (this is what fixed Garden Route towns like Knysna/Plettenberg Bay being tagged "Western Cape"; see the town-zone colours on the Master map below to check what's still wrong). Costs a fresh Google lookup for every coordinate, and can overwrite a zone you corrected by hand if Google or the keyword match disagrees with it &mdash; use this as a one-off cleanup, not routinely.</p>
+          <div class="btn-row" style="margin-top:0;">
+            <button class="btn-outline" id="recheckZonesBtn">Re-check all zones</button>
+          </div>
+          <div class="status" id="recheckZonesStatus"></div>
+        </div>
       </div>
 
       <div class="card" style="margin-top:20px;">
@@ -6018,17 +6027,34 @@
         });
       });
 
-      startGeocodeBtn.addEventListener('click', function(){
+      // Runs the same batched "Start geocoding" process either from the
+      // button click below, or automatically right after a resort-list CSV
+      // upload finishes (see resortFileInput's change handler) — one
+      // process, two triggers, per Jean's request that every import path
+      // get geocoded the same way, automatically, instead of needing a
+      // separate manual click (2026-09-18). `geocodeBusy` guards against
+      // two runs overlapping (e.g. an auto-run still in flight when the
+      // admin also clicks the button, or two uploads in quick succession).
+      var geocodeBusy = false;
+
+      function runStartGeocode(opts){
+        opts = opts || {};
+        if(geocodeBusy) return;
+        geocodeBusy = true;
         startGeocodeBtn.disabled = true;
         checkGeocodeBtn.disabled = true;
+        recheckZonesBtn.disabled = true;
         var totalTagged = 0, totalFallback = 0, totalTowns = 0, totalSuburbs = 0, totalFailed = 0, iterations = 0;
         var MAX_ITERATIONS = 30;
         var googleFailureReason = '', googleFailureMessage = '', exampleFailedCoordinates = [];
+        var prefix = opts.statusPrefix || '';
 
         function finish(summary){
+          geocodeBusy = false;
           startGeocodeBtn.disabled = false;
           checkGeocodeBtn.disabled = false;
-          geocodeStatusEl.textContent = summary;
+          recheckZonesBtn.disabled = false;
+          geocodeStatusEl.textContent = prefix + summary;
           geocodeStatusEl.className = 'status show';
           loadActivities();
         }
@@ -6039,7 +6065,7 @@
             finish('Stopped after a large batch (tagged ' + totalTagged + ' so far) — click Start geocoding again to continue with what’s left.');
             return;
           }
-          geocodeStatusEl.textContent = 'Geocoding… (' + totalTagged + ' tagged so far)';
+          geocodeStatusEl.textContent = prefix + 'Geocoding… (' + totalTagged + ' tagged so far)';
           geocodeStatusEl.className = 'status show';
           // Kept deliberately small (rather than the higher cap map-api.js
           // allows) so one round-trip comfortably finishes inside the Edge
@@ -6049,9 +6075,11 @@
           // matching per-lookup timeout.
           mapAdminPost('geocodeLocations', { dryRun: false, limit: 12 }).then(function(res){
             if(!(res.data && res.data.ok)){
+              geocodeBusy = false;
               startGeocodeBtn.disabled = false;
               checkGeocodeBtn.disabled = false;
-              geocodeStatusEl.textContent = (res.data && res.data.error) || 'Could not geocode.';
+              recheckZonesBtn.disabled = false;
+              geocodeStatusEl.textContent = prefix + ((res.data && res.data.error) || 'Could not geocode.');
               geocodeStatusEl.className = 'status show';
               return;
             }
@@ -6081,6 +6109,13 @@
             if(res.data.remainingCoordinates > 0 && !noProgress){
               runBatch();
             } else {
+              if(opts.auto && totalTagged === 0 && totalFailed === 0){
+                // Nothing new to geocode this time (e.g. a re-uploaded CSV
+                // with no genuinely new coordinates) — say so plainly
+                // instead of a slightly odd-sounding "tagged 0 records."
+                finish('No new locations to geocode — everything uploaded already has a Region/Town.');
+                return;
+              }
               var totalPrecise = totalTagged - totalFallback;
               var summary = 'Done — tagged ' + totalTagged + ' record' + (totalTagged === 1 ? '' : 's');
               if(totalFallback){
@@ -6117,11 +6152,126 @@
             // always a timed-out or crashed request rather than a real
             // "can't geocode" error, and safe to just continue from: this
             // batch's own coordinates are still untagged, so the next
-            // "Start geocoding" click picks up right where this left off.
+            // "Start geocoding" click (or the next auto-triggered run)
+            // picks up right where this left off.
+            geocodeBusy = false;
             startGeocodeBtn.disabled = false;
             checkGeocodeBtn.disabled = false;
-            geocodeStatusEl.textContent = 'Tagged ' + totalTagged + ' so far, then that request timed out or failed — click Start geocoding again to continue with what’s left.';
+            recheckZonesBtn.disabled = false;
+            geocodeStatusEl.textContent = prefix + 'Tagged ' + totalTagged + ' so far, then that request timed out or failed — click Start geocoding again to continue with what’s left.';
             geocodeStatusEl.className = 'status show';
+          });
+        }
+        runBatch();
+      }
+
+      startGeocodeBtn.addEventListener('click', function(){
+        runStartGeocode();
+      });
+
+      // "Re-check all zones" — a one-off correction pass Jean asked for
+      // (2026-09-18) after the districtToZone/provinceToZone priority fix,
+      // to go back and fix zones assigned before that fix existed (Garden
+      // Route towns tagged "Western Cape" being the known case). Unlike
+      // "Start geocoding" above, this re-sends EVERY tagged coordinate
+      // through Google again and overwrites whatever's there if it comes
+      // back different — see map-api.js's recheckZones action for the full
+      // reasoning, including the caveat that it can overwrite a zone
+      // corrected by hand, since there's no "manually locked" flag on a
+      // Town record to protect it.
+      var recheckZonesBtn = document.getElementById('recheckZonesBtn');
+      var recheckZonesStatusEl = document.getElementById('recheckZonesStatus');
+
+      recheckZonesBtn.addEventListener('click', function(){
+        if(!confirm('This re-sends every already-tagged coordinate through Google again and can change zones that were set before today’s fix — including overwriting a zone you corrected by hand, if Google or the keyword match disagrees with it. It also costs a fresh Google lookup for every coordinate. Run this as a one-off, not routinely. Continue?')){
+          return;
+        }
+        recheckZonesBtn.disabled = true;
+        startGeocodeBtn.disabled = true;
+        checkGeocodeBtn.disabled = true;
+        var totalChecked = 0, totalChanged = 0, totalTownsFixed = 0, totalTowns = 0, totalSuburbs = 0, totalFallback = 0, totalFailed = 0, iterations = 0;
+        var MAX_ITERATIONS = 60; // higher than Start geocoding's cap — this pass covers everything, not just the untagged backlog
+        var googleFailureReason = '', googleFailureMessage = '';
+        var exampleChanges = [];
+
+        function finish(summary){
+          recheckZonesBtn.disabled = false;
+          startGeocodeBtn.disabled = false;
+          checkGeocodeBtn.disabled = false;
+          recheckZonesStatusEl.textContent = summary;
+          recheckZonesStatusEl.className = 'status show';
+          loadActivities();
+        }
+
+        function runBatch(){
+          iterations++;
+          if(iterations > MAX_ITERATIONS){
+            finish('Stopped after a large batch (checked ' + totalChecked + ', changed ' + totalChanged + ' so far) — click Re-check all zones again to continue with what’s left.');
+            return;
+          }
+          recheckZonesStatusEl.textContent = 'Re-checking… (' + totalChecked + ' checked, ' + totalChanged + ' changed so far)';
+          recheckZonesStatusEl.className = 'status show';
+          mapAdminPost('recheckZones', { dryRun: false, limit: 12 }).then(function(res){
+            if(!(res.data && res.data.ok)){
+              recheckZonesBtn.disabled = false;
+              startGeocodeBtn.disabled = false;
+              checkGeocodeBtn.disabled = false;
+              recheckZonesStatusEl.textContent = (res.data && res.data.error) || 'Could not re-check.';
+              recheckZonesStatusEl.className = 'status show';
+              return;
+            }
+            var batchChecked = res.data.checkedRecords || 0;
+            var batchFailed = res.data.geocodeFailures || 0;
+            var batchProcessed = res.data.processedCoordinates || 0;
+            totalChecked += batchChecked;
+            totalChanged += res.data.changedRecords || 0;
+            totalTownsFixed += res.data.townZonesCorrected || 0;
+            totalTowns += res.data.addedTowns || 0;
+            totalSuburbs += res.data.addedSuburbs || 0;
+            totalFallback += res.data.fallbackTagged || 0;
+            totalFailed += batchFailed;
+            if(!googleFailureReason && res.data.googleFailureReason){
+              googleFailureReason = res.data.googleFailureReason;
+              googleFailureMessage = res.data.googleFailureMessage || '';
+            }
+            if(Array.isArray(res.data.exampleChanges)){
+              res.data.exampleChanges.forEach(function(c){
+                if(exampleChanges.length < 8) exampleChanges.push(c);
+              });
+            }
+
+            var noProgress = batchChecked === 0 && batchProcessed > 0 && batchFailed >= batchProcessed;
+
+            if(res.data.remainingCoordinates > 0 && !noProgress){
+              runBatch();
+            } else {
+              var summary = 'Done — checked ' + totalChecked + ' record' + (totalChecked === 1 ? '' : 's') +
+                ', changed ' + totalChanged + ' zone' + (totalChanged === 1 ? '' : 's') +
+                (totalTownsFixed ? (' (' + totalTownsFixed + ' town' + (totalTownsFixed === 1 ? '' : 's') + ' corrected)') : '') + '.';
+              if(totalTowns || totalSuburbs){
+                summary += ' Added ' + totalTowns + ' new town' + (totalTowns === 1 ? '' : 's') + ' and ' + totalSuburbs + ' new suburb' + (totalSuburbs === 1 ? '' : 's') + ' along the way.';
+              }
+              if(exampleChanges.length){
+                summary += ' Examples: ' + exampleChanges.map(function(c){ return c.what + ': ' + c.from + ' → ' + c.to; }).join('; ') + '.';
+              }
+              if(totalFailed){
+                summary += ' ' + totalFailed + ' location' + (totalFailed === 1 ? '' : 's') + ' couldn’t be resolved';
+                if(googleFailureReason === 'no_town_in_result'){
+                  summary += ' — no usable town at that exact point, and nothing close enough nearby to guess from.';
+                } else if(googleFailureReason){
+                  summary += ' — Google said: ' + googleFailureReason + (googleFailureMessage ? (' (' + googleFailureMessage + ')') : '') + '.';
+                } else {
+                  summary += ' (often a sign the API key or billing needs checking).';
+                }
+              }
+              finish(summary);
+            }
+          }).catch(function(){
+            recheckZonesBtn.disabled = false;
+            startGeocodeBtn.disabled = false;
+            checkGeocodeBtn.disabled = false;
+            recheckZonesStatusEl.textContent = 'Checked ' + totalChecked + ' so far, then that request timed out or failed — click Re-check all zones again to continue with what’s left.';
+            recheckZonesStatusEl.className = 'status show';
           });
         }
         runBatch();
@@ -6864,9 +7014,16 @@
             resortUploadBtn.disabled = false;
             resortUploadBtn.textContent = 'Upload resort list CSV';
             if(res.data && res.data.ok){
-              resortUploadStatusEl.textContent = 'Resort list updated (' + res.data.count + ' resorts).';
+              resortUploadStatusEl.textContent = 'Resort list updated (' + res.data.count + ' resorts). Automatically checking for new locations to geocode — see "Geocode locations from coordinates" below for progress.';
               resortUploadStatusEl.className = 'status show';
               loadActivities();
+              // The exact same coordinate-based geocoding process as "Start
+              // geocoding" below, just triggered automatically right after
+              // upload instead of needing a separate manual click — see
+              // runStartGeocode's own comment. Only genuinely new/untagged
+              // coordinates are ever touched, so re-uploading the same CSV
+              // costs nothing extra.
+              runStartGeocode({ auto: true, statusPrefix: 'From your resort list upload: ' });
             } else {
               resortUploadStatusEl.textContent = (res.data && res.data.error) || 'Could not update the resort list.';
               resortUploadStatusEl.className = 'status show';
