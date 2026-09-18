@@ -1226,14 +1226,15 @@
 
       <div class="card" style="margin-top:20px;">
         <h3 style="margin-top:0;">Master map</h3>
-        <p style="margin-top:0;">Every property and activity, including hidden ones (shown dimmed). Click a pin to show/hide it on the affiliate-facing map.</p>
+        <p style="margin-top:0;">Every property and activity, including hidden ones (shown dimmed). Town pins are coloured by their assigned zone — click a pin to show/hide it on the affiliate-facing map, or to see its exact zone and jump to Edit if it looks wrong.</p>
         <div class="status" id="missingCoordsSummary" style="margin-top:0;"></div>
-        <div class="map-filter-row" style="display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin-bottom:12px;">
+        <div class="map-filter-row" style="display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin-bottom:6px;">
           <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#1a4d7a; display:inline-block;"></span> Property (shown)</label>
           <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#0e7c66; display:inline-block;"></span> Activity (shown)</label>
-          <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#a3672d; display:inline-block;"></span> Town (shown)</label>
-          <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#b7b7ae; display:inline-block;"></span> Hidden</label>
+          <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#b7b7ae; display:inline-block;"></span> Hidden (any type)</label>
         </div>
+        <p style="margin:0 0 6px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);">Town zone colours</p>
+        <div id="zoneLegend" style="display:flex; flex-wrap:wrap; gap:8px 16px; margin-bottom:12px; font-size:12.5px;"></div>
         <div id="adminMapEl" style="width:100%; height:460px; border-radius:10px;"></div>
       </div>
 
@@ -6211,6 +6212,81 @@
         });
       }
 
+      // Zone colour key for the Master map's Town pins — the same 8-zone
+      // list as lib/zones.js's ZONES / the Affiliate modal's
+      // AFF_ZONE_ORDER (a few <script> blocks up), duplicated here rather
+      // than shared, per this codebase's standing cross-block-scoping
+      // convention (see the "Bugs found and fixed" note near the Towns
+      // tab code — a top-level var in one <script> block isn't visible to
+      // another). Colouring towns by zone, instead of one flat colour,
+      // is what makes a mis-zoned town jump out visually — e.g. a blue
+      // "Western Cape" pin sitting in a tight cluster of orange "Garden
+      // Route" pins around Knysna is an obvious outlier worth checking.
+      var MAP_ZONES = [
+        'Western Cape (Cape Town & Winelands)',
+        'Eastern Cape & Garden Route',
+        'Northern Cape',
+        'Free State',
+        'KwaZulu-Natal',
+        'Gauteng & North West',
+        'Mpumalanga',
+        'Limpopo'
+      ];
+      var MAP_ZONE_COLORS = {
+        'Western Cape (Cape Town & Winelands)': '#2a78d6',
+        'Eastern Cape & Garden Route': '#eb6834',
+        'Northern Cape': '#1baf7a',
+        'Free State': '#eda100',
+        'KwaZulu-Natal': '#e87ba4',
+        'Gauteng & North West': '#008300',
+        'Mpumalanga': '#4a3aa7',
+        'Limpopo': '#e34948'
+      };
+      var MAP_ZONE_NO_ZONE_COLOR = '#5b5b5b'; // deliberately distinct from the "hidden" grey (#b7b7ae) below
+
+      function zoneColor(zone){
+        return MAP_ZONE_COLORS[zone] || MAP_ZONE_NO_ZONE_COLOR;
+      }
+
+      function zoneLegendItem(label, color, count){
+        var item = document.createElement('span');
+        item.style.cssText = 'display:inline-flex; align-items:center; gap:6px;';
+        var swatch = document.createElement('span');
+        swatch.style.cssText = 'width:10px; height:10px; border-radius:50%; display:inline-block; background:' + color + ';';
+        item.appendChild(swatch);
+        var text = document.createElement('span');
+        text.textContent = label + ' (' + count + ')';
+        item.appendChild(text);
+        return item;
+      }
+
+      function renderZoneLegend(towns){
+        var legendEl = document.getElementById('zoneLegend');
+        if(!legendEl) return;
+        var counts = {};
+        (towns || []).forEach(function(t){
+          var lat = parseFloat(t.latitude);
+          var lng = parseFloat(t.longitude);
+          if(!isFinite(lat) || !isFinite(lng)) return;
+          var key = MAP_ZONE_COLORS[t.zone] ? t.zone : '';
+          counts[key] = (counts[key] || 0) + 1;
+        });
+        legendEl.innerHTML = '';
+        MAP_ZONES.forEach(function(zone){
+          if(!counts[zone]) return;
+          legendEl.appendChild(zoneLegendItem(zone, MAP_ZONE_COLORS[zone], counts[zone]));
+        });
+        if(counts['']){
+          legendEl.appendChild(zoneLegendItem('No zone set', MAP_ZONE_NO_ZONE_COLOR, counts['']));
+        }
+        if(!legendEl.children.length){
+          var noneEl = document.createElement('span');
+          noneEl.style.color = 'var(--muted)';
+          noneEl.textContent = 'No towns with coordinates yet.';
+          legendEl.appendChild(noneEl);
+        }
+      }
+
       var adminClusterGroup = null;
 
       function renderAdminMap(properties, activities, towns){
@@ -6280,18 +6356,29 @@
           allMarkers.push(marker);
         });
 
+        renderZoneLegend(towns);
+
         (towns || []).forEach(function(t){
           var lat = parseFloat(t.latitude);
           var lng = parseFloat(t.longitude);
           if(!isFinite(lat) || !isFinite(lng)) return;
           var hidden = t.visible === false || t.hidden === true;
-          var color = hidden ? '#b7b7ae' : '#a3672d';
+          var color = hidden ? '#b7b7ae' : zoneColor(t.zone);
           var marker = L.marker([lat, lng], { icon: dotIcon(color) });
           var content = document.createElement('div');
           var title = document.createElement('div');
           title.style.fontWeight = '600';
           title.textContent = t.name || 'Untitled';
           content.appendChild(title);
+          var zoneLine = document.createElement('div');
+          zoneLine.style.cssText = 'font-size:12px; color:#555; display:flex; align-items:center; gap:5px; margin-top:2px;';
+          var zoneSwatch = document.createElement('span');
+          zoneSwatch.style.cssText = 'width:8px; height:8px; border-radius:50%; display:inline-block; background:' + zoneColor(t.zone) + ';';
+          zoneLine.appendChild(zoneSwatch);
+          var zoneText = document.createElement('span');
+          zoneText.textContent = t.zone || 'No zone set';
+          zoneLine.appendChild(zoneText);
+          content.appendChild(zoneLine);
           if(t.area){
             var sub = document.createElement('div');
             sub.style.cssText = 'font-size:12px; color:#777;';
