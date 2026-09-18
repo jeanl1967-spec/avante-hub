@@ -625,6 +625,44 @@ async function discoverLocationTree({ listingsStore, resortListStore, activities
   return result;
 }
 
+// Straight-line distance in km between two coordinates (haversine formula).
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// Kept fairly tight (rather than "whichever town is least far away, however
+// far that is") so the fallback below only fires when a nearby town is
+// genuinely a reasonable stand-in for "what Region is this in" — not a
+// guess across hundreds of km of empty map.
+const NEAREST_TOWN_MAX_KM = 100;
+
+// The closest existing town (by straight-line distance, among towns that
+// have coordinates of their own) to a coordinate Google couldn't place —
+// or null if nothing is within NEAREST_TOWN_MAX_KM. Used only as a
+// ZERO_RESULTS fallback in geocodeLocations below; never called for a
+// coordinate Google successfully resolved.
+function nearestTown(allTowns, lat, lng, maxKm) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const t of allTowns) {
+    const tLat = parseFloat(t.latitude);
+    const tLng = parseFloat(t.longitude);
+    if (!isFinite(tLat) || !isFinite(tLng)) continue;
+    const d = haversineKm(lat, lng, tLat, tLng);
+    if (d < bestDist) {
+      bestDist = d;
+      best = t;
+    }
+  }
+  return best && bestDist <= maxKm ? best : null;
+}
+
 // Finds (or creates) the Town / Suburb a geocoded coordinate resolves to,
 // following the exact same "never overwrite what's already set" rule as
 // discoverLocations' apply step above — matched by name (case-insensitive)
@@ -996,6 +1034,11 @@ export default async (request, context) => {
       const existingIds = new Set(allTowns.map((t) => t.id));
 
       let addedTowns = 0, addedSuburbs = 0, taggedRecords = 0, geocodeFailures = 0;
+      // Records placed by proximity to an existing town rather than a real
+      // Google match — see the ZERO_RESULTS branch below. Counted
+      // separately from taggedRecords (which includes these too) so the
+      // admin UI can be upfront about which is which.
+      let fallbackTagged = 0;
       let resortListChanged = false;
       let activitiesChanged = false;
       const listingUpdates = [];
@@ -1017,7 +1060,40 @@ export default async (request, context) => {
         const lat = parseFloat(parts[0]);
         const lng = parseFloat(parts[1]);
         const geo = await reverseGeocode(lat, lng, apiKey);
-        if (!geo || !geo.ok || !geo.town) {
+
+        let result = null;
+        let viaFallback = false;
+
+        if (geo && geo.ok && geo.town) {
+          const zone = provinceToZone(geo.province) || districtToZone(geo.town) || "";
+          result = ensureTownAndSuburb(allTowns, existingIds, geo.town, zone, geo.suburb, lat, lng);
+          if (result) {
+            if (result.createdTown) addedTowns++;
+            if (result.createdSuburb) addedSuburbs++;
+          }
+        } else if (geo && !geo.ok && geo.reason === "ZERO_RESULTS") {
+          // Google successfully looked but found no addressable place at
+          // this exact coordinate — common for lodges, farms and game
+          // reserves that sit away from any town. Rather than leaving
+          // these untagged forever, fall back to the nearest existing town
+          // (by straight-line distance) so the record at least lands in
+          // the right Region for filtering. Never invents a new town, and
+          // leaves the suburb blank since we're only guessing the town —
+          // ensureTownAndSuburb's "never overwrite what's already set"
+          // rule still applies to it on any later, more precise run.
+          const nearest = nearestTown(allTowns, lat, lng, NEAREST_TOWN_MAX_KM);
+          if (nearest) {
+            result = {
+              zone: nearest.zone || "",
+              townId: nearest.id,
+              suburbId: "",
+              locationLabel: nearest.name,
+            };
+            viaFallback = true;
+          }
+        }
+
+        if (!result) {
           geocodeFailures++;
           if (!firstFailureReason && geo && !geo.ok) {
             firstFailureReason = geo.reason || "unknown";
@@ -1029,14 +1105,9 @@ export default async (request, context) => {
           return;
         }
 
-        const zone = provinceToZone(geo.province) || districtToZone(geo.town) || "";
-        const result = ensureTownAndSuburb(allTowns, existingIds, geo.town, zone, geo.suburb, lat, lng);
-        if (!result) { geocodeFailures++; return; }
-        if (result.createdTown) addedTowns++;
-        if (result.createdSuburb) addedSuburbs++;
-
         (groups.get(key) || []).forEach((t) => {
           taggedRecords++;
+          if (viaFallback) fallbackTagged++;
           if (t.source === "listing") {
             const rec = listings.find((r) => r.listingId === t.key);
             if (rec) {
@@ -1085,6 +1156,7 @@ export default async (request, context) => {
         processedCoordinates: groupKeys.length,
         remainingCoordinates,
         taggedRecords,
+        fallbackTagged,
         addedTowns,
         addedSuburbs,
         geocodeFailures,
