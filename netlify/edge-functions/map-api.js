@@ -1064,6 +1064,15 @@ export default async (request, context) => {
         let result = null;
         let viaFallback = false;
 
+        // Two distinct "Google couldn't place this precisely" cases get the
+        // same nearest-town fallback: an explicit ZERO_RESULTS, and an OK
+        // response whose top result simply has no locality-level component
+        // (only a country/route-level match — rare, but it happens for
+        // some very remote coordinates) so geo.town comes back blank even
+        // though geo.ok is true. Both mean the same thing in practice: no
+        // usable town at this exact point.
+        const noUsableTown = geo && ((geo.ok && !geo.town) || (!geo.ok && geo.reason === "ZERO_RESULTS"));
+
         if (geo && geo.ok && geo.town) {
           const zone = provinceToZone(geo.province) || districtToZone(geo.town) || "";
           result = ensureTownAndSuburb(allTowns, existingIds, geo.town, zone, geo.suburb, lat, lng);
@@ -1071,16 +1080,15 @@ export default async (request, context) => {
             if (result.createdTown) addedTowns++;
             if (result.createdSuburb) addedSuburbs++;
           }
-        } else if (geo && !geo.ok && geo.reason === "ZERO_RESULTS") {
-          // Google successfully looked but found no addressable place at
-          // this exact coordinate — common for lodges, farms and game
-          // reserves that sit away from any town. Rather than leaving
-          // these untagged forever, fall back to the nearest existing town
-          // (by straight-line distance) so the record at least lands in
-          // the right Region for filtering. Never invents a new town, and
-          // leaves the suburb blank since we're only guessing the town —
-          // ensureTownAndSuburb's "never overwrite what's already set"
-          // rule still applies to it on any later, more precise run.
+        } else if (noUsableTown) {
+          // Common for lodges, farms and game reserves that sit away from
+          // any town. Rather than leaving these untagged forever, fall back
+          // to the nearest existing town (by straight-line distance) so the
+          // record at least lands in the right Region for filtering. Never
+          // invents a new town, and leaves the suburb blank since we're
+          // only guessing the town — ensureTownAndSuburb's "never overwrite
+          // what's already set" rule still applies to it on any later, more
+          // precise run.
           const nearest = nearestTown(allTowns, lat, lng, NEAREST_TOWN_MAX_KM);
           if (nearest) {
             result = {
@@ -1095,9 +1103,16 @@ export default async (request, context) => {
 
         if (!result) {
           geocodeFailures++;
-          if (!firstFailureReason && geo && !geo.ok) {
-            firstFailureReason = geo.reason || "unknown";
-            firstFailureMessage = geo.message || "";
+          if (!firstFailureReason) {
+            if (geo && !geo.ok) {
+              firstFailureReason = geo.reason || "unknown";
+              firstFailureMessage = geo.message || "";
+            } else if (geo && geo.ok && !geo.town) {
+              // Reachable only when there's also no town within
+              // NEAREST_TOWN_MAX_KM to fall back to — genuinely remote.
+              firstFailureReason = "no_town_in_result";
+              firstFailureMessage = "Google matched this coordinate but the result had no town-level detail, and no existing town was close enough to use instead.";
+            }
           }
           if (exampleFailures.length < 5) {
             exampleFailures.push(lat.toFixed(4) + "," + lng.toFixed(4));
