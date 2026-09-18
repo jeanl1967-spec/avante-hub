@@ -1005,6 +1005,12 @@ export default async (request, context) => {
       // not authorized...") instead of a dead end.
       let firstFailureReason = "";
       let firstFailureMessage = "";
+      // A handful of the actual failing coordinates, so a run of
+      // ZERO_RESULTS (a valid Google response that just found nothing
+      // there — usually a placeholder/invalid coordinate, not a config
+      // problem) can be diagnosed by looking at the numbers themselves
+      // instead of digging through the database.
+      const exampleFailures = [];
 
       await mapWithConcurrency(groupKeys, 8, async (key) => {
         const parts = key.split(",");
@@ -1016,6 +1022,9 @@ export default async (request, context) => {
           if (!firstFailureReason && geo && !geo.ok) {
             firstFailureReason = geo.reason || "unknown";
             firstFailureMessage = geo.message || "";
+          }
+          if (exampleFailures.length < 5) {
+            exampleFailures.push(lat.toFixed(4) + "," + lng.toFixed(4));
           }
           return;
         }
@@ -1081,6 +1090,7 @@ export default async (request, context) => {
         geocodeFailures,
         googleFailureReason: firstFailureReason,
         googleFailureMessage: firstFailureMessage,
+        exampleFailedCoordinates: exampleFailures,
       });
     }
 
