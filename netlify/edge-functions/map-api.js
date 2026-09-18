@@ -999,13 +999,26 @@ export default async (request, context) => {
       let resortListChanged = false;
       let activitiesChanged = false;
       const listingUpdates = [];
+      // Google's own status/message from the first lookup that didn't come
+      // back OK — surfaced to the admin UI so "every coordinate failed"
+      // reads as an actual diagnosis (e.g. "REQUEST_DENIED: This API key is
+      // not authorized...") instead of a dead end.
+      let firstFailureReason = "";
+      let firstFailureMessage = "";
 
       await mapWithConcurrency(groupKeys, 8, async (key) => {
         const parts = key.split(",");
         const lat = parseFloat(parts[0]);
         const lng = parseFloat(parts[1]);
         const geo = await reverseGeocode(lat, lng, apiKey);
-        if (!geo || !geo.town) { geocodeFailures++; return; }
+        if (!geo || !geo.ok || !geo.town) {
+          geocodeFailures++;
+          if (!firstFailureReason && geo && !geo.ok) {
+            firstFailureReason = geo.reason || "unknown";
+            firstFailureMessage = geo.message || "";
+          }
+          return;
+        }
 
         const zone = provinceToZone(geo.province) || districtToZone(geo.town) || "";
         const result = ensureTownAndSuburb(allTowns, existingIds, geo.town, zone, geo.suburb, lat, lng);
@@ -1066,6 +1079,8 @@ export default async (request, context) => {
         addedTowns,
         addedSuburbs,
         geocodeFailures,
+        googleFailureReason: firstFailureReason,
+        googleFailureMessage: firstFailureMessage,
       });
     }
 
