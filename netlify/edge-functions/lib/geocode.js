@@ -1,6 +1,10 @@
 // Turns a lat/long into the four levels of the location tree (Country is a
-// fixed display label, never geocoded) using Google's Geocoding API. Shared
-// by map-api.js's geocodeLocations action — the only place that calls it.
+// fixed display label, never geocoded) using Google's Geocoding API. Called,
+// via map-api.js's shared resolveLocationForCoordinate() helper, by every
+// place in this codebase that resolves a coordinate to a Region/Town/Suburb:
+// the geocodeLocations backlog sweep, the recheckZones correction pass, and
+// the synchronous auto-geocode that now runs whenever a new activity or
+// property enters the system with coordinates but no picked location.
 //
 // Google returns several `results[]` entries for one coordinate, each a
 // different precision level (street address, then broader areas) of the
