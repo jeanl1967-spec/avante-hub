@@ -6048,6 +6048,14 @@
         var MAX_ITERATIONS = 30;
         var googleFailureReason = '', googleFailureMessage = '', exampleFailedCoordinates = [];
         var prefix = opts.statusPrefix || '';
+        // A single batch occasionally times out or the connection blips —
+        // that's not the same as a real failure, so retry the SAME batch a
+        // few times with a short pause before finally stopping and asking
+        // for a manual click. Resets to 0 after every batch that actually
+        // gets a response, successful or not, so this only guards against
+        // consecutive failures in a row, not the total across a whole run.
+        var batchRetries = 0;
+        var MAX_BATCH_RETRIES = 4;
 
         function finish(summary){
           geocodeBusy = false;
@@ -6074,6 +6082,7 @@
           // instead of fewer, riskier ones. See lib/geocode.js for the
           // matching per-lookup timeout.
           mapAdminPost('geocodeLocations', { dryRun: false, limit: 12 }).then(function(res){
+            batchRetries = 0;
             if(!(res.data && res.data.ok)){
               geocodeBusy = false;
               startGeocodeBtn.disabled = false;
@@ -6151,14 +6160,21 @@
             // Lands here when the response wasn't valid JSON — almost
             // always a timed-out or crashed request rather than a real
             // "can't geocode" error, and safe to just continue from: this
-            // batch's own coordinates are still untagged, so the next
-            // "Start geocoding" click (or the next auto-triggered run)
-            // picks up right where this left off.
+            // batch's own coordinates are still untagged, so retrying (or,
+            // after MAX_BATCH_RETRIES, the next manual click) picks up
+            // right where this left off.
+            batchRetries++;
+            if(batchRetries <= MAX_BATCH_RETRIES){
+              geocodeStatusEl.textContent = prefix + 'That request timed out — retrying (' + batchRetries + '/' + MAX_BATCH_RETRIES + ')… (' + totalTagged + ' tagged so far)';
+              geocodeStatusEl.className = 'status show';
+              setTimeout(runBatch, 1500);
+              return;
+            }
             geocodeBusy = false;
             startGeocodeBtn.disabled = false;
             checkGeocodeBtn.disabled = false;
             recheckZonesBtn.disabled = false;
-            geocodeStatusEl.textContent = prefix + 'Tagged ' + totalTagged + ' so far, then that request timed out or failed — click Start geocoding again to continue with what’s left.';
+            geocodeStatusEl.textContent = prefix + 'Tagged ' + totalTagged + ' so far, then that request kept timing out after ' + MAX_BATCH_RETRIES + ' retries — click Start geocoding again to continue with what’s left.';
             geocodeStatusEl.className = 'status show';
           });
         }
@@ -6193,6 +6209,14 @@
         var MAX_ITERATIONS = 60; // higher than Start geocoding's cap — this pass covers everything, not just the untagged backlog
         var googleFailureReason = '', googleFailureMessage = '';
         var exampleChanges = [];
+        // Same transient-failure retry as Start geocoding above — a single
+        // batch timing out isn't a real failure, so retry it a few times
+        // before asking for a manual click. This pass covers roughly 2600+
+        // coordinates at 12 per batch, so without this a handful of
+        // ordinary network blips could otherwise mean dozens of manual
+        // re-clicks to get all the way through.
+        var batchRetries = 0;
+        var MAX_BATCH_RETRIES = 4;
 
         function finish(summary){
           recheckZonesBtn.disabled = false;
@@ -6212,6 +6236,7 @@
           recheckZonesStatusEl.textContent = 'Re-checking… (' + totalChecked + ' checked, ' + totalChanged + ' changed so far)';
           recheckZonesStatusEl.className = 'status show';
           mapAdminPost('recheckZones', { dryRun: false, limit: 12 }).then(function(res){
+            batchRetries = 0;
             if(!(res.data && res.data.ok)){
               recheckZonesBtn.disabled = false;
               startGeocodeBtn.disabled = false;
@@ -6267,10 +6292,17 @@
               finish(summary);
             }
           }).catch(function(){
+            batchRetries++;
+            if(batchRetries <= MAX_BATCH_RETRIES){
+              recheckZonesStatusEl.textContent = 'That request timed out — retrying (' + batchRetries + '/' + MAX_BATCH_RETRIES + ')… (' + totalChecked + ' checked so far)';
+              recheckZonesStatusEl.className = 'status show';
+              setTimeout(runBatch, 1500);
+              return;
+            }
             recheckZonesBtn.disabled = false;
             startGeocodeBtn.disabled = false;
             checkGeocodeBtn.disabled = false;
-            recheckZonesStatusEl.textContent = 'Checked ' + totalChecked + ' so far, then that request timed out or failed — click Re-check all zones again to continue with what’s left.';
+            recheckZonesStatusEl.textContent = 'Checked ' + totalChecked + ' so far, then that request kept timing out after ' + MAX_BATCH_RETRIES + ' retries — click Re-check all zones again to continue with what’s left.';
             recheckZonesStatusEl.className = 'status show';
           });
         }
