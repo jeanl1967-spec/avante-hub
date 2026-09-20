@@ -1348,9 +1348,20 @@ export default async (request, context) => {
         return json({ ok: true, dryRun: true, totalRecords: targets.length, uniqueCoordinates: groups.size });
       }
 
+      // Unlike geocodeLocations (where a processed coordinate gets tagged and
+      // so drops out of the next call's target list), a re-check leaves every
+      // coordinate in the target list forever — so the only way to make
+      // progress is an explicit cursor. Before this, every call re-checked
+      // the SAME first `limit` coordinates and reported remainingCoordinates
+      // as (total - limit), a constant, so the admin loop could never
+      // finish and just re-spent Google lookups on the same dozen places.
+      // Keys are sorted so the order is identical from one call to the next.
       const limit = Math.max(1, Math.min(parseInt(body.limit, 10) || 12, 20));
-      const groupKeys = Array.from(groups.keys()).slice(0, limit);
-      const remainingCoordinates = Math.max(0, groups.size - groupKeys.length);
+      const offset = Math.max(0, parseInt(body.offset, 10) || 0);
+      const totalCoordinates = groups.size;
+      const groupKeys = Array.from(groups.keys()).sort().slice(offset, offset + limit);
+      const nextOffset = offset + groupKeys.length;
+      const remainingCoordinates = Math.max(0, totalCoordinates - nextOffset);
 
       const allTowns = await loadTowns(townsStore);
       const existingIds = new Set(allTowns.map((t) => t.id));
@@ -1437,6 +1448,8 @@ export default async (request, context) => {
         dryRun: false,
         processedCoordinates: groupKeys.length,
         remainingCoordinates,
+        totalCoordinates,
+        nextOffset,
         checkedRecords,
         changedRecords,
         townZonesCorrected,
