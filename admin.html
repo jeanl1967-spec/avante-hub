@@ -6202,11 +6202,30 @@
         if(!confirm('This re-sends every already-tagged coordinate through Google again and can change zones that were set before today’s fix — including overwriting a zone you corrected by hand, if Google or the keyword match disagrees with it. It also costs a fresh Google lookup for every coordinate. Run this as a one-off, not routinely. Continue?')){
           return;
         }
+        // The server walks the coordinate list with a cursor (offset). The
+        // cursor is remembered in this browser so that if a run is ever
+        // interrupted, the next click can resume instead of starting over
+        // (and re-paying Google for what's already been checked).
+        var RECHECK_OFFSET_KEY = 'avante-recheck-zones-offset';
+        var offset = 0;
+        try {
+          var savedOffset = parseInt(localStorage.getItem(RECHECK_OFFSET_KEY), 10) || 0;
+          if(savedOffset > 0 && confirm('A previous re-check stopped part-way, after ' + savedOffset + ' locations. OK = resume from there. Cancel = start again from the beginning.')){
+            offset = savedOffset;
+          }
+        } catch(e){}
         recheckZonesBtn.disabled = true;
         startGeocodeBtn.disabled = true;
         checkGeocodeBtn.disabled = true;
         var totalChecked = 0, totalChanged = 0, totalTownsFixed = 0, totalTowns = 0, totalSuburbs = 0, totalFallback = 0, totalFailed = 0, iterations = 0;
-        var MAX_ITERATIONS = 60; // higher than Start geocoding's cap — this pass covers everything, not just the untagged backlog
+        var totalCoordinates = 0, allFailedStreak = 0;
+        // Only a safety valve now: the server cursor guarantees the loop
+        // ends on its own. ~2700 coordinates at 12 per batch is ~225 batches.
+        var MAX_ITERATIONS = 1000;
+        function saveOffset(v){ try { if(v > 0) localStorage.setItem(RECHECK_OFFSET_KEY, String(v)); else localStorage.removeItem(RECHECK_OFFSET_KEY); } catch(e){} }
+        function progressText(){
+          return totalCoordinates ? (' — location ' + Math.min(offset, totalCoordinates) + ' of ' + totalCoordinates) : '';
+        }
         var googleFailureReason = '', googleFailureMessage = '';
         var exampleChanges = [];
         // Same transient-failure retry as Start geocoding above — a single
@@ -6230,12 +6249,12 @@
         function runBatch(){
           iterations++;
           if(iterations > MAX_ITERATIONS){
-            finish('Stopped after a large batch (checked ' + totalChecked + ', changed ' + totalChanged + ' so far) — click Re-check all zones again to continue with what’s left.');
+            finish('Stopped after ' + MAX_ITERATIONS + ' batches (checked ' + totalChecked + ', changed ' + totalChanged + ' so far' + progressText() + ') — click Re-check all zones again and choose Resume.');
             return;
           }
-          recheckZonesStatusEl.textContent = 'Re-checking… (' + totalChecked + ' checked, ' + totalChanged + ' changed so far)';
+          recheckZonesStatusEl.textContent = 'Re-checking… (' + totalChecked + ' checked, ' + totalChanged + ' changed so far' + progressText() + ')';
           recheckZonesStatusEl.className = 'status show';
-          mapAdminPost('recheckZones', { dryRun: false, limit: 12 }).then(function(res){
+          mapAdminPost('recheckZones', { dryRun: false, limit: 12, offset: offset }).then(function(res){
             batchRetries = 0;
             if(!(res.data && res.data.ok)){
               recheckZonesBtn.disabled = false;
@@ -6265,12 +6284,27 @@
               });
             }
 
-            var noProgress = batchChecked === 0 && batchProcessed > 0 && batchFailed >= batchProcessed;
+            // Move the cursor forward by exactly what the server processed.
+            var newOffset = (typeof res.data.nextOffset === 'number') ? res.data.nextOffset : (offset + batchProcessed);
+            totalCoordinates = res.data.totalCoordinates || totalCoordinates;
+            var stalled = batchProcessed === 0 || newOffset <= offset;
+            offset = newOffset;
 
-            if(res.data.remainingCoordinates > 0 && !noProgress){
+            // Stop early only if several batches in a row failed outright
+            // (bad key / billing) — one all-failed batch in a remote area is
+            // normal now that the cursor moves on to the next locations.
+            if(batchChecked === 0 && batchProcessed > 0 && batchFailed >= batchProcessed) allFailedStreak++; else allFailedStreak = 0;
+            var noProgress = allFailedStreak >= 3;
+
+            if(res.data.remainingCoordinates > 0 && !noProgress && !stalled){
+              saveOffset(offset);
               runBatch();
+            } else if(stalled && res.data.remainingCoordinates > 0){
+              saveOffset(offset);
+              finish('Stopped because the server stopped advancing at location ' + offset + (totalCoordinates ? (' of ' + totalCoordinates) : '') + ' (checked ' + totalChecked + ', changed ' + totalChanged + '). Click Re-check all zones again and choose Resume.');
             } else {
-              var summary = 'Done — checked ' + totalChecked + ' record' + (totalChecked === 1 ? '' : 's') +
+              saveOffset(noProgress ? offset : 0);
+              var summary = (noProgress ? ('Stopped early at location ' + offset + (totalCoordinates ? (' of ' + totalCoordinates) : '') + ' — 3 batches in a row couldn’t be resolved at all. So far: checked ') : 'Done — checked ') + totalChecked + ' record' + (totalChecked === 1 ? '' : 's') +
                 ', changed ' + totalChanged + ' zone' + (totalChanged === 1 ? '' : 's') +
                 (totalTownsFixed ? (' (' + totalTownsFixed + ' town' + (totalTownsFixed === 1 ? '' : 's') + ' corrected)') : '') + '.';
               if(totalTowns || totalSuburbs){
@@ -6302,7 +6336,8 @@
             recheckZonesBtn.disabled = false;
             startGeocodeBtn.disabled = false;
             checkGeocodeBtn.disabled = false;
-            recheckZonesStatusEl.textContent = 'Checked ' + totalChecked + ' so far, then that request kept timing out after ' + MAX_BATCH_RETRIES + ' retries — click Re-check all zones again to continue with what’s left.';
+            saveOffset(offset);
+            recheckZonesStatusEl.textContent = 'Checked ' + totalChecked + ' so far' + progressText() + ', then that request kept timing out after ' + MAX_BATCH_RETRIES + ' retries — click Re-check all zones again and choose Resume to carry on from there.';
             recheckZonesStatusEl.className = 'status show';
           });
         }
