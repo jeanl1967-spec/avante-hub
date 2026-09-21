@@ -539,7 +539,8 @@
       <label>Zones (optional — select all that apply)</label>
       <div class="row" id="affZoneCheckboxes" style="flex-wrap:wrap; gap:8px 16px; margin-bottom:8px;">
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Western Cape (Cape Town &amp; Winelands)" class="aff-zone-cb"> Western Cape (Cape Town &amp; Winelands)</label>
-        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Eastern Cape &amp; Garden Route" class="aff-zone-cb"> Eastern Cape &amp; Garden Route</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Garden Route" class="aff-zone-cb"> Garden Route</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Eastern Cape" class="aff-zone-cb"> Eastern Cape</label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Northern Cape" class="aff-zone-cb"> Northern Cape</label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Free State" class="aff-zone-cb"> Free State</label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="KwaZulu-Natal" class="aff-zone-cb"> KwaZulu-Natal</label>
@@ -1226,14 +1227,15 @@
 
       <div class="card" style="margin-top:20px;">
         <h3 style="margin-top:0;">Master map</h3>
-        <p style="margin-top:0;">Every property and activity, including hidden ones (shown dimmed). Town pins are coloured by their assigned zone — click a pin to show/hide it on the affiliate-facing map, or to see its exact zone and jump to Edit if it looks wrong.</p>
+        <p style="margin-top:0;">Every property and activity, including hidden ones (shown dimmed). Zone areas are shaded in the zone colours, and town and property pins take the colour of their zone (places outside South Africa are coloured per country) — click a pin to show/hide it on the affiliate-facing map, or to see its exact zone and jump to Edit if it looks wrong.</p>
         <div class="status" id="missingCoordsSummary" style="margin-top:0;"></div>
         <div class="map-filter-row" style="display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin-bottom:6px;">
-          <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#1a4d7a; display:inline-block;"></span> Property (shown)</label>
+          <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:conic-gradient(#8074dd 0 25%,#e6a000 0 50%,#1d9e75 0 75%,#d85a30 0); display:inline-block;"></span> Property (shown, coloured by zone)</label>
           <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#0e7c66; display:inline-block;"></span> Activity (shown)</label>
           <label style="margin:0; display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:50%; background:#b7b7ae; display:inline-block;"></span> Hidden (any type)</label>
         </div>
-        <p style="margin:0 0 6px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);">Town zone colours</p>
+        <p style="margin:0 0 6px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted);">Zone colours</p>
+        <label style="margin:0 0 8px; display:flex; align-items:center; gap:6px; font-size:13px; font-weight:400;"><input type="checkbox" id="zoneShadeToggle" checked style="width:auto; flex:none;"> Shade the zone areas on the map</label>
         <div id="zoneLegend" style="display:flex; flex-wrap:wrap; gap:8px 16px; margin-bottom:12px; font-size:12.5px;"></div>
         <div id="adminMapEl" style="width:100%; height:460px; border-radius:10px;"></div>
       </div>
@@ -1371,7 +1373,8 @@
             <select id="townZoneInput">
               <option value="">— No zone —</option>
               <option value="Western Cape (Cape Town &amp; Winelands)">Western Cape (Cape Town &amp; Winelands)</option>
-              <option value="Eastern Cape &amp; Garden Route">Eastern Cape &amp; Garden Route</option>
+              <option value="Garden Route">Garden Route</option>
+              <option value="Eastern Cape">Eastern Cape</option>
               <option value="Northern Cape">Northern Cape</option>
               <option value="Free State">Free State</option>
               <option value="KwaZulu-Natal">KwaZulu-Natal</option>
@@ -1423,7 +1426,7 @@
 
         <div style="margin-top:18px; padding-top:16px; border-top:1.5px solid var(--line);">
           <h4 style="margin:0 0 6px; font-size:13.5px;">Re-check zones on everything already tagged</h4>
-          <p style="margin:0 0 12px; font-size:13px; color:var(--muted);">Re-sends every coordinate through Google again &mdash; including records already tagged &mdash; and corrects the zone wherever it comes back different (this is what fixed Garden Route towns like Knysna/Plettenberg Bay being tagged "Western Cape"; see the town-zone colours on the Master map below to check what's still wrong). Costs a fresh Google lookup for every coordinate, and can overwrite a zone you corrected by hand if Google or the keyword match disagrees with it &mdash; use this as a one-off cleanup, not routinely.</p>
+          <p style="margin:0 0 12px; font-size:13px; color:var(--muted);">Re-sends every coordinate through Google again &mdash; including records already tagged &mdash; and brings the whole hub up to date: each place gets its Country, Zone, Town and Suburb (the <strong>zone now comes from where the coordinates fall on the zone map</strong>, so Garden Route, Eastern Cape and same-named towns such as the two Middelburgs land correctly; outside South Africa the zone is the province/region), places with no town of their own are placed <em>Nearby</em> the closest town, and towns that share a name in different provinces get separate records. Every Google answer is remembered, so a coordinate is only ever paid for once &mdash; running this again later is free. It can overwrite a zone you corrected by hand, so use it as a cleanup, not routinely.</p>
           <div class="btn-row" style="margin-top:0;">
             <button class="btn-outline" id="recheckZonesBtn">Re-check all zones</button>
           </div>
@@ -1447,6 +1450,22 @@
         <div class="btn-row" id="coordDownloads" style="display:none; margin-top:12px;">
           <button class="btn-outline" id="coordDownloadReportBtn">Download review report (.csv)</button>
           <button class="btn-outline" id="coordDownloadUploadBtn">Download updated StockNetwork file (.csv)</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
+        <h3 style="margin-top:0;">Corrected StockNetwork file (Country / State / City / Suburb from the hub)</h3>
+        <p style="margin-top:0;">Makes the file you send to StockNetwork match this hub. Choose your StockNetwork resort export and you get a copy in exactly the same format where, for every property, <strong>Country</strong>, <strong>State</strong>, <strong>City</strong> and <strong>Suburb</strong> are filled in from the hub's Zone &gt; Town &gt; Suburb, worked out from the property's coordinates. <strong>State is the hub zone</strong> (for example Garden Route, Eastern Cape, or the province/region for places outside South Africa). When a place has no suburb, the town name is repeated; when it has no town of its own but is close to one, the Suburb reads <em>Nearby &lt;Town&gt;</em>. Every other column is left exactly as it was.</p>
+        <p style="margin-top:0; font-size:13px; color:var(--muted);">Run <strong>Re-check all zones</strong> (above) first so the hub is up to date &mdash; then this is quick and needs no new Google lookups. Rows the hub can't settle (coordinates missing or in the sea, or the country in the file disagreeing with where the coordinates are) are left as they were and listed in the report for you to decide. Nothing is sent to StockNetwork from here.</p>
+        <div class="btn-row" style="margin-top:0; align-items:center;">
+          <button class="btn-outline" id="fixFileBtn">Choose StockNetwork export (.csv)…</button>
+          <input type="file" id="fixFileInput" accept=".csv,text/csv" style="display:none;">
+          <button class="primary" id="fixStartBtn" disabled>Build corrected file</button>
+        </div>
+        <div class="status" id="fixStatus"></div>
+        <div class="btn-row" id="fixDownloads" style="display:none; margin-top:12px;">
+          <button class="btn-outline" id="fixDownloadFileBtn">Download corrected StockNetwork file (.csv)</button>
+          <button class="btn-outline" id="fixDownloadReportBtn">Download change report (.csv)</button>
         </div>
       </div>
 
@@ -2457,7 +2476,12 @@
       label.textContent = n === 0 ? 'No locations selected' : (n + ' location' + (n === 1 ? '' : 's') + ' selected');
     }
 
-    var AFF_ZONE_ORDER = ['Western Cape (Cape Town & Winelands)', 'Eastern Cape & Garden Route', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng & North West', 'Mpumalanga', 'Limpopo'];
+    var AFF_ZONE_ORDER = ['Western Cape (Cape Town & Winelands)', 'Garden Route', 'Eastern Cape', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng & North West', 'Mpumalanga', 'Limpopo'];
+    // Zones outside South Africa are created automatically (one per province/region), so
+    // anything not in the fixed list above is listed after it rather than dropped.
+    function affZoneExtras(towns){
+      return (towns || []).map(function(t){ return t.zone || ''; }).filter(function(z, i, a){ return z && AFF_ZONE_ORDER.indexOf(z) === -1 && a.indexOf(z) === i; }).sort();
+    }
 
     // ---- Shared Zone/Town/Suburb location-tree <select> builder ----
     // Used by every "which area/town/suburb is this in" picker across the
@@ -2488,11 +2512,11 @@
     function buildLocationSelectOptionsHtml(towns){
       var byZone = {};
       towns.forEach(function(t){
-        var z = t.zone && AFF_ZONE_ORDER.indexOf(t.zone) > -1 ? t.zone : '';
+        var z = t.zone || '';
         if(!byZone[z]) byZone[z] = [];
         byZone[z].push(t);
       });
-      var zoneKeys = AFF_ZONE_ORDER.filter(function(z){ return byZone[z]; });
+      var zoneKeys = AFF_ZONE_ORDER.filter(function(z){ return byZone[z]; }).concat(affZoneExtras(towns).filter(function(z){ return byZone[z]; }));
       if(byZone['']) zoneKeys.push('');
 
       var html = '<option value="">— None selected —</option>';
@@ -2638,7 +2662,7 @@
         var openTowns = Array.prototype.map.call(containerEl.querySelectorAll('details.loc-tree-node[data-town][open]'), function(d){ return d.dataset.town; });
         containerEl.innerHTML = '';
 
-        AFF_ZONE_ORDER.forEach(function(zone){
+        AFF_ZONE_ORDER.concat(affZoneExtras(towns)).forEach(function(zone){
           var zoneTowns = regionTowns(zone).slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
           if(!zoneTowns.length){
             var empty = document.createElement('div');
@@ -2785,11 +2809,11 @@
         // trailing "Other" group rather than being dropped.
         var byZone = {};
         towns.forEach(function(t){
-          var z = t.zone && AFF_ZONE_ORDER.indexOf(t.zone) > -1 ? t.zone : '';
+          var z = t.zone || '';
           if(!byZone[z]) byZone[z] = [];
           byZone[z].push(t);
         });
-        var zoneKeys = AFF_ZONE_ORDER.filter(function(z){ return byZone[z]; });
+        var zoneKeys = AFF_ZONE_ORDER.filter(function(z){ return byZone[z]; }).concat(affZoneExtras(towns).filter(function(z){ return byZone[z]; }));
         if(byZone['']) zoneKeys.push('');
 
         zoneKeys.forEach(function(zoneKey){
@@ -2954,6 +2978,10 @@
       document.getElementById('affEmailInput').value = existing ? (existing.email || '') : '';
       document.getElementById('affSiteNrInput').value = existing ? (existing.siteNr || '') : '';
       var existingZones = existing ? ((existing.zones && existing.zones.length) ? existing.zones : (existing.zone ? [existing.zone] : [])) : [];
+      // The old combined "Eastern Cape & Garden Route" zone is now two zones.
+      if(existingZones.indexOf('Eastern Cape & Garden Route') > -1){
+        existingZones = existingZones.concat(['Garden Route', 'Eastern Cape']);
+      }
       document.querySelectorAll('.aff-zone-cb').forEach(function(cb){
         cb.checked = existingZones.indexOf(cb.value) > -1;
       });
@@ -5836,7 +5864,15 @@
             townIdInput.value = t.id;
             townNameInput.value = t.name || '';
             townAreaInput.value = t.area || '';
-            townZoneInput.value = t.zone || '';
+            // Zones outside South Africa are created automatically (a province/region
+        // per country), so the fixed list may not have this town's zone yet.
+        if(t.zone && !Array.prototype.some.call(townZoneInput.options, function(o){ return o.value === t.zone; })){
+          var extraZoneOpt = document.createElement('option');
+          extraZoneOpt.value = t.zone;
+          extraZoneOpt.textContent = t.zone;
+          townZoneInput.appendChild(extraZoneOpt);
+        }
+        townZoneInput.value = t.zone || '';
             if(!townAffOptionsPopulated){ populateTownAffiliateOptions(); townAffOptionsPopulated = true; }
             townAffInput.value = t.affId || '';
             townLatInput.value = t.latitude || '';
@@ -6494,6 +6530,18 @@
           return /[",\r\n]|^\s|\s$/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
         }
         function toCsv(rows){ return '﻿' + rows.map(function(r){ return r.map(csvCell).join(','); }).join('\r\n') + '\r\n'; }
+        // The updated StockNetwork file is written the way StockNetwork writes its own
+        // export (no BOM, CRLF, Resort column always quoted, other fields quoted only
+        // when they need it) so it round-trips byte-for-byte when nothing changes.
+        function toStockNetworkCsv(rows){
+          return rows.map(function(r, n){
+            return r.map(function(v, i){
+              v = (v === null || v === undefined) ? '' : String(v);
+              var q = (i === 0 && n > 0) || /[",\r\n]/.test(v);
+              return q ? '"' + v.replace(/"/g, '""') + '"' : v;
+            }).join(',');
+          }).join('\r\n') + '\r\n';
+        }
         function download(name, text){
           var blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
           var a = document.createElement('a');
@@ -6672,8 +6720,239 @@
             }
             out.push(r);
           });
-          download('Resort Information - improved coordinates.csv', toCsv(out));
+          download('Resort Information - improved coordinates.csv', toStockNetworkCsv(out));
           setStatus('Downloaded a copy of your export with ' + swapped + ' high-confidence coordinates swapped in. Every other row and column is unchanged. Check a few before loading it into StockNetwork.');
+        });
+      })();
+
+      // ---- Corrected StockNetwork file (Country / State / City / Suburb from the hub) ----
+      // Reads the admin's StockNetwork resort export in the browser, asks
+      // map-api.js's exportLocations action what Country / State (= hub zone) /
+      // City / Suburb each row should have (hub-tagged rows are free; anything
+      // else is looked up through the same cached resolver Re-check uses), then
+      // builds the corrected CSV and a change report entirely client-side.
+      // Nothing is sent to StockNetwork from here.
+      (function(){
+        var fileBtn = document.getElementById('fixFileBtn');
+        var fileInput = document.getElementById('fixFileInput');
+        var startBtn = document.getElementById('fixStartBtn');
+        var statusEl = document.getElementById('fixStatus');
+        var dlBox = document.getElementById('fixDownloads');
+        var dlFileBtn = document.getElementById('fixDownloadFileBtn');
+        var dlReportBtn = document.getElementById('fixDownloadReportBtn');
+        if(!fileBtn || !fileInput || !startBtn) return;
+
+        var BATCH = 150, MAX_BATCH_RETRIES = 4;
+        var state = null; // { header, rows, col, results:{rowIdx:item}, fileName }
+        var running = false;
+
+        function setStatus(t, isError){ statusEl.textContent = t; statusEl.className = 'status show' + (isError ? '' : ' ok'); }
+
+        // Same minimal RFC-4180 parser as the coordinates tool above.
+        function parseCsv(text){
+          if(text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+          var rows = [], row = [], field = '', inQ = false, i = 0, n = text.length, c;
+          while(i < n){
+            c = text[i];
+            if(inQ){
+              if(c === '"'){
+                if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
+                inQ = false; i++; continue;
+              }
+              field += c; i++; continue;
+            }
+            if(c === '"'){ inQ = true; i++; continue; }
+            if(c === ','){ row.push(field); field = ''; i++; continue; }
+            if(c === '\r'){ i++; continue; }
+            if(c === '\n'){ row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
+            field += c; i++;
+          }
+          if(field !== '' || row.length){ row.push(field); rows.push(row); }
+          return rows;
+        }
+        // The report opens in Excel, so it carries a BOM.
+        function csvCell(v){
+          v = (v === null || v === undefined) ? '' : String(v);
+          return /[",\r\n]|^\s|\s$/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+        }
+        function toReportCsv(rows){ return '﻿' + rows.map(function(r){ return r.map(csvCell).join(','); }).join('\r\n') + '\r\n'; }
+        // The StockNetwork file itself is written exactly the way StockNetwork
+        // writes its own export (checked byte-for-byte against a real one): no
+        // BOM, CRLF line endings, the Resort column always in quotes, other
+        // fields quoted only when they contain a comma, quote or line break.
+        function toStockNetworkCsv(rows){
+          return rows.map(function(r, n){
+            return r.map(function(v, i){
+              v = (v === null || v === undefined) ? '' : String(v);
+              var q = (i === 0 && n > 0) || /[",\r\n]/.test(v);
+              return q ? '"' + v.replace(/"/g, '""') + '"' : v;
+            }).join(',');
+          }).join('\r\n') + '\r\n';
+        }
+        function download(name, text){
+          var blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob); a.download = name;
+          document.body.appendChild(a); a.click();
+          setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        }
+        function g(r, k){ return k > -1 ? (r[k] || '') : ''; }
+
+        function serverRow(i){
+          var r = state.rows[i], c = state.col;
+          return { i: i, name: g(r, c.name), resortId: g(r, c.resortId), siteId: g(r, c.siteId), lat: g(r, c.lat).trim(), lng: g(r, c.lng).trim(), csvCountry: g(r, c.country).trim() };
+        }
+        function badCoords(i){
+          var r = state.rows[i], c = state.col;
+          var la = g(r, c.lat).trim(), ln = g(r, c.lng).trim();
+          return (la !== '' && !isFinite(parseFloat(la))) || (ln !== '' && !isFinite(parseFloat(ln)));
+        }
+
+        fileBtn.addEventListener('click', function(){ fileInput.click(); });
+        fileInput.addEventListener('change', function(){
+          if(!fileInput.files || !fileInput.files[0]) return;
+          var f = fileInput.files[0];
+          var reader = new FileReader();
+          reader.onload = function(){
+            var rows = parseCsv(String(reader.result || ''));
+            if(rows.length < 2){ setStatus('That file looks empty.', true); return; }
+            var header = rows.shift();
+            var lower = header.map(function(h){ return h.trim().toLowerCase(); });
+            function ix(){ for(var a = 0; a < arguments.length; a++){ var j = lower.indexOf(arguments[a]); if(j > -1) return j; } return -1; }
+            var col = { name: ix('resort','name'), country: ix('country'), state: ix('state'), city: ix('city'), suburb: ix('suburb'), lat: ix('latitude'), lng: ix('longitude'), resortId: ix('resortid'), siteId: ix('siteid') };
+            if(col.name < 0 || col.lat < 0 || col.lng < 0){ setStatus('This doesn’t look like the StockNetwork resort export — I need "Resort", "Latitude" and "Longitude" columns.', true); return; }
+            if(col.country < 0 || col.state < 0 || col.city < 0 || col.suburb < 0){ setStatus('This export is missing one of the Country, State, City or Suburb columns, so there is nothing for me to fill in.', true); return; }
+            rows = rows.filter(function(r){ return r.length > 1 || (r[0] || '').trim() !== ''; });
+            state = { header: header, rows: rows, col: col, results: {}, fileName: f.name };
+            dlBox.style.display = 'none';
+            startBtn.disabled = true;
+            setStatus('Loaded ' + rows.length + ' properties from ' + f.name + '. Checking how many the hub already knows…');
+            var payload = [];
+            for(var i = 0; i < rows.length; i++){ if(!badCoords(i)) payload.push(serverRow(i)); }
+            mapAdminPost('exportLocations', { dryRun: true, rows: payload }).then(function(res){
+              if(!(res.data && res.data.ok)){ setStatus((res.data && res.data.error) || 'Could not check the hub.', true); return; }
+              var d = res.data;
+              var msg = 'Loaded ' + rows.length + ' properties from ' + f.name + '. The hub already has a current location for ' + d.fromHub + ' of them; ' + d.needLookup + ' need a fresh look-up (Google, each coordinate only once); ' + (d.unusable + (rows.length - payload.length)) + ' have no usable coordinates.';
+              if(d.needLookup > 300) msg += ' That is a lot of look-ups — running “Re-check all zones” first will do them in a safer, resumable way.';
+              msg += ' Press “Build corrected file”.';
+              setStatus(msg);
+              startBtn.disabled = false;
+            }).catch(function(){ setStatus('Could not check the hub — the request failed. You can still press “Build corrected file”.', true); startBtn.disabled = false; });
+          };
+          reader.readAsText(f);
+          fileInput.value = '';
+        });
+
+        function tally(){
+          var t = { ok: 0, nearby: 0, sea: 0, check: 0, fail: 0, skip: 0, done: 0 };
+          Object.keys(state.results).forEach(function(k){ var s = state.results[k].status; if(t[s] !== undefined) t[s]++; t.done++; });
+          return t;
+        }
+
+        startBtn.addEventListener('click', function(){
+          if(!state || running) return;
+          state.results = {};
+          running = true; startBtn.disabled = true; fileBtn.disabled = true; dlBox.style.display = 'none';
+          var pos = 0, retries = 0, stuck = 0;
+          var total = state.rows.length;
+
+          function finish(msg, isError){
+            running = false; startBtn.disabled = false; fileBtn.disabled = false;
+            setStatus(msg, isError);
+            if(Object.keys(state.results).length) dlBox.style.display = 'flex';
+          }
+          function next(){
+            // Rows with damaged coordinates never go to the server.
+            while(pos < total && badCoords(pos)){
+              state.results[pos] = { i: pos, status: 'skip', note: 'The Latitude/Longitude columns don’t hold numbers — this row looks damaged (columns shifted), so it was left as it is.' };
+              pos++;
+            }
+            if(pos >= total){
+              var t = tally();
+              finish('Done — ' + total + ' properties: ' + t.ok + ' placed, ' + t.nearby + ' placed “Nearby” a town, ' + t.sea + ' with coordinates in the sea, ' + t.check + ' with a country clash, ' + t.fail + ' the hub couldn’t place, ' + t.skip + ' with no usable coordinates. Download the corrected file and the change report below.');
+              return;
+            }
+            var slice = [], j = pos;
+            while(j < total && slice.length < BATCH){
+              if(badCoords(j)){
+                state.results[j] = { i: j, status: 'skip', note: 'The Latitude/Longitude columns don’t hold numbers — this row looks damaged (columns shifted), so it was left as it is.' };
+              } else slice.push(serverRow(j));
+              j++;
+            }
+            var t0 = tally();
+            setStatus('Working… ' + pos + ' of ' + total + ' (' + t0.ok + ' placed, ' + t0.nearby + ' nearby, ' + (t0.sea + t0.check + t0.fail + t0.skip) + ' to review so far)');
+            mapAdminPost('exportLocations', { rows: slice }).then(function(res){
+              if(!(res.data && res.data.ok)){ finish((res.data && res.data.error) || 'Could not build the file.', true); return; }
+              retries = 0;
+              var results = res.data.results || [], used = res.data.nextIndex || 0;
+              results.forEach(function(it){ state.results[it.i] = it; });
+              if(!used){
+                stuck++;
+                if(stuck >= 3){ finish('Stopped — the server processed nothing three times in a row at row ' + pos + '. Press “Build corrected file” to try again.', true); return; }
+              } else stuck = 0;
+              if(used >= slice.length){ pos = j; }
+              else if(used > 0){ pos = slice[used - 1].i + 1; }
+              next();
+            }).catch(function(){
+              retries++;
+              if(retries <= MAX_BATCH_RETRIES){
+                setStatus('That request timed out — retrying (' + retries + '/' + MAX_BATCH_RETRIES + ')… ' + pos + ' of ' + total + ' done');
+                setTimeout(next, 1500);
+                return;
+              }
+              finish('Stopped after repeated timeouts at row ' + pos + ' of ' + total + '. Press “Build corrected file” to start again — anything already looked up is remembered, so it will be quicker.', true);
+            });
+          }
+          next();
+        });
+
+        var APPLY = { ok: 1, nearby: 1, sea: 1 };
+        var LABEL = { ok: 'OK', nearby: 'Nearby a town', sea: 'Coordinates in the sea', check: 'Country clash — left unchanged', fail: 'Couldn’t place — left unchanged', skip: 'No usable coordinates — left unchanged' };
+        var ORDER = { check: 0, fail: 1, skip: 2, sea: 3, nearby: 4, ok: 5 };
+
+        dlFileBtn.addEventListener('click', function(){
+          var c = state.col, changed = 0, out = [state.header];
+          state.rows.forEach(function(r, i){
+            var it = state.results[i];
+            if(it && APPLY[it.status]){
+              var nr = r.slice();
+              nr[c.country] = it.country; nr[c.state] = it.state; nr[c.city] = it.city; nr[c.suburb] = it.suburb;
+              if(nr[c.country] !== r[c.country] || nr[c.state] !== r[c.state] || nr[c.city] !== r[c.city] || nr[c.suburb] !== r[c.suburb]) changed++;
+              r = nr;
+            }
+            out.push(r);
+          });
+          download('Resort Information - hub corrected.csv', toStockNetworkCsv(out));
+          setStatus('Downloaded the corrected file: ' + changed + ' of ' + state.rows.length + ' rows had Country, State, City or Suburb changed; every other column and row is exactly as it was. Have a look through the change report before loading it into StockNetwork.');
+        });
+
+        dlReportBtn.addEventListener('click', function(){
+          var c = state.col;
+          var out = [['Status','Changed','Resort','ResortID','SiteID','Latitude','Longitude','Old Country','New Country','Old State','New State','Old City','New City','Old Suburb','New Suburb','Note','Suggested Latitude','Suggested Longitude','Check on Google Maps']];
+          var idx = [];
+          state.rows.forEach(function(r, i){ if(state.results[i]) idx.push(i); });
+          function didChange(i){
+            var it = state.results[i], r = state.rows[i];
+            return !!(APPLY[it.status] && (it.country !== g(r, c.country) || it.state !== g(r, c.state) || it.city !== g(r, c.city) || it.suburb !== g(r, c.suburb)));
+          }
+          idx.sort(function(a, b){
+            var d = ORDER[state.results[a].status] - ORDER[state.results[b].status];
+            if(d) return d;
+            d = (didChange(b) ? 1 : 0) - (didChange(a) ? 1 : 0);
+            return d || g(state.rows[a], c.name).localeCompare(g(state.rows[b], c.name));
+          });
+          idx.forEach(function(i){
+            var it = state.results[i], r = state.rows[i], apply = APPLY[it.status];
+            var la = g(r, c.lat).trim(), ln = g(r, c.lng).trim();
+            var sug = it.suggestion;
+            var link = (sug ? 'https://www.google.com/maps/search/?api=1&query=' + sug.lat + ',' + sug.lng : (la && ln ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(la + ',' + ln) : ''));
+            out.push([
+              LABEL[it.status] || it.status, didChange(i) ? 'Yes' : 'No', g(r, c.name), g(r, c.resortId), g(r, c.siteId), la, ln,
+              g(r, c.country), apply ? it.country : '', g(r, c.state), apply ? it.state : '', g(r, c.city), apply ? it.city : '', g(r, c.suburb), apply ? it.suburb : '',
+              it.note || '', sug ? sug.lat : '', sug ? sug.lng : '', link
+            ]);
+          });
+          download('hub-corrected-change-report.csv', toReportCsv(out));
         });
       })();
 
@@ -6709,7 +6988,7 @@
         downloadCsv('avante-towns-template.csv', ['name', 'area', 'zone', 'description', 'latitude', 'longitude', 'affiliateId'], {
           name: 'e.g. Hermanus',
           area: 'e.g. Cape Whale Coast',
-          zone: 'Eastern Cape & Garden Route',
+          zone: 'Garden Route',
           description: 'Short blurb for the map popup and area-hook picker',
           latitude: '-34.4187',
           longitude: '19.2345',
@@ -6774,7 +7053,8 @@
       // Route" pins around Knysna is an obvious outlier worth checking.
       var MAP_ZONES = [
         'Western Cape (Cape Town & Winelands)',
-        'Eastern Cape & Garden Route',
+        'Garden Route',
+        'Eastern Cape',
         'Northern Cape',
         'Free State',
         'KwaZulu-Natal',
@@ -6782,20 +7062,39 @@
         'Mpumalanga',
         'Limpopo'
       ];
+      // Same colours as the zone-areas example map Jean sent (2026-09-21).
       var MAP_ZONE_COLORS = {
-        'Western Cape (Cape Town & Winelands)': '#2a78d6',
-        'Eastern Cape & Garden Route': '#eb6834',
-        'Northern Cape': '#1baf7a',
-        'Free State': '#eda100',
-        'KwaZulu-Natal': '#e87ba4',
-        'Gauteng & North West': '#008300',
-        'Mpumalanga': '#4a3aa7',
-        'Limpopo': '#e34948'
+        'Western Cape (Cape Town & Winelands)': '#8074dd',
+        'Garden Route': '#e6a000',
+        'Eastern Cape': '#d85a30',
+        'Northern Cape': '#888780',
+        'Free State': '#b8741a',
+        'KwaZulu-Natal': '#1d9e75',
+        'Gauteng & North West': '#3a88e0',
+        'Mpumalanga': '#63982a',
+        'Limpopo': '#d4537e'
       };
       var MAP_ZONE_NO_ZONE_COLOR = '#5b5b5b'; // deliberately distinct from the "hidden" grey (#b7b7ae) below
 
-      function zoneColor(zone){
-        return MAP_ZONE_COLORS[zone] || MAP_ZONE_NO_ZONE_COLOR;
+      // Zones outside South Africa are one per province/region, far too many
+      // to give each a colour, so every place in the same COUNTRY shares one
+      // colour (a stable colour worked out from the country's name).
+      function countryColor(country){
+        var h = 0;
+        for(var i = 0; i < country.length; i++){ h = (h * 31 + country.charCodeAt(i)) % 360; }
+        return 'hsl(' + h + ',55%,42%)';
+      }
+      function isForeign(country){ return !!country && country !== 'South Africa'; }
+      // Key used to group places in the legend: an SA zone name, 'c:<Country>', or '' for none.
+      function zoneKeyFor(zone, country){
+        if(MAP_ZONE_COLORS[zone]) return zone;
+        if(isForeign(country)) return 'c:' + country;
+        return '';
+      }
+      function zoneColor(zone, country){
+        if(MAP_ZONE_COLORS[zone]) return MAP_ZONE_COLORS[zone];
+        if(isForeign(country)) return countryColor(country);
+        return MAP_ZONE_NO_ZONE_COLOR;
       }
 
       function zoneLegendItem(label, color, count){
@@ -6810,32 +7109,93 @@
         return item;
       }
 
-      function renderZoneLegend(towns){
+      function renderZoneLegend(towns, properties){
         var legendEl = document.getElementById('zoneLegend');
         if(!legendEl) return;
-        var counts = {};
+        var townCounts = {}, propCounts = {};
         (towns || []).forEach(function(t){
           var lat = parseFloat(t.latitude);
           var lng = parseFloat(t.longitude);
           if(!isFinite(lat) || !isFinite(lng)) return;
-          var key = MAP_ZONE_COLORS[t.zone] ? t.zone : '';
-          counts[key] = (counts[key] || 0) + 1;
+          var key = zoneKeyFor(t.zone, t.country);
+          townCounts[key] = (townCounts[key] || 0) + 1;
         });
+        (properties || []).forEach(function(p){
+          if(typeof p.latitude !== 'number' || typeof p.longitude !== 'number') return;
+          var key = zoneKeyFor(p.zone, p.country);
+          propCounts[key] = (propCounts[key] || 0) + 1;
+        });
+        function countText(key){
+          var parts = [];
+          if(townCounts[key]) parts.push(townCounts[key] + ' town' + (townCounts[key] === 1 ? '' : 's'));
+          if(propCounts[key]) parts.push(propCounts[key] + ' propert' + (propCounts[key] === 1 ? 'y' : 'ies'));
+          return parts.join(' \u00b7 ');
+        }
+        function legendItem(label, color, key){
+          var item = zoneLegendItem(label, color, 0);
+          item.lastChild.textContent = label + ' (' + countText(key) + ')';
+          return item;
+        }
         legendEl.innerHTML = '';
         MAP_ZONES.forEach(function(zone){
-          if(!counts[zone]) return;
-          legendEl.appendChild(zoneLegendItem(zone, MAP_ZONE_COLORS[zone], counts[zone]));
+          if(!townCounts[zone] && !propCounts[zone]) return;
+          legendEl.appendChild(legendItem(zone, MAP_ZONE_COLORS[zone], zone));
         });
-        if(counts['']){
-          legendEl.appendChild(zoneLegendItem('No zone set', MAP_ZONE_NO_ZONE_COLOR, counts['']));
+        var foreignKeys = Object.keys(townCounts).concat(Object.keys(propCounts)).filter(function(k, i, a){ return k.indexOf('c:') === 0 && a.indexOf(k) === i; }).sort();
+        foreignKeys.forEach(function(k){
+          var country = k.slice(2);
+          legendEl.appendChild(legendItem(country + ' (outside South Africa)', countryColor(country), k));
+        });
+        if(townCounts[''] || propCounts['']){
+          legendEl.appendChild(legendItem('No zone set', MAP_ZONE_NO_ZONE_COLOR, ''));
         }
         if(!legendEl.children.length){
           var noneEl = document.createElement('span');
           noneEl.style.color = 'var(--muted)';
-          noneEl.textContent = 'No towns with coordinates yet.';
+          noneEl.textContent = 'No towns or properties with coordinates yet.';
           legendEl.appendChild(noneEl);
         }
       }
+
+      // Shaded zone areas behind the pins (polygons served by /api/map?shapes=1,
+      // built from the district boundaries). Toggle: #zoneShadeToggle.
+      var zoneShapesData = null;
+      var zoneShapesLoading = false;
+      var zoneShadeLayer = null;
+
+      function drawZoneShading(){
+        if(!adminLeafletMap) return;
+        if(zoneShadeLayer){ adminLeafletMap.removeLayer(zoneShadeLayer); zoneShadeLayer = null; }
+        var toggle = document.getElementById('zoneShadeToggle');
+        if(toggle && !toggle.checked) return;
+        if(!zoneShapesData){
+          if(zoneShapesLoading) return;
+          zoneShapesLoading = true;
+          fetch('/api/map?shapes=1').then(function(r){ return r.json(); }).then(function(d){
+            zoneShapesData = (d && d.shapes) || {};
+            zoneShapesLoading = false;
+            drawZoneShading();
+          }).catch(function(){ zoneShapesLoading = false; });
+          return;
+        }
+        var group = L.layerGroup();
+        Object.keys(zoneShapesData).forEach(function(zone){
+          var color = zoneColor(zone);
+          zoneShapesData[zone].forEach(function(poly){
+            var rings = poly.map(function(ring){ return ring.map(function(pt){ return [pt[1], pt[0]]; }); });
+            var pg = L.polygon(rings, { color: color, weight: 1, opacity: 0.85, fillColor: color, fillOpacity: 0.30 });
+            pg.bindTooltip(zone, { sticky: true });
+            group.addLayer(pg);
+          });
+        });
+        zoneShadeLayer = group;
+        group.addTo(adminLeafletMap);
+        group.eachLayer(function(l){ if(l.bringToBack) l.bringToBack(); });
+      }
+      (function(){
+        var t = document.getElementById('zoneShadeToggle');
+        if(t) t.addEventListener('change', drawZoneShading);
+      })();
 
       var adminClusterGroup = null;
 
@@ -6849,7 +7209,7 @@
 
         properties.forEach(function(p){
           if(typeof p.latitude !== 'number' || typeof p.longitude !== 'number') return;
-          var color = p.hidden ? '#b7b7ae' : '#1a4d7a';
+          var color = p.hidden ? '#b7b7ae' : zoneColor(p.zone, p.country);
           var marker = L.marker([p.latitude, p.longitude], { icon: dotIcon(color) });
           var content = document.createElement('div');
           var title = document.createElement('div');
@@ -6906,14 +7266,15 @@
           allMarkers.push(marker);
         });
 
-        renderZoneLegend(towns);
+        renderZoneLegend(towns, properties);
+        drawZoneShading();
 
         (towns || []).forEach(function(t){
           var lat = parseFloat(t.latitude);
           var lng = parseFloat(t.longitude);
           if(!isFinite(lat) || !isFinite(lng)) return;
           var hidden = t.visible === false || t.hidden === true;
-          var color = hidden ? '#b7b7ae' : zoneColor(t.zone);
+          var color = hidden ? '#b7b7ae' : zoneColor(t.zone, t.country);
           var marker = L.marker([lat, lng], { icon: dotIcon(color) });
           var content = document.createElement('div');
           var title = document.createElement('div');
@@ -6923,7 +7284,7 @@
           var zoneLine = document.createElement('div');
           zoneLine.style.cssText = 'font-size:12px; color:#555; display:flex; align-items:center; gap:5px; margin-top:2px;';
           var zoneSwatch = document.createElement('span');
-          zoneSwatch.style.cssText = 'width:8px; height:8px; border-radius:50%; display:inline-block; background:' + zoneColor(t.zone) + ';';
+          zoneSwatch.style.cssText = 'width:8px; height:8px; border-radius:50%; display:inline-block; background:' + zoneColor(t.zone, t.country) + ';';
           zoneLine.appendChild(zoneSwatch);
           var zoneText = document.createElement('span');
           zoneText.textContent = t.zone || 'No zone set';
@@ -7525,7 +7886,7 @@
         downloadCsv('avante-activities-template.csv', ['name', 'area', 'zone', 'price', 'contactLink', 'description', 'latitude', 'longitude'], {
           name: 'e.g. Bloukrans Bungy',
           area: 'e.g. Plettenberg Bay',
-          zone: 'Eastern Cape & Garden Route',
+          zone: 'Garden Route',
           price: 'e.g. R2,800 pp',
           contactLink: 'https://example.com/book',
           description: 'Short blurb for the map popup',
