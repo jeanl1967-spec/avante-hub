@@ -10,7 +10,7 @@ import { mergeIntoRecord, AI_SCAN_CACHE_FIELDS_CLEARED } from "./lib/record-merg
 import { isShortLink, resolveShortLink, findExistingShortLink, createShortLink } from "./lib/short-link.js";
 import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-link.js";
 import { resolveHookMode } from "./lib/hook-mode.js";
-import { ZONES } from "./lib/zones.js";
+import { ZONES, LEGACY_EXPAND } from "./lib/zones.js";
 import {
   parseStockNetworkCsv,
   normalizeStockNetworkStatus,
@@ -841,10 +841,12 @@ export default async (request, context) => {
       const email = typeof body.email === "string" ? body.email.trim() : "";
       const siteNr = typeof body.siteNr === "string" ? body.siteNr.trim() : "";
       const zones = Array.isArray(body.zones)
-        // The old combined "Eastern Cape & Garden Route" zone was split into two
-        // (2026-09-21); an old value saved from a stale form counts as both.
+        // The old combined zones ("Eastern Cape & Garden Route", "Western Cape
+        // (Cape Town & Winelands)", "Gauteng & North West") were split
+        // (2026-09-21); an old value saved from a stale form counts as all the
+        // zones it covered.
         ? [...new Set(body.zones
-            .flatMap((z) => (z === "Eastern Cape & Garden Route" ? ["Garden Route", "Eastern Cape"] : [z]))
+            .flatMap((z) => (LEGACY_EXPAND[z] ? LEGACY_EXPAND[z] : [z]))
             .filter((z) => typeof z === "string" && ZONES.includes(z)))]
         : [];
       const ALLOWED_TYPES = ["franchise", "property", "agent"];
