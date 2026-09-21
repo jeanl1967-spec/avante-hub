@@ -6261,28 +6261,106 @@
           startGeocodeBtn.disabled = false;
           checkGeocodeBtn.disabled = false;
           recheckZonesStatusEl.textContent = summary;
-          recheckZonesStatusEl.className = 'status show';
+          recheckZonesStatusEl.className = 'status show' + (/^Done/.test(summary) ? ' ok' : '');
           loadActivities();
+        }
+
+        // Adaptive batch size. If a batch fails, halve it and retry the same
+        // spot: a batch that's too slow for the server (Google being slow)
+        // often succeeds when smaller, and a single bad coordinate gets
+        // isolated instead of blocking the whole run forever. A coordinate
+        // that still fails on its own after retries is skipped (and counted)
+        // rather than stalling everything behind it.
+        var batchSize = 12, MIN_SIZE = 1, lastError = '', cleanStreak = 0;
+        var singleFailures = 0, skippedAt = [], consecutiveSkips = 0;
+        var MAX_SKIPS_IN_A_ROW = 3;
+
+        // Like mapAdminPost, but never throws on a non-JSON reply (a
+        // timed-out Netlify function returns an HTML/text error page): it
+        // reports the HTTP status and the start of the body, so a failure
+        // can be diagnosed instead of just showing "timed out".
+        function recheckPost(body){
+          var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+          var timer = controller ? setTimeout(function(){ controller.abort(); }, 60000) : null;
+          return fetch('/api/map', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(Object.assign({ action: 'recheckZones', token: ADMIN_TOKEN }, body)),
+            signal: controller ? controller.signal : undefined
+          }).then(function(r){
+            if(timer) clearTimeout(timer);
+            if(r.status === 401){ goToLogin(); return Promise.reject(new Error('unauthenticated')); }
+            return r.text().then(function(text){
+              var data = null;
+              try { data = JSON.parse(text); } catch(e){}
+              return { status: r.status, data: data, raw: text };
+            });
+          }, function(err){
+            if(timer) clearTimeout(timer);
+            return { status: 0, data: null, raw: (err && err.name === 'AbortError') ? 'no reply after 60 seconds' : String((err && err.message) || err) };
+          });
+        }
+        function describeFailure(res){
+          var snippet = String(res.raw || '').replace(/\s+/g, ' ').slice(0, 140);
+          return (res.status ? ('HTTP ' + res.status + ' ') : 'no response ') + (snippet ? ('— ' + snippet) : '');
+        }
+        function stopWith(msg){
+          saveOffset(offset);
+          finish(msg);
         }
 
         function runBatch(){
           iterations++;
           if(iterations > MAX_ITERATIONS){
-            finish('Stopped after ' + MAX_ITERATIONS + ' batches (checked ' + totalChecked + ', changed ' + totalChanged + ' so far' + progressText() + ') — click Re-check all zones again and choose Resume.');
+            stopWith('Stopped after ' + MAX_ITERATIONS + ' batches (checked ' + totalChecked + ', changed ' + totalChanged + ' so far' + progressText() + ') — click Re-check all zones again and choose Resume.');
             return;
           }
           recheckZonesStatusEl.textContent = 'Re-checking… (' + totalChecked + ' checked, ' + totalChanged + ' changed so far' + progressText() + ')';
-          recheckZonesStatusEl.className = 'status show';
-          mapAdminPost('recheckZones', { dryRun: false, limit: 12, offset: offset }).then(function(res){
-            batchRetries = 0;
+          recheckZonesStatusEl.className = 'status show ok';
+          recheckPost({ dryRun: false, limit: batchSize, offset: offset }).then(function(res){
             if(!(res.data && res.data.ok)){
-              recheckZonesBtn.disabled = false;
-              startGeocodeBtn.disabled = false;
-              checkGeocodeBtn.disabled = false;
-              recheckZonesStatusEl.textContent = (res.data && res.data.error) || 'Could not re-check.';
-              recheckZonesStatusEl.className = 'status show';
+              // Either the server answered with a real error message, or the
+              // reply wasn't JSON at all (timeout / gateway error).
+              var serverMsg = res.data && res.data.error;
+              lastError = serverMsg ? ('server said: ' + serverMsg) : describeFailure(res);
+              if(serverMsg && res.status >= 400 && res.status < 500){
+                stopWith('Could not re-check — ' + serverMsg + progressText() + '.');
+                return;
+              }
+              batchRetries++; cleanStreak = 0;
+              if(batchSize > MIN_SIZE){
+                batchSize = Math.max(MIN_SIZE, Math.floor(batchSize / 2));
+                recheckZonesStatusEl.textContent = 'That batch failed (' + lastError + ') — trying smaller batches (' + batchSize + ' at a time)…' + progressText();
+                recheckZonesStatusEl.className = 'status show';
+                setTimeout(runBatch, 1500);
+                return;
+              }
+              // Already down to one location at a time.
+              singleFailures++;
+              if(singleFailures < 3){
+                recheckZonesStatusEl.textContent = 'Location ' + (offset + 1) + ' failed (' + lastError + ') — retrying (' + singleFailures + '/3)…';
+                recheckZonesStatusEl.className = 'status show';
+                setTimeout(runBatch, 2000);
+                return;
+              }
+              // This one location keeps failing on its own: skip it, note it, move on.
+              skippedAt.push(offset + 1);
+              consecutiveSkips++;
+              singleFailures = 0;
+              if(consecutiveSkips >= MAX_SKIPS_IN_A_ROW){
+                // Not a single bad coordinate — something is wrong more widely.
+                offset -= (consecutiveSkips - 1);   // don't skip past the ones we haven't really checked
+                skippedAt = skippedAt.slice(0, skippedAt.length - consecutiveSkips);
+                stopWith('Stopped at location ' + (offset + 1) + (totalCoordinates ? (' of ' + totalCoordinates) : '') + ' — the server keeps failing even on single locations (' + lastError + '). This looks like a problem on the server or with Google rather than one bad location. Checked ' + totalChecked + ' so far. Click Re-check all zones and choose Resume to try again later.');
+                return;
+              }
+              offset += 1;
+              saveOffset(offset);
+              setTimeout(runBatch, 500);
               return;
             }
+
+            batchRetries = 0; singleFailures = 0; consecutiveSkips = 0;
             var batchChecked = res.data.checkedRecords || 0;
             var batchFailed = res.data.geocodeFailures || 0;
             var batchProcessed = res.data.processedCoordinates || 0;
@@ -6303,10 +6381,21 @@
               });
             }
 
-            // Move the cursor forward by exactly what the server processed.
+            // The server may finish only part of a batch when Google is slow
+            // (it reports exactly how far it got) — the cursor moves by that.
             var newOffset = (typeof res.data.nextOffset === 'number') ? res.data.nextOffset : (offset + batchProcessed);
             totalCoordinates = res.data.totalCoordinates || totalCoordinates;
             var stalled = batchProcessed === 0 || newOffset <= offset;
+            // Shrink at once when the server had to cut a batch short; only
+            // grow back after 5 clean batches in a row, so a size that was
+            // too big isn't retried (and re-paid for on Google) every other call.
+            if(res.data.skippedForTime > 0){
+              cleanStreak = 0;
+              if(batchSize > 4) batchSize = Math.max(4, Math.floor(batchSize / 2));
+            } else if(batchSize < 12){
+              cleanStreak++;
+              if(cleanStreak >= 5){ batchSize = Math.min(12, batchSize * 2); cleanStreak = 0; }
+            }
             offset = newOffset;
 
             // Stop early only if several batches in a row failed outright
@@ -6319,8 +6408,7 @@
               saveOffset(offset);
               runBatch();
             } else if(stalled && res.data.remainingCoordinates > 0){
-              saveOffset(offset);
-              finish('Stopped because the server stopped advancing at location ' + offset + (totalCoordinates ? (' of ' + totalCoordinates) : '') + ' (checked ' + totalChecked + ', changed ' + totalChanged + '). Click Re-check all zones again and choose Resume.');
+              stopWith('Stopped because the server stopped advancing at location ' + offset + (totalCoordinates ? (' of ' + totalCoordinates) : '') + ' (checked ' + totalChecked + ', changed ' + totalChanged + '). Click Re-check all zones again and choose Resume.');
             } else {
               saveOffset(noProgress ? offset : 0);
               var summary = (noProgress ? ('Stopped early at location ' + offset + (totalCoordinates ? (' of ' + totalCoordinates) : '') + ' — 3 batches in a row couldn’t be resolved at all. So far: checked ') : 'Done — checked ') + totalChecked + ' record' + (totalChecked === 1 ? '' : 's') +
@@ -6331,6 +6419,9 @@
               }
               if(exampleChanges.length){
                 summary += ' Examples: ' + exampleChanges.map(function(c){ return c.what + ': ' + c.from + ' → ' + c.to; }).join('; ') + '.';
+              }
+              if(skippedAt.length){
+                summary += ' ' + skippedAt.length + ' location' + (skippedAt.length === 1 ? '' : 's') + ' kept failing on their own and were skipped (positions ' + skippedAt.join(', ') + ' in the list) — their zones are unchanged.';
               }
               if(totalFailed){
                 summary += ' ' + totalFailed + ' location' + (totalFailed === 1 ? '' : 's') + ' couldn’t be resolved';
@@ -6344,20 +6435,8 @@
               }
               finish(summary);
             }
-          }).catch(function(){
-            batchRetries++;
-            if(batchRetries <= MAX_BATCH_RETRIES){
-              recheckZonesStatusEl.textContent = 'That request timed out — retrying (' + batchRetries + '/' + MAX_BATCH_RETRIES + ')… (' + totalChecked + ' checked so far)';
-              recheckZonesStatusEl.className = 'status show';
-              setTimeout(runBatch, 1500);
-              return;
-            }
-            recheckZonesBtn.disabled = false;
-            startGeocodeBtn.disabled = false;
-            checkGeocodeBtn.disabled = false;
-            saveOffset(offset);
-            recheckZonesStatusEl.textContent = 'Checked ' + totalChecked + ' so far' + progressText() + ', then that request kept timing out after ' + MAX_BATCH_RETRIES + ' retries — click Re-check all zones again and choose Resume to carry on from there.';
-            recheckZonesStatusEl.className = 'status show';
+          }).catch(function(err){
+            stopWith('Stopped: ' + ((err && err.message) || 'unexpected error') + progressText() + '. Click Re-check all zones and choose Resume.');
           });
         }
         runBatch();
