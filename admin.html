@@ -1432,6 +1432,25 @@
       </div>
 
       <div class="card" style="margin-top:20px;">
+        <h3 style="margin-top:0;">Improve property coordinates (from your StockNetwork export)</h3>
+        <p style="margin-top:0;">Most StockNetwork coordinates are rounded to about 1 km, so map pins can sit a kilometre out. Choose your StockNetwork resort export (the .csv you upload to the resort list) and this looks each property up by name on Google, then gives you two files: a <strong>review report</strong> (every property with a confidence rating and the suggested latitude/longitude), and a <strong>copy of your export</strong> with only the high-confidence coordinates swapped in, ready to load back into StockNetwork. It changes nothing in the hub itself. Each property looked up is one Google lookup.</p>
+        <div class="btn-row" style="margin-top:0; align-items:center;">
+          <button class="btn-outline" id="coordFileBtn">Choose StockNetwork export (.csv)…</button>
+          <input type="file" id="coordFileInput" accept=".csv,text/csv" style="display:none;">
+          <select id="coordScopeSelect" style="width:auto; max-width:360px;">
+            <option value="first">Fix-first only: missing, 0,0, wrong country, or many on one point</option>
+            <option value="all">Everything with rounded or missing coordinates (uses many more lookups)</option>
+          </select>
+          <button class="primary" id="coordStartBtn" disabled>Start</button>
+        </div>
+        <div class="status" id="coordStatus"></div>
+        <div class="btn-row" id="coordDownloads" style="display:none; margin-top:12px;">
+          <button class="btn-outline" id="coordDownloadReportBtn">Download review report (.csv)</button>
+          <button class="btn-outline" id="coordDownloadUploadBtn">Download updated StockNetwork file (.csv)</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px;">
         <div class="btn-row" style="margin-top:0;">
           <button class="btn-outline" id="refreshTownsBtn">Refresh</button>
         </div>
@@ -6343,6 +6362,241 @@
         }
         runBatch();
       });
+
+      // ---- Improve property coordinates (from a StockNetwork export) ----
+      // Reads the admin's own StockNetwork resort export in the browser,
+      // asks map-api.js's read-only suggestCoordinates action to look each
+      // targeted property up by name (12 per request), then builds two CSV
+      // downloads entirely client-side. Nothing is written to the hub.
+      (function(){
+        var fileBtn = document.getElementById('coordFileBtn');
+        var fileInput = document.getElementById('coordFileInput');
+        var scopeSel = document.getElementById('coordScopeSelect');
+        var startBtn = document.getElementById('coordStartBtn');
+        var statusEl = document.getElementById('coordStatus');
+        var dlBox = document.getElementById('coordDownloads');
+        var dlReportBtn = document.getElementById('coordDownloadReportBtn');
+        var dlUploadBtn = document.getElementById('coordDownloadUploadBtn');
+        if(!fileBtn || !fileInput || !startBtn) return;
+
+        var BOX = { 'South Africa':[-35,-22,16,33.1], 'Namibia':[-29,-16.9,11.5,25.3], 'Zimbabwe':[-22.5,-15.6,25.2,33.1], 'Botswana':[-26.9,-17.8,20,29.4],
+          'Mozambique':[-27,-10.4,30.2,41], 'Swaziland':[-27.4,-25.7,30.7,32.2], 'Lesotho':[-30.7,-28.5,27,29.5], 'Zambia':[-18.1,-8.2,21.9,33.7],
+          'Tanzania':[-11.8,-0.9,29.3,40.5], 'Kenya':[-4.7,5.1,33.9,41.9], 'Indonesia':[-11.1,6.1,95,141.1], 'Malawi':[-17.2,-9.3,32.6,35.9] };
+        var BATCH = 12, MAX_BATCH_RETRIES = 4;
+        var state = null; // { header, rows, col, targets:[rowIdx], results:{rowIdx:result}, fileName }
+        var running = false;
+
+        function setStatus(t, isError){ statusEl.textContent = t; statusEl.className = 'status show' + (isError ? '' : ' ok'); }
+
+        // Minimal RFC-4180 parser (quoted fields, doubled quotes, newlines inside quotes).
+        function parseCsv(text){
+          if(text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+          var rows = [], row = [], field = '', inQ = false, i = 0, n = text.length, c;
+          while(i < n){
+            c = text[i];
+            if(inQ){
+              if(c === '"'){
+                if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
+                inQ = false; i++; continue;
+              }
+              field += c; i++; continue;
+            }
+            if(c === '"'){ inQ = true; i++; continue; }
+            if(c === ','){ row.push(field); field = ''; i++; continue; }
+            if(c === '\r'){ i++; continue; }
+            if(c === '\n'){ row.push(field); rows.push(row); row = []; field = ''; i++; continue; }
+            field += c; i++;
+          }
+          if(field !== '' || row.length){ row.push(field); rows.push(row); }
+          return rows;
+        }
+        function csvCell(v){
+          v = (v === null || v === undefined) ? '' : String(v);
+          return /[",\r\n]|^\s|\s$/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+        }
+        function toCsv(rows){ return '﻿' + rows.map(function(r){ return r.map(csvCell).join(','); }).join('\r\n') + '\r\n'; }
+        function download(name, text){
+          var blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob); a.download = name;
+          document.body.appendChild(a); a.click();
+          setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+        }
+
+        function decimals(t){ t = (t || '').trim(); var i = t.indexOf('.'); return i < 0 ? 0 : t.length - i - 1; }
+        function num(t){ var v = parseFloat((t || '').trim()); return isFinite(v) ? v : null; }
+
+        function pickTargets(scope){
+          var c = state.col, rows = state.rows, share = {}, i, r;
+          for(i = 0; i < rows.length; i++){
+            r = rows[i]; var k = (r[c.lat] || '').trim() + ',' + (r[c.lng] || '').trim();
+            share[k] = (share[k] || 0) + 1;
+          }
+          var out = [];
+          for(i = 0; i < rows.length; i++){
+            r = rows[i];
+            var la = num(r[c.lat]), ln = num(r[c.lng]);
+            var missing = la === null || ln === null || (la === 0 && ln === 0);
+            var d = missing ? 0 : Math.min(decimals(r[c.lat]), decimals(r[c.lng]));
+            var box = c.country > -1 ? BOX[(r[c.country] || '').trim()] : null;
+            var outside = !missing && box && !(la >= box[0] && la <= box[1] && ln >= box[2] && ln <= box[3]);
+            var stacked = !missing && d <= 2 && share[(r[c.lat] || '').trim() + ',' + (r[c.lng] || '').trim()] >= 10;
+            var rounded = !missing && d <= 2;
+            if(scope === 'all' ? (missing || outside || rounded) : (missing || outside || stacked)) out.push(i);
+          }
+          return out;
+        }
+
+        function queryFor(r){
+          var c = state.col, parts = [];
+          [c.name, c.suburb, c.city, c.state, c.country].forEach(function(ix){
+            if(ix < 0) return;
+            var v = (r[ix] || '').trim();
+            if(v && parts.map(function(p){ return p.toLowerCase(); }).indexOf(v.toLowerCase()) < 0) parts.push(v);
+          });
+          return parts.join(', ');
+        }
+
+        fileBtn.addEventListener('click', function(){ fileInput.click(); });
+        fileInput.addEventListener('change', function(){
+          if(!fileInput.files || !fileInput.files[0]) return;
+          var f = fileInput.files[0];
+          var reader = new FileReader();
+          reader.onload = function(){
+            var rows = parseCsv(String(reader.result || ''));
+            if(rows.length < 2){ setStatus('That file looks empty.', true); return; }
+            var header = rows.shift();
+            var lower = header.map(function(h){ return h.trim().toLowerCase(); });
+            function ix(){ for(var a = 0; a < arguments.length; a++){ var j = lower.indexOf(arguments[a]); if(j > -1) return j; } return -1; }
+            var col = { name: ix('resort','name'), country: ix('country'), state: ix('state','province'), city: ix('city'), suburb: ix('suburb'), lat: ix('latitude'), lng: ix('longitude'), resortId: ix('resortid'), siteId: ix('siteid') };
+            if(col.name < 0 || col.lat < 0 || col.lng < 0){ setStatus('This doesn’t look like the StockNetwork resort export — I need "Resort", "Latitude" and "Longitude" columns.', true); return; }
+            rows = rows.filter(function(r){ return r.length > 1 || (r[0] || '').trim() !== ''; });
+            state = { header: header, rows: rows, col: col, targets: [], results: {}, fileName: f.name };
+            dlBox.style.display = 'none';
+            startBtn.disabled = false;
+            var n = pickTargets(scopeSel.value).length;
+            setStatus('Loaded ' + rows.length + ' properties from ' + f.name + '. With this setting, ' + n + ' would be looked up on Google (' + n + ' lookups). Press Start.');
+          };
+          reader.readAsText(f);
+          fileInput.value = '';
+        });
+        scopeSel.addEventListener('change', function(){
+          if(!state || running) return;
+          var n = pickTargets(scopeSel.value).length;
+          setStatus('With this setting, ' + n + ' of ' + state.rows.length + ' properties would be looked up on Google (' + n + ' lookups). Press Start.');
+        });
+
+        function counts(){
+          var hi = 0, rv = 0, no = 0, fail = 0;
+          Object.keys(state.results).forEach(function(k){
+            var r = state.results[k];
+            if(r.failed) fail++;
+            if(r.confidence === 'high') hi++; else if(r.confidence === 'review') rv++; else no++;
+          });
+          return { hi: hi, rv: rv, no: no, fail: fail, done: Object.keys(state.results).length };
+        }
+
+        startBtn.addEventListener('click', function(){
+          if(!state || running) return;
+          if(!Object.keys(state.results).length){
+            state.targets = pickTargets(scopeSel.value);
+          }
+          var pending = state.targets.filter(function(i){ var r = state.results[i]; return !r || (r.failed && r.reason !== 'ZERO_RESULTS'); });
+          if(!pending.length){ setStatus('Nothing left to look up.'); showDownloads(); return; }
+          if(!confirm('This will look up ' + pending.length + ' properties on Google (one lookup each). Continue?')) return;
+          running = true; startBtn.disabled = true; fileBtn.disabled = true; scopeSel.disabled = true;
+          var pos = 0, retries = 0, failStreak = 0;
+
+          function finish(msg, isError){
+            running = false; startBtn.disabled = false; fileBtn.disabled = false; scopeSel.disabled = false;
+            setStatus(msg, isError); showDownloads();
+          }
+          function next(){
+            if(pos >= pending.length){
+              var c = counts();
+              finish('Done — looked up ' + c.done + ' properties: ' + c.hi + ' high-confidence, ' + c.rv + ' to review, ' + c.no + ' where Google could only find the town (no better than what you have). Download your files below.');
+              return;
+            }
+            var slice = pending.slice(pos, pos + BATCH);
+            var items = slice.map(function(i){
+              var r = state.rows[i];
+              return { id: i, query: queryFor(r), lat: r[state.col.lat], lng: r[state.col.lng] };
+            });
+            var c0 = counts();
+            setStatus('Looking up… ' + (pos) + ' of ' + pending.length + ' (' + c0.hi + ' high-confidence, ' + c0.rv + ' to review so far)');
+            mapAdminPost('suggestCoordinates', { items: items }).then(function(res){
+              retries = 0;
+              if(!(res.data && res.data.ok)){ finish((res.data && res.data.error) || 'Could not look these up.', true); return; }
+              var allFailed = true;
+              res.data.results.forEach(function(r){ state.results[r.id] = r; if(!r.failed) allFailed = false; });
+              if(res.data.results.length && allFailed){
+                failStreak++;
+                if(failStreak >= 3){
+                  var first = res.data.results[0];
+                  finish('Stopped — Google refused 3 batches in a row (' + (first.reason || 'unknown') + (first.message ? ': ' + first.message : '') + '). Usually the API key, billing or the monthly free limit. ' + counts().done + ' properties were done before this.', true);
+                  return;
+                }
+              } else failStreak = 0;
+              pos += slice.length;
+              next();
+            }).catch(function(){
+              retries++;
+              if(retries <= MAX_BATCH_RETRIES){
+                setStatus('That request timed out — retrying (' + retries + '/' + MAX_BATCH_RETRIES + ')… ' + pos + ' of ' + pending.length + ' done');
+                setTimeout(next, 1500);
+                return;
+              }
+              finish('Stopped after repeated timeouts at ' + pos + ' of ' + pending.length + '. Press Start again to carry on — finished lookups are kept — or download what you have.', true);
+            });
+          }
+          next();
+        });
+
+        function showDownloads(){
+          if(state && Object.keys(state.results).length) dlBox.style.display = 'flex';
+        }
+
+        function mapsLink(r, res){
+          if(res && res.lat !== undefined && res.lat !== null) return 'https://www.google.com/maps/search/?api=1&query=' + res.lat + ',' + res.lng;
+          return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(queryFor(r));
+        }
+
+        dlReportBtn.addEventListener('click', function(){
+          var c = state.col, out = [['Confidence','Resort','ResortID','SiteID','Country','State','City','Suburb','Current Latitude','Current Longitude','Suggested Latitude','Suggested Longitude','Moved (km)','Google matched','Note','Check on Google Maps']];
+          var order = { review: 0, high: 1, none: 2 };
+          var idx = state.targets.filter(function(i){ return state.results[i]; });
+          idx.sort(function(a, b){
+            var d = order[state.results[a].confidence] - order[state.results[b].confidence];
+            return d || (state.rows[a][c.name] || '').localeCompare(state.rows[b][c.name] || '');
+          });
+          idx.forEach(function(i){
+            var r = state.rows[i], res = state.results[i], has = res.confidence !== 'none';
+            function g(k){ return k > -1 ? (r[k] || '') : ''; }
+            out.push([
+              res.confidence === 'high' ? 'High' : res.confidence === 'review' ? 'Review' : 'No better match',
+              g(c.name), g(c.resortId), g(c.siteId), g(c.country), g(c.state), g(c.city), g(c.suburb),
+              g(c.lat), g(c.lng),
+              has ? res.lat : '', has ? res.lng : '', has && res.distKm !== null && res.distKm !== undefined ? res.distKm : '',
+              res.formatted || '', res.note || '', mapsLink(r, has ? res : null)
+            ]);
+          });
+          download('coordinate-suggestions-review.csv', toCsv(out));
+        });
+
+        dlUploadBtn.addEventListener('click', function(){
+          var c = state.col, swapped = 0;
+          var out = [state.header];
+          state.rows.forEach(function(r, i){
+            var res = state.results[i];
+            if(res && res.confidence === 'high'){
+              r = r.slice(); r[c.lat] = String(res.lat); r[c.lng] = String(res.lng); swapped++;
+            }
+            out.push(r);
+          });
+          download('Resort Information - improved coordinates.csv', toCsv(out));
+          setStatus('Downloaded a copy of your export with ' + swapped + ' high-confidence coordinates swapped in. Every other row and column is unchanged. Check a few before loading it into StockNetwork.');
+        });
+      })();
 
       var importTownsBtn = document.getElementById('importTownsBtn');
       var importTownsFileInput = document.getElementById('importTownsFileInput');
