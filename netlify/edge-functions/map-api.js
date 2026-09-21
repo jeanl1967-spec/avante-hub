@@ -268,6 +268,56 @@ async function mapWithConcurrency(items, limit, fn) {
   return results;
 }
 
+
+// Forward-geocodes a free-text place query ("Resort name, suburb, city,
+// state, country") with Google's Geocoding API and reports how trustworthy
+// the match is. Used only by the suggestCoordinates action below. Unlike
+// reverseGeocode (lib/geocode.js) this is asking "where IS this named
+// place?", so the key question is whether Google matched the actual
+// business/establishment or just fell back to the town it sits in — a
+// town-centre answer is no better than the rounded coordinate already on
+// file and must never be offered as an improvement.
+const FORWARD_TIMEOUT_MS = 8000;
+const NAME_MATCH_TYPES = ["establishment", "lodging", "point_of_interest", "premise", "subpremise", "street_address", "tourist_attraction", "campground", "rv_park"];
+
+async function forwardGeocode(query, apiKey) {
+  const url = "https://maps.googleapis.com/maps/api/geocode/json?address=" + encodeURIComponent(query) + "&key=" + encodeURIComponent(apiKey);
+  let res;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FORWARD_TIMEOUT_MS);
+    try {
+      res = await fetch(url, { signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (e) {
+    return { ok: false, reason: (e && e.name === "AbortError") ? "timeout" : "network", message: String((e && e.message) || e) };
+  }
+  if (!res.ok) return { ok: false, reason: "bad_response", message: "HTTP " + res.status };
+  let data;
+  try { data = await res.json(); } catch (e) { return { ok: false, reason: "bad_response", message: "Response wasn't valid JSON" }; }
+  if (!data || data.status !== "OK" || !Array.isArray(data.results) || !data.results.length) {
+    return { ok: false, reason: (data && data.status) || "unknown", message: (data && data.error_message) || "" };
+  }
+  const top = data.results[0];
+  const loc = top.geometry && top.geometry.location;
+  if (!loc || !isFinite(loc.lat) || !isFinite(loc.lng)) return { ok: false, reason: "bad_response", message: "No location in result" };
+  const types = Array.isArray(top.types) ? top.types : [];
+  const countryComp = (top.address_components || []).find((c) => Array.isArray(c.types) && c.types.includes("country"));
+  return {
+    ok: true,
+    lat: loc.lat,
+    lng: loc.lng,
+    types,
+    nameMatch: types.some((t) => NAME_MATCH_TYPES.includes(t)),
+    locationType: (top.geometry && top.geometry.location_type) || "",
+    partial: !!top.partial_match,
+    formatted: top.formatted_address || "",
+    country: countryComp ? countryComp.long_name : "",
+  };
+}
+
 async function verifyAdminToken(token) {
   if (!token) return false;
   const sessionStore = getStore({ name: "admin-sessions", consistency: "strong" });
@@ -1462,6 +1512,58 @@ export default async (request, context) => {
         exampleFailedCoordinates: exampleFailures,
         exampleChanges,
       });
+    }
+
+    if (action === "suggestCoordinates") {
+      // Read-only (writes NOTHING to any store): for each { id, query, lat,
+      // lng } the admin page sends — rows it read from the admin's own
+      // StockNetwork export file — look the place up by name via Google and
+      // say how much to trust the answer. The admin page assembles the
+      // review report / upload-ready file itself, so this never touches
+      // the stored resort list or any tagged record.
+      //
+      // Confidence:
+      //   high   — Google matched the actual business (not just its town) AND
+      //            the point is within 15 km of the coordinate already on
+      //            file, so it's clearly the same place, just more exact.
+      //   review — Google matched a business but there's nothing (missing /
+      //            0,0) or something far away (>15 km) to cross-check it
+      //            against; a human should eyeball the pin before using it.
+      //   none   — Google only found the town/area, or nothing at all —
+      //            no better than what's on file, so nothing is suggested.
+      const apiKey = Deno.env.get("GOOGLE_GEOCODING_API_KEY") || "";
+      if (!apiKey) {
+        return json({ error: "GOOGLE_GEOCODING_API_KEY isn't set in this site's environment variables yet." }, 400);
+      }
+      const items = Array.isArray(body.items) ? body.items.slice(0, 12) : [];
+      const results = await mapWithConcurrency(items, 8, async (it) => {
+        const id = it && it.id;
+        const query = it && typeof it.query === "string" ? it.query.trim().slice(0, 300) : "";
+        if (!query) return { id, confidence: "none", note: "No name to look up" };
+        const g = await forwardGeocode(query, apiKey);
+        if (!g.ok) return { id, confidence: "none", failed: g.reason !== "ZERO_RESULTS", reason: g.reason, message: g.message, note: g.reason === "ZERO_RESULTS" ? "Google found nothing for this name" : "Google: " + g.reason };
+        const oLat = parseFloat(it.lat), oLng = parseFloat(it.lng);
+        const hasOld = isFinite(oLat) && isFinite(oLng) && !(oLat === 0 && oLng === 0);
+        const distKm = hasOld ? haversineKm(oLat, oLng, g.lat, g.lng) : null;
+        let confidence = "none", note = "";
+        if (!g.nameMatch) {
+          note = "Google only found the area (" + (g.types[0] || "unknown") + "), not the property";
+        } else if (hasOld && distKm <= 15) {
+          confidence = "high"; note = "Matched by name; " + distKm.toFixed(1) + " km from the current pin";
+        } else if (hasOld) {
+          confidence = "review"; note = "Matched by name but " + distKm.toFixed(0) + " km from the current pin — check it is the right place";
+        } else {
+          confidence = "review"; note = "Matched by name; no usable current coordinate to cross-check against";
+        }
+        return {
+          id, confidence, note,
+          lat: Math.round(g.lat * 1e6) / 1e6,
+          lng: Math.round(g.lng * 1e6) / 1e6,
+          distKm: distKm === null ? null : Math.round(distKm * 10) / 10,
+          formatted: g.formatted, googleType: g.types[0] || "", locationType: g.locationType, partial: g.partial,
+        };
+      });
+      return json({ ok: true, results });
     }
 
     if (action === "importPropertyCoordinatesCsv") {
