@@ -1358,6 +1358,7 @@ export default async (request, context) => {
       if (!apiKey) {
         return json({ error: "GOOGLE_GEOCODING_API_KEY isn't set in this site's environment variables yet." }, 400);
       }
+      const actionStartedAt = Date.now();
 
       const { blobs: listingBlobs } = await listingsStore.list();
       const listings = await mapWithConcurrency(listingBlobs, 25, (b) => listingsStore.get(b.key, { type: "json" }));
@@ -1410,8 +1411,19 @@ export default async (request, context) => {
       const offset = Math.max(0, parseInt(body.offset, 10) || 0);
       const totalCoordinates = groups.size;
       const groupKeys = Array.from(groups.keys()).sort().slice(offset, offset + limit);
-      const nextOffset = offset + groupKeys.length;
-      const remainingCoordinates = Math.max(0, totalCoordinates - nextOffset);
+
+      // Time budget. A Netlify Edge Function is killed (with a non-JSON
+      // error page) if it runs too long, and when Google is slow every
+      // lookup can sit for its full 8-second timeout — 12 of those, 8 at a
+      // time, is enough to blow the limit and make the SAME batch fail on
+      // every retry. So stop STARTING new lookups once this budget is spent,
+      // and report only what was really processed; the admin page's cursor
+      // then picks up exactly where this call stopped. Lookups start in
+      // list order, so the ones skipped are always the tail of the batch.
+      const LOOKUP_START_BUDGET_MS = 11000;
+      const lookupsBeganAt = Date.now();
+      const loadMs = lookupsBeganAt - actionStartedAt;
+      let skippedForTime = 0;
 
       const allTowns = await loadTowns(townsStore);
       const existingIds = new Set(allTowns.map((t) => t.id));
@@ -1430,6 +1442,10 @@ export default async (request, context) => {
       const correctedTownNames = new Set();
 
       await mapWithConcurrency(groupKeys, 8, async (key) => {
+        if (Date.now() - lookupsBeganAt > LOOKUP_START_BUDGET_MS) {
+          skippedForTime++;
+          return;
+        }
         const parts = key.split(",");
         const lat = parseFloat(parts[0]);
         const lng = parseFloat(parts[1]);
@@ -1472,15 +1488,28 @@ export default async (request, context) => {
               exampleChanges.push({ what: t.name, from: beforeZone || "(none)", to: result.zone });
             }
           }
+          // Only queue a write when a stored field really differs. Before,
+          // every checked record was re-saved — including the entire
+          // 5,900-row resort list — on every single batch, even when
+          // nothing had changed (which, on a second pass, is nearly all of
+          // them), making each call far slower than it needed to be.
+          const differs = rec.zone !== result.zone || rec.townId !== result.townId ||
+            rec.suburbId !== result.suburbId || rec.locationLabel !== result.locationLabel;
           rec.zone = result.zone;
           rec.townId = result.townId;
           rec.suburbId = result.suburbId;
           rec.locationLabel = result.locationLabel;
+          if (!differs) return;
           if (t.source === "listing") listingUpdates.push(rec);
           else if (t.source === "resort") resortListChanged = true;
           else if (t.source === "activity") activitiesChanged = true;
         });
       });
+
+      const lookupMs = Date.now() - lookupsBeganAt;
+      const processedCount = groupKeys.length - skippedForTime;
+      const nextOffset = offset + processedCount;
+      const remainingCoordinates = Math.max(0, totalCoordinates - nextOffset);
 
       await saveTowns(townsStore, allTowns);
       if (listingUpdates.length) {
@@ -1496,7 +1525,9 @@ export default async (request, context) => {
       return json({
         ok: true,
         dryRun: false,
-        processedCoordinates: groupKeys.length,
+        processedCoordinates: processedCount,
+        skippedForTime,
+        timings: { loadMs, lookupMs, totalMs: Date.now() - actionStartedAt },
         remainingCoordinates,
         totalCoordinates,
         nextOffset,
