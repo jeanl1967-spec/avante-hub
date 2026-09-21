@@ -717,6 +717,113 @@ const NEAREST_TOWN_MAX_KM = 100;
 // zone back and forth.
 const SAME_TOWN_MAX_KM = 60;
 
+// A big city (Cape Town's metro is ~60 km across) comes back from Google as
+// ONE town name for properties far apart, so for a same-named town that is in
+// the SAME ZONE the match is looser: up to this distance it is still the same
+// place. (Different zone = a different town, whatever the distance.)
+const SAME_ZONE_TOWN_MAX_KM = 150;
+
+// "Cape Town", "cape town " and "Cape  Town" are one name.
+function townNameKey(n) {
+  return String(n || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+// Finds towns that are the same place recorded more than once: same name, same
+// country, same zone, and within SAME_ZONE_TOWN_MAX_KM of each other (or one
+// has no coordinates). Same-named towns in DIFFERENT zones (Heidelberg in the
+// Western Cape and in Gauteng) are left alone. Returns the groups plus the
+// old-id -> surviving-id maps (towns, and suburbs that had to be joined to a
+// same-named suburb of the survivor). Deterministic, so the preview and the
+// apply step always agree.
+function planTownMerges(allTowns) {
+  const byKey = new Map();
+  allTowns.forEach((t) => {
+    if (!t || !t.id) return;
+    const k = townNameKey(t.name) + "|" + townCountry(t).toLowerCase() + "|" + townZone(t);
+    if (!townNameKey(t.name)) return;
+    if (!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(t);
+  });
+
+  const score = (t) => {
+    const photos = Array.isArray(t.photoKeys) ? t.photoKeys.length : (t.photoKey ? 1 : 0);
+    return (Array.isArray(t.suburbs) ? t.suburbs.length : 0) * 2 + photos * 3 +
+      (t.description ? 2 : 0) + (t.affId ? 1 : 0) +
+      (isFinite(parseFloat(t.latitude)) && isFinite(parseFloat(t.longitude)) ? 1 : 0);
+  };
+
+  const groups = [];
+  const townMap = {};
+  const subMap = {};
+  byKey.forEach((list) => {
+    if (list.length < 2) return;
+    // Union-find over "close enough (or no coordinates to compare)".
+    const parent = list.map((_, i) => i);
+    const find = (i) => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i], b = list[j];
+        const aLat = parseFloat(a.latitude), aLng = parseFloat(a.longitude);
+        const d = (isFinite(aLat) && isFinite(aLng)) ? townDistanceKm(b, aLat, aLng) : Infinity;
+        if (!isFinite(d) || d <= SAME_ZONE_TOWN_MAX_KM) parent[find(j)] = find(i);
+      }
+    }
+    const clusters = new Map();
+    list.forEach((t, i) => {
+      const r = find(i);
+      if (!clusters.has(r)) clusters.set(r, []);
+      clusters.get(r).push(t);
+    });
+    clusters.forEach((members) => {
+      if (members.length < 2) return;
+      members.sort((a, b) => (score(b) - score(a)) ||
+        String(a.createdAt || "9").localeCompare(String(b.createdAt || "9")) || String(a.id).localeCompare(String(b.id)));
+      const survivor = members[0];
+      const survivorSubs = new Map();
+      (Array.isArray(survivor.suburbs) ? survivor.suburbs : []).forEach((s) => {
+        const k = townNameKey(s.name);
+        if (k && !survivorSubs.has(k)) survivorSubs.set(k, s);
+      });
+      let suburbsJoined = 0, suburbsMoved = 0, affConflict = false;
+      const outMembers = [];
+      members.forEach((m, idx) => {
+        outMembers.push({
+          id: m.id, name: m.name || "", zone: townZone(m), latitude: m.latitude || "", longitude: m.longitude || "",
+          suburbs: Array.isArray(m.suburbs) ? m.suburbs.length : 0, affId: m.affId || "", survivor: idx === 0,
+        });
+        if (idx === 0) return;
+        townMap[m.id] = survivor.id;
+        if ((m.affId || "") !== (survivor.affId || "") && m.affId) affConflict = true;
+        (Array.isArray(m.suburbs) ? m.suburbs : []).forEach((s) => {
+          const k = townNameKey(s.name);
+          const same = k && survivorSubs.get(k);
+          if (same) { subMap[s.id] = same.id; suburbsJoined++; }
+          else { if (k) survivorSubs.set(k, s); suburbsMoved++; }
+        });
+      });
+      groups.push({
+        name: survivor.name || "", zone: townZone(survivor), country: townCountry(survivor),
+        survivorId: survivor.id, members: outMembers, suburbsJoined, suburbsMoved, affConflict,
+      });
+    });
+  });
+  groups.sort((a, b) => b.members.length - a.members.length || a.name.localeCompare(b.name));
+  return { groups, townMap, subMap };
+}
+
+function isPlainMap(x) { return !!x && typeof x === "object" && !Array.isArray(x); }
+
+// Re-points a record's townId/suburbId after towns were merged. Returns true
+// when something changed.
+function remapTownRefs(rec, townMap, subMap) {
+  if (!rec || typeof rec !== "object") return false;
+  let changed = false;
+  if (typeof rec.townId === "string" && townMap[rec.townId]) { rec.townId = townMap[rec.townId]; changed = true; }
+  if (typeof rec.suburbId === "string" && subMap[rec.suburbId]) { rec.suburbId = subMap[rec.suburbId]; changed = true; }
+  return changed;
+}
+
+
 // A point this close to a zone edge still counts as land — the zone polygons
 // are simplified (~400 m) so a beach property can sit just outside them.
 const COAST_SLACK_KM = 4;
@@ -820,6 +927,9 @@ function ensureTownAndSuburb(allTowns, existingIds, townName, zoneName, suburbNa
       if (d < bestKm) { bestKm = d; best = t; }
     });
     if (best && bestKm <= SAME_TOWN_MAX_KM) town = best;
+    // A same-named town in the SAME zone, a bit further away, is still the
+    // same place (a big city such as Cape Town spans well over 60 km).
+    else if (best && zone && bestKm <= SAME_ZONE_TOWN_MAX_KM && townZone(best) === zone) town = best;
     // No coordinates anywhere to compare (an old record typed in by hand):
     // fall back to the old name-only match rather than duplicating it.
     else if (!isFinite(bestKm)) town = sameName[0];
@@ -2069,6 +2179,107 @@ export default async (request, context) => {
       await saveTowns(townsStore, Array.from(byId.values()));
 
       return json({ ok: true, created: created, updated: updated });
+    }
+
+    // ---- Merge duplicate towns -------------------------------------------
+    // Step 1 (planTownMerges): read-only preview of which towns are the same
+    // place recorded more than once. Step 2 (remapTownRefs, once per kind of
+    // record): re-point everything that uses a duplicate at the surviving
+    // town. Step 3 (applyTownMerges): fold the duplicates into the survivor
+    // and delete them. References are moved BEFORE the duplicates are deleted,
+    // so a run that stops half way leaves nothing pointing at a missing town.
+    if (action === "planTownMerges") {
+      const all = await loadTowns(townsStore);
+      const plan = planTownMerges(all);
+      return json({ ok: true, totalTowns: all.length, groups: plan.groups, townMap: plan.townMap, subMap: plan.subMap });
+    }
+
+    if (action === "remapTownRefs") {
+      const townMap = isPlainMap(body.townMap) ? body.townMap : {};
+      const subMap = isPlainMap(body.subMap) ? body.subMap : {};
+      const kind = body.kind;
+      if (!Object.keys(townMap).length && !Object.keys(subMap).length) return json({ ok: true, changed: 0, done: true });
+      if (kind === "activities") {
+        const list = await loadActivities(activitiesStore);
+        let changed = 0;
+        list.forEach((r) => { if (remapTownRefs(r, townMap, subMap)) changed++; });
+        if (changed) await saveActivities(activitiesStore, list);
+        return json({ ok: true, kind, changed, done: true });
+      }
+      if (kind === "resorts") {
+        const rec = await resortListStore.get("current", { type: "json" });
+        const list = (rec && Array.isArray(rec.resorts)) ? rec.resorts : [];
+        let changed = 0;
+        list.forEach((r) => { if (remapTownRefs(r, townMap, subMap)) changed++; });
+        if (changed) await resortListStore.setJSON("current", Object.assign({}, rec, { resorts: list }));
+        return json({ ok: true, kind, changed, done: true });
+      }
+      if (kind === "listings") {
+        const { blobs } = await listingsStore.list();
+        const recs = await mapWithConcurrency(blobs, 25, (b) => listingsStore.get(b.key, { type: "json" }));
+        const toSave = [];
+        recs.forEach((r, i) => { if (remapTownRefs(r, townMap, subMap)) toSave.push({ key: blobs[i].key, rec: r }); });
+        await mapWithConcurrency(toSave, 10, (x) => listingsStore.setJSON(x.key, x.rec));
+        return json({ ok: true, kind, changed: toSave.length, done: true });
+      }
+      if (kind === "hooks") {
+        // Hooks (the admin's default hooks and every affiliate's own hooks)
+        // remember the town they were tagged with. There can be many, so this
+        // works through them in slices; the caller repeats with `cursor`.
+        const hookStore = getStore({ name: "promo-hooks", consistency: "strong" });
+        const { blobs } = await hookStore.list();
+        const keys = blobs.map((b) => b.key).sort();
+        const start = Math.max(0, parseInt(body.cursor, 10) || 0);
+        const startedAt = Date.now();
+        let idx = start;
+        let changed = 0;
+        while (idx < keys.length && Date.now() - startedAt < 15000) {
+          const slice = keys.slice(idx, idx + 40);
+          const recs = await mapWithConcurrency(slice, 20, (k) => hookStore.get(k, { type: "json" }).catch(() => null));
+          const toSave = [];
+          recs.forEach((r, i) => { if (isPlainMap(r) && remapTownRefs(r, townMap, subMap)) toSave.push({ key: slice[i], rec: r }); });
+          await mapWithConcurrency(toSave, 10, (x) => hookStore.setJSON(x.key, x.rec));
+          changed += toSave.length;
+          idx += slice.length;
+        }
+        return json({ ok: true, kind, changed, done: idx >= keys.length, cursor: idx, total: keys.length });
+      }
+      return json({ error: "Unknown kind." }, 400);
+    }
+
+    if (action === "applyTownMerges") {
+      const townMap = isPlainMap(body.townMap) ? body.townMap : {};
+      const subMap = isPlainMap(body.subMap) ? body.subMap : {};
+      const all = await loadTowns(townsStore);
+      const byId = new Map(all.map((t) => [t.id, t]));
+      let merged = 0, movedSuburbs = 0, joinedSuburbs = 0;
+      Object.keys(townMap).forEach((oldId) => {
+        const dup = byId.get(oldId);
+        const keep = byId.get(townMap[oldId]);
+        if (!dup || !keep || dup === keep) return;
+        if (!Array.isArray(keep.suburbs)) keep.suburbs = [];
+        (Array.isArray(dup.suburbs) ? dup.suburbs : []).forEach((s) => {
+          if (subMap[s.id]) { joinedSuburbs++; return; }   // same-named suburb already on the survivor
+          keep.suburbs.push(s);
+          movedSuburbs++;
+        });
+        const keepPhotos = Array.isArray(keep.photoKeys) ? keep.photoKeys.slice() : keep.photoKey ? [keep.photoKey] : [];
+        const dupPhotos = Array.isArray(dup.photoKeys) ? dup.photoKeys : dup.photoKey ? [dup.photoKey] : [];
+        dupPhotos.forEach((k) => { if (keepPhotos.length < 12 && keepPhotos.indexOf(k) === -1) keepPhotos.push(k); });
+        if (keepPhotos.length) { keep.photoKeys = keepPhotos; delete keep.photoKey; }
+        if (!keep.description && dup.description) keep.description = dup.description;
+        if (!keep.area && dup.area) keep.area = dup.area;
+        if (!isFinite(parseFloat(keep.latitude)) && isFinite(parseFloat(dup.latitude))) keep.latitude = dup.latitude;
+        if (!isFinite(parseFloat(keep.longitude)) && isFinite(parseFloat(dup.longitude))) keep.longitude = dup.longitude;
+        if (!keep.country && dup.country) keep.country = dup.country;
+        if (keep.visible === false && dup.visible !== false) keep.visible = true;
+        keep.updatedAt = new Date().toISOString();
+        byId.delete(oldId);
+        merged++;
+      });
+      const next = all.filter((t) => byId.get(t.id) === t);
+      await saveTowns(townsStore, next);
+      return json({ ok: true, merged, movedSuburbs, joinedSuburbs, townsNow: next.length });
     }
 
     if (action === "addTown") {
