@@ -1,5 +1,5 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
-import { ZONES, provinceToZone, districtToZone } from "./lib/zones.js";
+import { ZONES, LEGACY_ZONES, provinceToZone, districtToZone, normalizeZone, isValidZone, locateZone, zoneShapes } from "./lib/zones.js";
 import { reverseGeocode } from "./lib/geocode.js";
 
 // Backs the new "Map & Activities" admin tab and the new "Explore Map" hub
@@ -350,7 +350,7 @@ function toPropertyPin(record, hidden) {
     // geocodeLocations action below) over the live province guess, so a
     // property once tagged shows up correctly in the location tree filter
     // instead of only ever being findable by its loose province match.
-    zone: record.zone || provinceToZone(record.stateProvince),
+    zone: recordZone(record) || provinceToZone(record.stateProvince),
     townId: record.townId || "",
     suburbId: record.suburbId || "",
     locationLabel: record.locationLabel || "",
@@ -395,7 +395,7 @@ function toResortPin(record, hidden) {
     name: record.name || "",
     area: record.suburb || record.district || "",
     city: "",
-    country: "South Africa",
+    country: record.country || "South Africa",
     // Same preference order as toPropertyPin above: a location the
     // geocodeLocations action already resolved for this exact resort row
     // wins over the CSV-column guess, since it's tied to the property's
@@ -406,7 +406,7 @@ function toResortPin(record, hidden) {
     // while zoneHint is often just the real province ("Western Cape"),
     // which would otherwise win first and mis-zone every Garden Route
     // resort row exactly like the geocodeLocations bug fixed above.
-    zone: record.zone || districtToZone(record.district) || provinceToZone(record.zoneHint),
+    zone: recordZone(record) || districtToZone(record.district) || provinceToZone(record.zoneHint),
     townId: record.townId || "",
     suburbId: record.suburbId || "",
     locationLabel: record.locationLabel || "",
@@ -429,7 +429,7 @@ function sanitizeActivity(body, existing) {
     }
   });
   if (typeof body.zone === "string") {
-    record.zone = ZONES.includes(body.zone) ? body.zone : "";
+    record.zone = okZone(body.zone);
   }
   // Which town/suburb (from the Zone > Town > Suburb tree) this activity
   // is tagged with — set via admin.html's location tree picker, which
@@ -463,7 +463,7 @@ function sanitizeTown(body, existing) {
     }
   });
   if (typeof body.zone === "string") {
-    record.zone = ZONES.includes(body.zone) ? body.zone : "";
+    record.zone = okZone(body.zone);
   }
   // affId: which affiliate this town is allocated to. Empty string means
   // shared/unallocated — every affiliate's Explore Map and area-hook
@@ -498,7 +498,8 @@ function toTownPin(record) {
     id: record.id,
     name: record.name || "",
     area: record.area || "",
-    zone: record.zone || "",
+    zone: townZone(record),
+    country: record.country || "South Africa",
     affId: record.affId || "",
     description: (record.description || "").slice(0, 400),
     photo: photos[0] || "",
@@ -520,7 +521,7 @@ function toActivityPin(record) {
     id: record.id,
     name: record.name || "",
     area: record.area || "",
-    zone: record.zone || "",
+    zone: recordZone(record),
     townId: record.townId || "",
     suburbId: record.suburbId || "",
     locationLabel: record.locationLabel || "",
@@ -654,7 +655,7 @@ async function discoverLocationTree({ listingsStore, resortListStore, activities
   activities.filter(Boolean).forEach((r) => {
     const townName = clean(r.area || "", 120);
     if (!townName) return;
-    const zoneName = ZONES.includes(r.zone) ? r.zone : (districtToZone(r.area) || "");
+    const zoneName = okZone(r.zone) || districtToZone(r.area) || "";
     const town = townNode(zoneBucket(zoneName), townName);
     town.activityCount++;
     addCoord(town, r.latitude, r.longitude);
@@ -707,52 +708,123 @@ function haversineKm(lat1, lng1, lat2, lng2) {
 // guess across hundreds of km of empty map.
 const NEAREST_TOWN_MAX_KM = 100;
 
+// Two towns with the SAME NAME are only treated as one place when their
+// coordinates are within this distance of each other. Beyond it they are
+// different towns that happen to share a name (Middelburg in Mpumalanga vs
+// the Eastern Cape, Elim in Limpopo vs the Western Cape) and get separate
+// Town records, each with its own zone. Before this, towns were matched by
+// name alone, so those pairs shared one record and every Re-check flipped its
+// zone back and forth.
+const SAME_TOWN_MAX_KM = 60;
+
+// A point this close to a zone edge still counts as land — the zone polygons
+// are simplified (~400 m) so a beach property can sit just outside them.
+const COAST_SLACK_KM = 4;
+
+const SA_NAME = "South Africa";
+
+// Stored on every resort row the location pass has tagged, so the CSV export
+// knows the row carries the full set of fields (country, nearby flag) rather
+// than an older, less complete tag.
+const LOCATION_TAG_VERSION = 2;
+
+function okZone(z) {
+  const n = normalizeZone(z);
+  return isValidZone(n) ? clean(n, 120) : "";
+}
+
+function townCountry(t) {
+  return (t && t.country) || SA_NAME;
+}
+
+// A town's zone as it should be shown. A town still carrying the old combined
+// "Eastern Cape & Garden Route" name (not yet corrected by Re-check all zones)
+// is placed by its own coordinates instead of being guessed as Eastern Cape.
+function townZone(t) {
+  const z = String((t && t.zone) || "");
+  if (LEGACY_ZONES[z]) {
+    const lat = parseFloat(t.latitude), lng = parseFloat(t.longitude);
+    if (isFinite(lat) && isFinite(lng)) {
+      const at = locateZone(lat, lng);
+      if (at.zone && at.km <= COAST_SLACK_KM) return at.zone;
+    }
+  }
+  return normalizeZone(z);
+}
+
+// Same idea for a property/resort/activity row still tagged with the old
+// combined zone name: place it by its own coordinates.
+function recordZone(r) {
+  return townZone(r);
+}
+
+function townDistanceKm(t, lat, lng) {
+  const tLat = parseFloat(t.latitude);
+  const tLng = parseFloat(t.longitude);
+  if (!isFinite(tLat) || !isFinite(tLng)) return Infinity;
+  return haversineKm(lat, lng, tLat, tLng);
+}
+
 // The closest existing town (by straight-line distance, among towns that
-// have coordinates of their own) to a coordinate Google couldn't place —
-// or null if nothing is within NEAREST_TOWN_MAX_KM. Used only as a
-// ZERO_RESULTS fallback in geocodeLocations below; never called for a
-// coordinate Google successfully resolved.
-function nearestTown(allTowns, lat, lng, maxKm) {
+// have coordinates of their own — and, when a country is given, in that same
+// country) to a coordinate Google couldn't put in a town — or null if nothing
+// is within maxKm. Returns { town, km }.
+function nearestTown(allTowns, lat, lng, maxKm, country) {
   let best = null;
   let bestDist = Infinity;
   for (const t of allTowns) {
-    const tLat = parseFloat(t.latitude);
-    const tLng = parseFloat(t.longitude);
-    if (!isFinite(tLat) || !isFinite(tLng)) continue;
-    const d = haversineKm(lat, lng, tLat, tLng);
+    if (country && townCountry(t) !== country) continue;
+    const d = townDistanceKm(t, lat, lng);
     if (d < bestDist) {
       bestDist = d;
       best = t;
     }
   }
-  return best && bestDist <= maxKm ? best : null;
+  return best && bestDist <= maxKm ? { town: best, km: bestDist } : null;
 }
 
-// Finds (or creates) the Town / Suburb a geocoded coordinate resolves to,
-// following the exact same "never overwrite what's already set" rule as
-// discoverLocations' apply step above — matched by name (case-insensitive)
-// rather than creating a duplicate, and a blank zone/coordinate is filled
-// in but a value an admin (or an earlier run) already set never is —
-// UNLESS `force` is true, in which case a non-blank, different zone DOES
-// get overwritten too. `force` exists for exactly one caller:
-// recheckZones below, a deliberate one-time correction pass Jean asked
-// for after the districtToZone/provinceToZone priority fix (2026-09-18)
-// to go back and fix zones — like Garden Route towns landing in "Western
-// Cape" — that were assigned wrong before that fix existed. Every other
-// caller (geocodeLocations, discoverLocations) leaves `force` undefined
-// and keeps the original never-overwrite behavior, including for a zone
-// an admin corrected by hand via the Towns tab Edit form — there's no
-// separate "manually locked" flag on a Town record, so `force` should
-// only ever be used for an explicit, Jean-approved recheck run, never
-// automatically or on a schedule.
+// A district/municipality name that came back in the "town" slot when Google
+// had no real locality for the point (a farm, a reserve): not a town.
+function looksLikeDistrict(name) {
+  return /\b(district|municipality|metropolitan|metro)\b/i.test(name || "");
+}
+
+// Finds (or creates) the Town / Suburb a geocoded coordinate resolves to.
+// Matched by name (case-insensitive) AND place — a same-named town more than
+// SAME_TOWN_MAX_KM away is a different town and gets its own record. Follows
+// the same "never overwrite what's already set" rule as discoverLocations'
+// apply step — a blank zone/coordinate is filled in but a value an admin (or
+// an earlier run) already set never is — UNLESS `force` is true, in which case
+// a different zone DOES get overwritten. `force` exists for exactly one
+// caller: recheckZones, a deliberate correction pass Jean asked for. With
+// force, a town's zone is recomputed from the TOWN'S OWN coordinates (its
+// zone polygon), not from whichever property happened to be checked last —
+// that is what stops a shared name from flip-flopping.
 // Mutates `allTowns` in place and returns the ids to tag onto whichever
 // property/activity/resort row this coordinate came from.
-function ensureTownAndSuburb(allTowns, existingIds, townName, zoneName, suburbName, lat, lng, force) {
+function ensureTownAndSuburb(allTowns, existingIds, townName, zoneName, suburbName, lat, lng, force, country) {
   const cleanTown = clean(townName, 120);
   if (!cleanTown) return null;
-  const zone = ZONES.includes(zoneName) ? zoneName : "";
+  const zone = okZone(zoneName);
+  const ctry = country || SA_NAME;
 
-  let town = allTowns.find((t) => (t.name || "").toLowerCase() === cleanTown.toLowerCase());
+  // Towns made before country was recorded have none set: they match on name
+  // and distance alone, and are stamped with the country below.
+  const sameName = allTowns.filter((t) => (t.name || "").toLowerCase() === cleanTown.toLowerCase() && (!t.country || t.country === ctry));
+  let town = null;
+  if (sameName.length) {
+    let best = null;
+    let bestKm = Infinity;
+    sameName.forEach((t) => {
+      const d = lat != null ? townDistanceKm(t, lat, lng) : Infinity;
+      if (d < bestKm) { bestKm = d; best = t; }
+    });
+    if (best && bestKm <= SAME_TOWN_MAX_KM) town = best;
+    // No coordinates anywhere to compare (an old record typed in by hand):
+    // fall back to the old name-only match rather than duplicating it.
+    else if (!isFinite(bestKm)) town = sameName[0];
+  }
+
   let createdTown = false;
   let zoneChangedFrom = null;
   if (!town) {
@@ -761,6 +833,7 @@ function ensureTownAndSuburb(allTowns, existingIds, townName, zoneName, suburbNa
       name: cleanTown,
       area: "",
       zone: zone,
+      country: ctry,
       affId: "",
       description: "",
       latitude: lat != null ? String(lat) : "",
@@ -774,14 +847,27 @@ function ensureTownAndSuburb(allTowns, existingIds, townName, zoneName, suburbNa
     allTowns.push(town);
     createdTown = true;
   } else {
-    if (zone && force && zone !== town.zone) {
-      zoneChangedFrom = town.zone || "(none)";
-      town.zone = zone;
-    } else if (!town.zone && zone) {
-      town.zone = zone;
-    }
+    if (!town.country) town.country = ctry;
     if (!town.latitude && lat != null) town.latitude = String(lat);
     if (!town.longitude && lng != null) town.longitude = String(lng);
+    const stored = String(town.zone || "");
+    if (force) {
+      // The zone this TOWN belongs in: from its own coordinates when it is a
+      // South African place, otherwise the zone worked out for this lookup.
+      let want = zone;
+      const tLat = parseFloat(town.latitude);
+      const tLng = parseFloat(town.longitude);
+      if (ctry === SA_NAME && isFinite(tLat) && isFinite(tLng)) {
+        const at = locateZone(tLat, tLng);
+        if (at.zone && at.km <= COAST_SLACK_KM) want = at.zone;
+      }
+      if (want && want !== stored) {
+        zoneChangedFrom = stored || "(none)";
+        town.zone = want;
+      }
+    } else if ((!stored || LEGACY_ZONES[stored]) && zone) {
+      town.zone = zone;
+    }
   }
   if (!Array.isArray(town.suburbs)) town.suburbs = [];
 
@@ -806,69 +892,119 @@ function ensureTownAndSuburb(allTowns, existingIds, townName, zoneName, suburbNa
   }
 
   const locationLabel = suburbId ? (cleanSuburb + ", " + cleanTown) : cleanTown;
-  return { zone: town.zone || zone, townId: town.id, suburbId, locationLabel, createdTown, createdSuburb, zoneChangedFrom, townName: cleanTown };
+  return {
+    zone: okZone(town.zone) || zone, townId: town.id, suburbId, locationLabel, createdTown, createdSuburb,
+    zoneChangedFrom, townName: cleanTown, country: ctry,
+    suburbName: suburbId ? cleanSuburb : "",
+  };
 }
 
-// The single per-coordinate resolution step — reverse-geocode via Google,
-// then find-or-create the Town/Suburb it belongs to (or fall back to the
-// nearest existing town when Google can't place it precisely). Shared by
-// every caller that needs "what Region/Town/Suburb does this coordinate
-// belong to": geocodeLocations (the backlog sweep for untagged records),
-// recheckZones (the one-time correction pass that also overwrites already-
-// tagged zones, via `force`), and autoGeocodeRecord below (a single,
-// synchronous lookup run right when one new record is saved, so it never
-// needs a separate batch run to get tagged at all). One process, several
-// callers — this is deliberately the same code path everywhere, per Jean's
-// request that every import path resolve locations the same way
-// (2026-09-18).
+// Reverse-geocodes through a cache so a coordinate never costs a second
+// Google lookup, however many times any tool asks about it (Re-check all
+// zones, the corrected-file export, a later re-run). Keys are the same
+// 4-decimal (~11 m) rounding the batching code already groups by. Only a
+// real answer, or Google's definitive ZERO_RESULTS, is cached — never a
+// timeout, network error or quota failure, which should be retried.
+function geoCacheKey(lat, lng) {
+  return "g:" + Number(lat).toFixed(4) + "," + Number(lng).toFixed(4);
+}
+
+async function cachedReverseGeocode(geoCache, lat, lng, apiKey) {
+  const key = geoCacheKey(lat, lng);
+  if (geoCache) {
+    try {
+      const hit = await geoCache.get(key, { type: "json" });
+      if (hit && typeof hit.ok === "boolean") return Object.assign({}, hit, { cached: true });
+    } catch (e) { /* cache trouble must never block a lookup */ }
+  }
+  const geo = await reverseGeocode(lat, lng, apiKey);
+  if (geoCache && geo && (geo.ok || geo.reason === "ZERO_RESULTS")) {
+    try { await geoCache.setJSON(key, geo); } catch (e) { /* best effort */ }
+  }
+  return geo;
+}
+
+// The single per-coordinate resolution step — work out what Country / Zone /
+// Town / Suburb a coordinate belongs to, then find-or-create the Town/Suburb.
+// Shared by every caller that needs "where is this": geocodeLocations (the
+// backlog sweep), recheckZones (the correction pass), the corrected-file
+// export, and autoGeocodeRecord (one new record, right when it is saved).
+//
+//  * Names (town, suburb, country) come from Google, via the cache above.
+//  * The ZONE inside South Africa comes from the coordinate's own zone
+//    polygon (lib/zones.js) — never from the town's name — so same-named
+//    towns and towns missing from the keyword table still land right.
+//  * Outside South Africa the zone is the province/region Google reports
+//    ("Erongo Region", "Matabeleland North Province"), falling back to the
+//    country name.
+//  * A point with no real town (a farm, or coordinates in the sea) is placed
+//    with the nearest existing town within NEAREST_TOWN_MAX_KM and marked
+//    `nearby`, which the export writes as Suburb "Nearby <Town>".
 //
 // Returns { result, viaFallback, failureReason, failureMessage }. `result`
-// is null when Google failed AND no nearby town could be used as a
-// fallback either — callers treat that as "couldn't resolve this
-// coordinate" and use failureReason/failureMessage to explain why.
-async function resolveLocationForCoordinate(lat, lng, apiKey, allTowns, existingIds, force) {
-  const geo = await reverseGeocode(lat, lng, apiKey);
+// is null when nothing could place this coordinate at all.
+async function resolveLocationForCoordinate(lat, lng, apiKey, allTowns, existingIds, force, geoCache) {
+  const geo = await cachedReverseGeocode(geoCache, lat, lng, apiKey);
+  const geoOk = !!(geo && geo.ok);
+  const at = locateZone(lat, lng);
+  const onLand = at.km <= COAST_SLACK_KM;
+
+  const country = geoOk && geo.country ? geo.country : (onLand ? SA_NAME : "");
+  const inSA = country === SA_NAME;
+  // Google found a real town here → the point is on land, whatever the
+  // simplified zone edge says (border and coast polygons are approximate).
+  // Only a point Google couldn't put in any town AND that sits outside every
+  // zone is treated as being in the sea / not on land.
+  const foundTown = !!(geoOk && geo.town && !(geo.townType === "administrative_area_level_2" && looksLikeDistrict(geo.town)));
+  const offshoreKm = !foundTown && (inSA || !country) && !onLand && isFinite(at.km) ? Math.max(1, Math.round(at.km)) : 0;
+
+  let zone = "";
+  if (inSA) {
+    zone = onLand ? at.zone : (districtToZone(geoOk ? geo.town : "") || provinceToZone(geoOk ? geo.province : "") || "");
+  } else if (country) {
+    zone = clean((geoOk && geo.province) || country, 120);
+  }
+
+  const realTown = geoOk && geo.town && !(geo.townType === "administrative_area_level_2" && looksLikeDistrict(geo.town));
+  // Google answered but with no real town, or found nothing at all here.
+  const noUsableTown = geo && ((geoOk && !realTown) || (!geoOk && geo.reason === "ZERO_RESULTS"));
 
   let result = null;
   let viaFallback = false;
-  // Two distinct "Google couldn't place this precisely" cases get the same
-  // nearest-town fallback: an explicit ZERO_RESULTS, and an OK response
-  // whose top result has no locality-level component at all (only a
-  // country/route-level match — rare, but happens for some very remote
-  // coordinates) so geo.town comes back blank even though geo.ok is true.
-  const noUsableTown = geo && ((geo.ok && !geo.town) || (!geo.ok && geo.reason === "ZERO_RESULTS"));
 
-  if (geo && geo.ok && geo.town) {
-    // districtToZone(geo.town) checked FIRST, not provinceToZone(geo.province) —
-    // see ensureTownAndSuburb's own comment and the towns-layer-implementation
-    // project doc's eighth-round section for the full Garden-Route-towns-in-
-    // "Western Cape" bug this ordering fixes.
-    const zone = districtToZone(geo.town) || provinceToZone(geo.province) || "";
-    result = ensureTownAndSuburb(allTowns, existingIds, geo.town, zone, geo.suburb, lat, lng, force);
-  } else if (noUsableTown) {
-    const nearest = nearestTown(allTowns, lat, lng, NEAREST_TOWN_MAX_KM);
-    if (nearest) {
+  if (realTown) {
+    result = ensureTownAndSuburb(allTowns, existingIds, geo.town, zone, geo.suburb, lat, lng, force, country || SA_NAME);
+    if (result) { result.nearby = false; result.nearbyKm = null; }
+  } else if (noUsableTown || (geo && !geoOk && onLand && geo.reason === "ZERO_RESULTS")) {
+    const near = nearestTown(allTowns, lat, lng, NEAREST_TOWN_MAX_KM, country || (onLand ? SA_NAME : ""));
+    if (near) {
+      const nearest = near.town;
       result = {
-        zone: nearest.zone || "",
+        zone: okZone(townZone(nearest)) || zone,
         townId: nearest.id,
         suburbId: "",
+        suburbName: "",
         locationLabel: nearest.name,
         createdTown: false,
         createdSuburb: false,
         zoneChangedFrom: null,
         townName: nearest.name,
+        country: townCountry(nearest),
+        nearby: true,
+        nearbyKm: Math.round(near.km * 10) / 10,
       };
       viaFallback = true;
     }
   }
+  if (result) result.offshoreKm = offshoreKm;
 
   let failureReason = "";
   let failureMessage = "";
   if (!result) {
-    if (geo && !geo.ok) {
+    if (geo && !geoOk) {
       failureReason = geo.reason || "unknown";
       failureMessage = geo.message || "";
-    } else if (geo && geo.ok && !geo.town) {
+    } else if (geoOk && !realTown) {
       // Reachable only when there's also no town within NEAREST_TOWN_MAX_KM
       // to fall back to — genuinely remote.
       failureReason = "no_town_in_result";
@@ -876,7 +1012,19 @@ async function resolveLocationForCoordinate(lat, lng, apiKey, allTowns, existing
     }
   }
 
-  return { result, viaFallback, failureReason, failureMessage };
+  return { result, viaFallback, failureReason, failureMessage, country, offshoreKm };
+}
+
+// Writes a resolved location onto a property / resort row / activity.
+function applyLocationTag(rec, result) {
+  rec.zone = result.zone;
+  rec.townId = result.townId;
+  rec.suburbId = result.suburbId;
+  rec.locationLabel = result.locationLabel;
+  rec.country = result.country || "";
+  rec.nearby = !!result.nearby;
+  rec.offshoreKm = result.offshoreKm || 0;
+  rec.locV = LOCATION_TAG_VERSION;
 }
 
 // Auto-geocodes ONE record in place, right when it's saved, using the exact
@@ -893,7 +1041,7 @@ async function resolveLocationForCoordinate(lat, lng, apiKey, allTowns, existing
 // the record just stays untagged, exactly as if "Start geocoding" hadn't
 // reached it yet, and the existing manual tools (Start geocoding, Re-check
 // all zones) remain the fallback if this ever misses one.
-async function autoGeocodeRecord(record, apiKey, townsStore) {
+async function autoGeocodeRecord(record, apiKey, townsStore, geoCache) {
   if (!apiKey || !record || record.locationLabel) return;
   const lat = parseFloat(record.latitude);
   const lng = parseFloat(record.longitude);
@@ -901,12 +1049,14 @@ async function autoGeocodeRecord(record, apiKey, townsStore) {
   try {
     const allTowns = await loadTowns(townsStore);
     const existingIds = new Set(allTowns.map((t) => t.id));
-    const { result } = await resolveLocationForCoordinate(lat, lng, apiKey, allTowns, existingIds, false);
+    const { result } = await resolveLocationForCoordinate(lat, lng, apiKey, allTowns, existingIds, false, geoCache);
     if (result) {
       record.zone = result.zone;
       record.townId = result.townId;
       record.suburbId = result.suburbId;
       record.locationLabel = result.locationLabel;
+      record.country = result.country;
+      record.nearby = !!result.nearby;
       await saveTowns(townsStore, allTowns);
     }
   } catch (e) {
@@ -937,9 +1087,20 @@ export default async (request, context) => {
   const townsStore = getStore({ name: "map-towns", consistency: "strong" });
   const visibilityStore = getStore({ name: "map-visibility", consistency: "strong" });
   const resortListStore = getStore({ name: "resort-list", consistency: "strong" });
+  // Raw Google reverse-geocode answers, one blob per (4-decimal) coordinate,
+  // so a coordinate is only ever paid for once — see cachedReverseGeocode.
+  const geoCacheStore = getStore({ name: "map-geocache", consistency: "strong" });
 
   try {
     if (request.method === "GET") {
+      // ?shapes=1 — the zone polygons + zone list the Master map shades with.
+      // Static data (lib/zone-shapes.js), so it can be cached hard.
+      if (new URL(request.url).searchParams.get("shapes")) {
+        return new Response(JSON.stringify({ ok: true, zones: ZONES, shapes: zoneShapes() }), {
+          status: 200,
+          headers: { "content-type": "application/json", "cache-control": "public, max-age=3600", ...cors },
+        });
+      }
       const { blobs } = await listingsStore.list();
       const listings = await mapWithConcurrency(blobs, 25, (b) => listingsStore.get(b.key, { type: "json" }));
       const { blobs: visBlobs } = await visibilityStore.list();
@@ -1098,7 +1259,7 @@ export default async (request, context) => {
                 id: genTownUniqueId(existingIds),
                 name: t.name,
                 area: "",
-                zone: ZONES.includes(zoneEntry.zone) ? zoneEntry.zone : "",
+                zone: okZone(zoneEntry.zone),
                 affId: "",
                 description: "",
                 latitude: t.latitude != null ? String(t.latitude) : "",
@@ -1119,7 +1280,7 @@ export default async (request, context) => {
               // in the zone/coordinates on towns that were created before
               // that column was available, without touching anything the
               // admin has since changed by hand.
-              if (!townRecord.zone && ZONES.includes(zoneEntry.zone)) townRecord.zone = zoneEntry.zone;
+              if ((!townRecord.zone || LEGACY_ZONES[townRecord.zone]) && okZone(zoneEntry.zone)) townRecord.zone = okZone(zoneEntry.zone);
               if (!townRecord.latitude && t.latitude != null) townRecord.latitude = String(t.latitude);
               if (!townRecord.longitude && t.longitude != null) townRecord.longitude = String(t.longitude);
             }
@@ -1249,7 +1410,7 @@ export default async (request, context) => {
         const lat = parseFloat(parts[0]);
         const lng = parseFloat(parts[1]);
         const { result, viaFallback, failureReason, failureMessage } =
-          await resolveLocationForCoordinate(lat, lng, apiKey, allTowns, existingIds, false);
+          await resolveLocationForCoordinate(lat, lng, apiKey, allTowns, existingIds, false, geoCacheStore);
 
         if (result) {
           if (result.createdTown) addedTowns++;
@@ -1272,28 +1433,19 @@ export default async (request, context) => {
           if (t.source === "listing") {
             const rec = listings.find((r) => r.listingId === t.key);
             if (rec) {
-              rec.zone = result.zone;
-              rec.townId = result.townId;
-              rec.suburbId = result.suburbId;
-              rec.locationLabel = result.locationLabel;
+              applyLocationTag(rec, result);
               listingUpdates.push(rec);
             }
           } else if (t.source === "resort") {
             const rec = resortList[t.key];
             if (rec) {
-              rec.zone = result.zone;
-              rec.townId = result.townId;
-              rec.suburbId = result.suburbId;
-              rec.locationLabel = result.locationLabel;
+              applyLocationTag(rec, result);
               resortListChanged = true;
             }
           } else if (t.source === "activity") {
             const rec = activities.find((r) => r.id === t.key);
             if (rec) {
-              rec.zone = result.zone;
-              rec.townId = result.townId;
-              rec.suburbId = result.suburbId;
-              rec.locationLabel = result.locationLabel;
+              applyLocationTag(rec, result);
               activitiesChanged = true;
             }
           }
@@ -1450,7 +1602,7 @@ export default async (request, context) => {
         const lat = parseFloat(parts[0]);
         const lng = parseFloat(parts[1]);
         const { result, viaFallback, failureReason, failureMessage } =
-          await resolveLocationForCoordinate(lat, lng, apiKey, allTowns, existingIds, true);
+          await resolveLocationForCoordinate(lat, lng, apiKey, allTowns, existingIds, true, geoCacheStore);
 
         if (result) {
           if (result.createdTown) addedTowns++;
@@ -1481,7 +1633,7 @@ export default async (request, context) => {
           else if (t.source === "activity") rec = activities.find((r) => r.id === t.key);
           if (!rec) return;
 
-          const beforeZone = rec.zone || "";
+          const beforeZone = normalizeZone(rec.zone);
           if (beforeZone !== result.zone) {
             changedRecords++;
             if (exampleChanges.length < 10) {
@@ -1494,11 +1646,10 @@ export default async (request, context) => {
           // nothing had changed (which, on a second pass, is nearly all of
           // them), making each call far slower than it needed to be.
           const differs = rec.zone !== result.zone || rec.townId !== result.townId ||
-            rec.suburbId !== result.suburbId || rec.locationLabel !== result.locationLabel;
-          rec.zone = result.zone;
-          rec.townId = result.townId;
-          rec.suburbId = result.suburbId;
-          rec.locationLabel = result.locationLabel;
+            rec.suburbId !== result.suburbId || rec.locationLabel !== result.locationLabel ||
+            (rec.country || "") !== (result.country || "") || !!rec.nearby !== !!result.nearby ||
+            rec.locV !== LOCATION_TAG_VERSION;
+          applyLocationTag(rec, result);
           if (!differs) return;
           if (t.source === "listing") listingUpdates.push(rec);
           else if (t.source === "resort") resortListChanged = true;
@@ -1543,6 +1694,211 @@ export default async (request, context) => {
         exampleFailedCoordinates: exampleFailures,
         exampleChanges,
       });
+    }
+
+    if (action === "exportLocations") {
+      // Backs the "Corrected StockNetwork file" tool. Given a batch of rows
+      // from a StockNetwork resort export ({ i, name, resortId, siteId,
+      // lat, lng, csvCountry }), returns what Country / State / City /
+      // Suburb each should be according to the HUB's own location tree, so
+      // the file that goes back to StockNetwork matches the hub exactly.
+      //
+      //  * State = the hub ZONE (e.g. "Garden Route", "Eastern Cape",
+      //    "Erongo Region"), per Jean's rule — not the province.
+      //  * City = the hub Town. Suburb = the hub Suburb; when the place has
+      //    no suburb the town name is repeated; when it has no town of its
+      //    own and was placed with the nearest town, "Nearby <Town>".
+      //  * A row whose stored hub tag is current (locV 2, same coordinates)
+      //    costs nothing. Anything else is resolved live through the same
+      //    resolveLocationForCoordinate step Re-check all zones uses (cache
+      //    first, so a coordinate is never paid for twice) — at most
+      //    LIVE_PER_CALL per call, then `nextIndex` tells the caller where
+      //    to resume. Read-only for the hub except for any brand-new towns
+      //    a live lookup creates, and the resort row it tags.
+      const apiKey = Deno.env.get("GOOGLE_GEOCODING_API_KEY") || "";
+      const startedAt = Date.now();
+      const rows = Array.isArray(body.rows) ? body.rows.slice(0, body.dryRun ? 8000 : 400) : [];
+      const LIVE_PER_CALL = 12;
+      const LIVE_BUDGET_MS = 11000;
+
+      const allTowns = await loadTowns(townsStore);
+      const existingIds = new Set(allTowns.map((t) => t.id));
+      const townById = new Map(allTowns.map((t) => [t.id, t]));
+      const resortRecord = await resortListStore.get("current", { type: "json" });
+      const resortList = (resortRecord && Array.isArray(resortRecord.resorts)) ? resortRecord.resorts : [];
+      const rowKey = (name, siteId, resortId) => String(name || "").trim().toLowerCase() + "|" + String(siteId || "").trim() + "|" + String(resortId || "").trim();
+      const byKey = new Map();
+      resortList.forEach((r, i) => byKey.set(rowKey(r.name, r.siteId, r.resortId), i));
+
+      const ALIASES = [["eswatini", "swaziland"], ["czechia", "czech republic"], ["türkiye", "turkey"],
+        ["côte d’ivoire", "ivory coast"], ["myanmar (burma)", "myanmar"], ["north macedonia", "macedonia"]];
+      const norm = (v) => String(v || "").trim().toLowerCase();
+      // Keep StockNetwork's own spelling of a country when Google only names
+      // it differently (Eswatini / Swaziland) so no new country values appear.
+      function countryMatches(google, csv) {
+        const g = norm(google), c = norm(csv);
+        if (!g || !c || g === c) return true;
+        return ALIASES.some(([a, b]) => (a === g && b === c) || (b === g && a === c));
+      }
+      function pickCountry(google, csv) {
+        if (!google) return csv || "";
+        return countryMatches(google, csv) && csv ? csv : google;
+      }
+      // The StockNetwork row says one country and the coordinates say another:
+      // one of them is wrong and the hub can't tell which, so the row is left
+      // exactly as it is and listed in the report for a person to decide.
+      function flagCountryClash(item, lat, lng, csvCountry, resolvedCountry) {
+        item.status = "check";
+        item.note = "StockNetwork says \"" + csvCountry + "\" but the coordinates are in \"" + resolvedCountry + "\" — left unchanged. Check the country or the coordinates.";
+        addFlipNote(item, lat, lng, csvCountry);
+      }
+
+      function fieldsFromTown(town, suburbName, nearby, country) {
+        const cityName = town.name || "";
+        return {
+          country,
+          state: townZone(town),
+          city: cityName,
+          suburb: suburbName || (nearby ? "Nearby " + cityName : cityName),
+        };
+      }
+
+      function seaNote(km) {
+        return km <= 100
+          ? "These coordinates are in the sea, about " + km + " km off the coast."
+          : "These coordinates aren't on any land Google recognises (in the sea, or well away from any town).";
+      }
+
+      // A likely fix for coordinates that landed nowhere: latitude/longitude
+      // with a flipped sign or swapped. Only ever suggested in the report,
+      // never applied.
+      function suggestFlip(lat, lng) {
+        const tries = [[-lat, lng], [lat, -lng], [-lat, -lng], [lng, lat], [-lng, lat], [lng, -lat], [-lng, -lat]];
+        for (const [a, b] of tries) {
+          const at = locateZone(a, b);
+          if (at.km <= 2) return { lat: a, lng: b, zone: at.zone };
+        }
+        return null;
+      }
+
+      function addFlipNote(item, lat, lng, csvCountry) {
+        const flip = suggestFlip(lat, lng);
+        if (flip && /^south africa$/i.test(csvCountry || "South Africa")) {
+          item.suggestion = { lat: flip.lat, lng: flip.lng, zone: flip.zone };
+          item.note += " Looks like the latitude/longitude may be swapped or have a flipped sign — as " + flip.lat + ", " + flip.lng + " it would be in " + flip.zone + ".";
+        }
+      }
+
+      // dryRun: no lookups, nothing written — just how many rows already have a
+      // current tag in the hub and how many would need a fresh look-up.
+      if (body.dryRun) {
+        let fromHub = 0, needLookup = 0, unusable = 0;
+        rows.forEach((r) => {
+          const lat = parseFloat(r.lat), lng = parseFloat(r.lng);
+          if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0) || Math.abs(lat) > 90 || Math.abs(lng) > 180) { unusable++; return; }
+          const ri = byKey.get(rowKey(r.name, r.siteId, r.resortId));
+          const rec = ri === undefined ? null : resortList[ri];
+          const same = rec && Math.abs(parseFloat(rec.latitude) - lat) < 0.00002 && Math.abs(parseFloat(rec.longitude) - lng) < 0.00002;
+          if (same && rec.locV === LOCATION_TAG_VERSION && townById.get(rec.townId)) fromHub++; else needLookup++;
+        });
+        return json({ ok: true, dryRun: true, total: rows.length, fromHub, needLookup, unusable });
+      }
+
+      const out = [];
+      let liveUsed = 0;
+      let resortChanged = false;
+      let townsChanged = false;
+      let idx = 0;
+      for (; idx < rows.length; idx++) {
+        const r = rows[idx];
+        const lat = parseFloat(r.lat);
+        const lng = parseFloat(r.lng);
+        const item = { i: r.i, status: "", note: "" };
+        if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+          item.status = "skip";
+          item.note = "No usable coordinates (blank, 0,0 or out of range) — location can't be worked out from the hub.";
+          out.push(item);
+          continue;
+        }
+        const csvCountry = r.csvCountry || "";
+        const ri = byKey.get(rowKey(r.name, r.siteId, r.resortId));
+        const rec = ri === undefined ? null : resortList[ri];
+        const same = rec && Math.abs(parseFloat(rec.latitude) - lat) < 0.00002 && Math.abs(parseFloat(rec.longitude) - lng) < 0.00002;
+        const stored = same && rec.locV === LOCATION_TAG_VERSION && townById.get(rec.townId);
+
+        if (stored) {
+          const town = stored;
+          const sub = rec.suburbId && (Array.isArray(town.suburbs) ? town.suburbs.find((s) => s.id === rec.suburbId) : null);
+          const resolvedCountry = rec.country || townCountry(town);
+          if (!countryMatches(resolvedCountry, csvCountry)) {
+            flagCountryClash(item, lat, lng, csvCountry, resolvedCountry);
+            out.push(item);
+            continue;
+          }
+          const country = pickCountry(resolvedCountry, csvCountry);
+          Object.assign(item, fieldsFromTown(town, sub ? sub.name : "", !!rec.nearby, country));
+          item.status = rec.nearby ? "nearby" : "ok";
+          item.source = "hub";
+          if (rec.nearby) item.note = "No town of its own here — placed with the nearest town.";
+          if (rec.offshoreKm > 0) {
+            item.status = "sea";
+            item.note = seaNote(rec.offshoreKm) + (rec.nearby ? " Placed with the nearest town." : "");
+            addFlipNote(item, lat, lng, csvCountry);
+          }
+          out.push(item);
+          continue;
+        }
+
+        // Needs a live lookup. Stop here (and report where) if this call has
+        // used its share, so the caller resumes at exactly this row.
+        if (liveUsed >= LIVE_PER_CALL || Date.now() - startedAt > LIVE_BUDGET_MS) break;
+        if (!apiKey) {
+          item.status = "fail";
+          item.note = "GOOGLE_GEOCODING_API_KEY isn't set, so this row can't be looked up.";
+          out.push(item);
+          continue;
+        }
+        liveUsed++;
+        const { result, failureReason, failureMessage, offshoreKm } =
+          await resolveLocationForCoordinate(Number(lat.toFixed(4)), Number(lng.toFixed(4)), apiKey, allTowns, existingIds, false, geoCacheStore);
+        if (result) {
+          townsChanged = true;
+          const town = allTowns.find((t) => t.id === result.townId);
+          allTowns.forEach((t) => { if (!townById.has(t.id)) townById.set(t.id, t); });
+          if (!countryMatches(result.country, csvCountry)) {
+            flagCountryClash(item, lat, lng, csvCountry, result.country);
+            out.push(item);
+            continue;
+          }
+          const country = pickCountry(result.country, csvCountry);
+          Object.assign(item, fieldsFromTown(town, result.suburbName, !!result.nearby, country));
+          item.source = "live";
+          item.status = result.nearby ? "nearby" : "ok";
+          if (result.nearby) item.note = "No town of its own here — placed with the nearest town (" + result.nearbyKm + " km away).";
+          if (offshoreKm > 0) {
+            item.status = "sea";
+            item.note = seaNote(offshoreKm) + (result.nearby ? " Placed with the nearest town." : "");
+          }
+          if (rec) {
+            applyLocationTag(rec, result);
+            rec.latitude = String(lat);
+            rec.longitude = String(lng);
+            resortChanged = true;
+          }
+        } else {
+          item.status = "fail";
+          item.note = "Couldn't place this coordinate" + (failureReason ? " (" + failureReason + ")" : "") + (failureMessage ? ": " + failureMessage : ".");
+          if (offshoreKm > 0) item.note = seaNote(offshoreKm) + " No town is within " + NEAREST_TOWN_MAX_KM + " km.";
+        }
+        if (item.status === "sea" || item.status === "fail") addFlipNote(item, lat, lng, csvCountry);
+        out.push(item);
+      }
+
+      if (townsChanged) await saveTowns(townsStore, allTowns);
+      if (resortChanged) {
+        await resortListStore.setJSON("current", Object.assign({}, resortRecord, { resorts: resortList }));
+      }
+      return json({ ok: true, results: out, nextIndex: idx, liveLookups: liveUsed, totalMs: Date.now() - startedAt });
     }
 
     if (action === "suggestCoordinates") {
@@ -1849,7 +2205,7 @@ export default async (request, context) => {
       // see autoGeocodeRecord's own comment. A no-op if the admin already
       // picked a location from the tree, if there's no usable coordinate,
       // or if GOOGLE_GEOCODING_API_KEY isn't configured.
-      await autoGeocodeRecord(record, Deno.env.get("GOOGLE_GEOCODING_API_KEY") || "", townsStore);
+      await autoGeocodeRecord(record, Deno.env.get("GOOGLE_GEOCODING_API_KEY") || "", townsStore, geoCacheStore);
       all.push(record);
       await saveActivities(activitiesStore, all);
       return json({ ok: true, activity: record });
@@ -1865,7 +2221,7 @@ export default async (request, context) => {
       record.updatedAt = new Date().toISOString();
       // Same auto-geocode as addActivity — covers an existing activity
       // that gets a coordinate added (or edited) without a location pick.
-      await autoGeocodeRecord(record, Deno.env.get("GOOGLE_GEOCODING_API_KEY") || "", townsStore);
+      await autoGeocodeRecord(record, Deno.env.get("GOOGLE_GEOCODING_API_KEY") || "", townsStore, geoCacheStore);
       all[idx] = record;
       await saveActivities(activitiesStore, all);
       return json({ ok: true, activity: record });
