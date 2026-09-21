@@ -78,11 +78,23 @@ export async function reverseGeocode(lat, lng, apiKey) {
     return "";
   }
 
+  // townType records WHICH component supplied the town. An
+  // "administrative_area_level_2" match is a district/municipality (e.g.
+  // "Eden District Municipality"), not a real town, so callers can tell a
+  // genuine locality from a rural point that only fell inside a district.
+  let town = "";
+  let townType = "";
+  for (const type of ["locality", "postal_town", "administrative_area_level_2"]) {
+    const c = comps.find((c) => Array.isArray(c.types) && c.types.includes(type));
+    if (c && c.long_name) { town = c.long_name; townType = type; break; }
+  }
+
   return {
     ok: true,
     country: find("country"),
     province: find("administrative_area_level_1"),
-    town: find("locality", "postal_town", "administrative_area_level_2"),
+    town,
+    townType,
     suburb: find("sublocality", "sublocality_level_1", "neighborhood"),
   };
 }
