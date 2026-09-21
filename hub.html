@@ -1268,13 +1268,14 @@
       <div class="card">
         <p style="margin:0 0 6px; font-weight:600; font-size:13.5px;">Browse by location</p>
         <p class="hint" style="margin:0 0 10px;">Tick a region, town, or suburb to narrow the map to just that area — leave nothing ticked to see everywhere.</p>
-        <div class="loc-tree-country">South Africa</div>
+        <div class="loc-tree-country">South Africa &amp; neighbouring countries</div>
         <div class="loc-tree-summary" id="em-locTreeSummary"></div>
         <div id="em-locationTree"></div>
         <div class="explore-kind-row">
           <label style="margin:0;"><input type="checkbox" id="em-showProperties" checked> Properties</label>
           <label style="margin:0;"><input type="checkbox" id="em-showActivities" checked> Activities</label>
           <label style="margin:0;"><input type="checkbox" id="em-showTowns" checked> Towns</label>
+          <label style="margin:0;"><input type="checkbox" id="em-showZones" checked> Zone areas</label>
         </div>
         <div class="status" id="em-status"></div>
         <div id="exploreMapEl"></div>
@@ -3585,7 +3586,7 @@
       // regardless of allocation). Built with DOM APIs rather than HTML
       // string concatenation so town/suburb names never need manual
       // escaping.
-      var HOOK_ZONE_ORDER = ['Western Cape (Cape Town & Winelands)', 'Eastern Cape & Garden Route', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng & North West', 'Mpumalanga', 'Limpopo'];
+      var HOOK_ZONE_ORDER = ['Western Cape (Cape Town & Winelands)', 'Garden Route', 'Eastern Cape', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng & North West', 'Mpumalanga', 'Limpopo'];
 
       function buildLocationOptionsFragment(towns){
         var frag = document.createDocumentFragment();
@@ -3596,11 +3597,15 @@
 
         var byZone = {};
         towns.forEach(function(t){
-          var z = t.zone && HOOK_ZONE_ORDER.indexOf(t.zone) > -1 ? t.zone : '';
+          var z = t.zone || '';
           if(!byZone[z]) byZone[z] = [];
           byZone[z].push(t);
         });
         var zoneKeys = HOOK_ZONE_ORDER.filter(function(z){ return byZone[z]; });
+        // Zones outside South Africa (a province/region name per country) are
+        // created automatically, so any zone not in the fixed list still gets
+        // its own group, after the South African ones.
+        Object.keys(byZone).filter(function(z){ return z && HOOK_ZONE_ORDER.indexOf(z) === -1; }).sort().forEach(function(z){ zoneKeys.push(z); });
         if(byZone['']) zoneKeys.push('');
 
         zoneKeys.forEach(function(zoneKey){
@@ -4291,7 +4296,7 @@
       var loaded = false;
       var locTree = null;
 
-      var EM_ZONE_ORDER = ['Western Cape (Cape Town & Winelands)', 'Eastern Cape & Garden Route', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng & North West', 'Mpumalanga', 'Limpopo'];
+      var EM_ZONE_ORDER = ['Western Cape (Cape Town & Winelands)', 'Garden Route', 'Eastern Cape', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng & North West', 'Mpumalanga', 'Limpopo'];
 
       // Cascading multi-select browse tree — same behavior as admin's Map &
       // Activities master map (see the shared-utilities comment there for
@@ -4346,7 +4351,8 @@
           var openTowns = Array.prototype.map.call(containerEl.querySelectorAll('details.loc-tree-node[data-town][open]'), function(d){ return d.dataset.town; });
           containerEl.innerHTML = '';
 
-          EM_ZONE_ORDER.forEach(function(zone){
+          var emZonesToShow = EM_ZONE_ORDER.concat(towns.map(function(t){ return t.zone || ''; }).filter(function(z, i, a){ return z && EM_ZONE_ORDER.indexOf(z) === -1 && a.indexOf(z) === i; }).sort());
+          emZonesToShow.forEach(function(zone){
             var zoneTowns = regionTowns(zone).slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
             if(!zoneTowns.length){
               var empty = document.createElement('div');
@@ -4591,6 +4597,54 @@
         }).catch(function(){ return ''; });
       }
 
+      // Shaded zone areas behind the pins (polygons from /api/map?shapes=1), in
+      // the same zone colours as the admin Master map.
+      var EM_ZONE_COLORS = {
+        'Western Cape (Cape Town & Winelands)': '#8074dd',
+        'Garden Route': '#e6a000',
+        'Eastern Cape': '#d85a30',
+        'Northern Cape': '#888780',
+        'Free State': '#b8741a',
+        'KwaZulu-Natal': '#1d9e75',
+        'Gauteng & North West': '#3a88e0',
+        'Mpumalanga': '#63982a',
+        'Limpopo': '#d4537e'
+      };
+      var zoneShapesData = null;
+      var zoneShapesLoading = false;
+      var zoneAreaLayer = null;
+      function drawZoneAreas(){
+        if(!leafletMap) return;
+        if(zoneAreaLayer){ leafletMap.removeLayer(zoneAreaLayer); zoneAreaLayer = null; }
+        var toggle = document.getElementById('em-showZones');
+        if(toggle && !toggle.checked) return;
+        if(!zoneShapesData){
+          if(zoneShapesLoading) return;
+          zoneShapesLoading = true;
+          fetch('/api/map?shapes=1').then(function(r){ return r.json(); }).then(function(d){
+            zoneShapesData = (d && d.shapes) || {};
+            zoneShapesLoading = false;
+            drawZoneAreas();
+          }).catch(function(){ zoneShapesLoading = false; });
+          return;
+        }
+        var group = L.layerGroup();
+        Object.keys(zoneShapesData).forEach(function(zone){
+          var color = EM_ZONE_COLORS[zone] || '#5b5b5b';
+          zoneShapesData[zone].forEach(function(poly){
+            var rings = poly.map(function(ring){ return ring.map(function(pt){ return [pt[1], pt[0]]; }); });
+            var pg = L.polygon(rings, { color: color, weight: 1, opacity: 0.85, fillColor: color, fillOpacity: 0.28 });
+            pg.bindTooltip(zone, { sticky: true });
+            group.addLayer(pg);
+          });
+        });
+        zoneAreaLayer = group;
+        group.addTo(leafletMap);
+        group.eachLayer(function(l){ if(l.bringToBack) l.bringToBack(); });
+      }
+      var showZonesEl = document.getElementById('em-showZones');
+      if(showZonesEl) showZonesEl.addEventListener('change', drawZoneAreas);
+
       function loadMap(){
         if(loaded) return;
         loaded = true;
@@ -4647,6 +4701,10 @@
           if(treeEl){
             locTree = createLocationBrowseTree(treeEl, towns);
             locTree.onChange(applyFilters);
+            // The old combined "Eastern Cape & Garden Route" zone is now two zones.
+            if(affiliateZone === 'Eastern Cape & Garden Route'){
+              affiliateZone = towns.some(function(t){ return t.zone === 'Garden Route'; }) ? 'Garden Route' : 'Eastern Cape';
+            }
             if(affiliateZone && towns.some(function(t){ return t.zone === affiliateZone; })){
               locTree.checkRegion(affiliateZone);
               statusEl.textContent = 'Showing your zone (' + affiliateZone + ') \u2014 untick it in Browse by location to see everywhere.';
@@ -4655,6 +4713,7 @@
           }
 
           applyFilters();
+          drawZoneAreas();
 
           if(markers.length){
             var group = L.featureGroup(markers.map(function(m){ return m.marker; }));
