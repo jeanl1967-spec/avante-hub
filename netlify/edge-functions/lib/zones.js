@@ -1,34 +1,52 @@
-// The 9 affiliate zones. "Garden Route" (Stilbaai to Storms River mouth,
+// The 12 affiliate zones. "Garden Route" (Stilbaai to Storms River mouth,
 // including the Klein Karoo towns such as Oudtshoorn and De Rust) is its own
-// zone, and the Eastern Cape has its own name again (2026-09-21, at Jean's
-// request). Gauteng is still grouped with North West. Shared by the affiliate
-// Zone field (admin-api.js's upsertAffiliate), the activity Zone field
-// (map-api.js), and the Hub's Explore Map filter, so all three always offer
-// the exact same list and can't drift out of sync.
+// zone, the Eastern Cape has its own name, and (2026-09-21, at Jean's request)
+// the old "Western Cape (Cape Town & Winelands)" is split into Cape Town,
+// Winelands and West Coast & Overberg, and "Gauteng & North West" into Gauteng
+// and North West. Shared by the affiliate Zone field (admin-api.js's
+// upsertAffiliate), the activity Zone field (map-api.js), and the Hub's
+// Explore Map filter, so all three always offer the exact same list and can't
+// drift out of sync.
 import ZONE_SHAPES from "./zone-shapes.js";
 
 export const ZONES = [
-  "Western Cape (Cape Town & Winelands)",
+  "Cape Town",
+  "Winelands",
+  "West Coast & Overberg",
   "Garden Route",
   "Eastern Cape",
   "Northern Cape",
   "Free State",
   "KwaZulu-Natal",
-  "Gauteng & North West",
+  "Gauteng",
+  "North West",
   "Mpumalanga",
   "Limpopo",
 ];
 
 const Z = {
-  WC: ZONES[0], GR: ZONES[1], EC: ZONES[2], NC: ZONES[3], FS: ZONES[4],
-  KZN: ZONES[5], GP: ZONES[6], MP: ZONES[7], LP: ZONES[8],
+  CT: ZONES[0], WL: ZONES[1], WO: ZONES[2], GR: ZONES[3], EC: ZONES[4], NC: ZONES[5], FS: ZONES[6],
+  KZN: ZONES[7], GP: ZONES[8], NW: ZONES[9], MP: ZONES[10], LP: ZONES[11],
 };
 
-// The old combined zone name is still stored on existing affiliates, towns,
-// activities and resort rows. It can't be mapped to ONE new zone on its own
-// (it covered both), so a stored old value reads as the Eastern Cape (the
-// Re-check pass then moves the Garden Route places over by coordinates).
-export const LEGACY_ZONES = { "Eastern Cape & Garden Route": Z.EC };
+// The old combined zone names are still stored on existing affiliates, towns,
+// activities and resort rows. Each covered several of today's zones, so a
+// stored old value can't be mapped to ONE new zone on its own:
+//   LEGACY_ZONES  = the single zone an old value reads as when nothing better
+//                   is known (records with coordinates are placed by the
+//                   coordinates instead; the Re-check pass then rewrites them).
+//   LEGACY_EXPAND = every current zone an old value covers (used for
+//                   affiliates, who can hold several zones).
+export const LEGACY_ZONES = {
+  "Eastern Cape & Garden Route": Z.EC,
+  "Western Cape (Cape Town & Winelands)": Z.CT,
+  "Gauteng & North West": Z.GP,
+};
+export const LEGACY_EXPAND = {
+  "Eastern Cape & Garden Route": [Z.GR, Z.EC],
+  "Western Cape (Cape Town & Winelands)": [Z.CT, Z.WL, Z.WO],
+  "Gauteng & North West": [Z.GP, Z.NW],
+};
 
 export function normalizeZone(z) {
   const s = String(z || "");
@@ -53,12 +71,17 @@ export function provinceToZone(stateProvince) {
   const s = String(stateProvince || "").toLowerCase();
   if (!s) return "";
   if (s.includes("garden route")) return Z.GR;
-  if (s.includes("western cape") || s.includes("winelands")) return Z.WC;
+  if (s.includes("cape town")) return Z.CT;
+  if (s.includes("winelands")) return Z.WL;
+  if (s.includes("overberg") || s.includes("west coast")) return Z.WO;
+  // A bare "Western Cape" can't say which of the three Western Cape zones,
+  // so it is left to the town name / coordinates.
   if (s.includes("eastern cape")) return Z.EC;
   if (s.includes("northern cape")) return Z.NC;
   if (s.includes("free state")) return Z.FS;
   if (s.includes("kwazulu") || s.includes("natal")) return Z.KZN;
-  if (s.includes("gauteng") || s.includes("north west")) return Z.GP;
+  if (s.includes("gauteng")) return Z.GP;
+  if (s.includes("north west") || s.includes("northwest")) return Z.NW;
   if (s.includes("mpumalanga")) return Z.MP;
   if (s.includes("limpopo")) return Z.LP;
   return "";
@@ -68,17 +91,22 @@ export function provinceToZone(stateProvince) {
 // ("Cradock", "Plettenberg Bay", "Hazyview"), so provinceToZone's substring
 // match against a province name won't fire for most of them. This is a
 // best-effort town/region keyword table covering the major towns across
-// all 9 provinces, including every town that appeared in the ~1,250-row
+// all 9 provinces (12 zones), including every town that appeared in the ~1,250-row
 // activities dataset. Coverage is NOT exhaustive — StockNetwork's resort
 // list has ~5,900 properties across many more small towns than are listed
 // here, so plenty of rows will come back with zone "" (unmapped) rather
 // than a guess. Unmapped just means "doesn't auto-filter into any zone
 // tab" — it still shows up under "All zones".
 const TOWN_ZONE_KEYWORDS = [
-  [Z.WC, ["cape town", "stellenbosch", "franschhoek", "paarl", "worcester", "robertson", "montagu", "ceres",
-    "saldanha", "langebaan", "hermanus", "gansbaai", "bredasdorp", "arniston", "clanwilliam", "citrusdal",
-    "malmesbury", "somerset west", "strand", "wellington", "swellendam", "riebeek", "heidelberg", "witsand",
-    "durbanville", "constantia", "hout bay", "camps bay", "sea point", "muizenberg", "simon's town", "simons town"]],
+  [Z.CT, ["cape town", "somerset west", "strand", "durbanville", "constantia", "hout bay", "camps bay", "sea point",
+    "muizenberg", "simon's town", "simons town", "gordon's bay", "gordons bay", "kommetjie", "noordhoek", "bloubergstrand",
+    "table view", "melkbosstrand", "khayelitsha", "fish hoek", "kalk bay", "llandudno", "century city"]],
+  [Z.WL, ["stellenbosch", "franschhoek", "paarl", "worcester", "robertson", "montagu", "ceres", "wellington",
+    "tulbagh", "bonnievale", "ashton", "mcgregor", "wolseley", "rawsonville"]],
+  [Z.WO, ["saldanha", "langebaan", "hermanus", "gansbaai", "bredasdorp", "arniston", "clanwilliam", "citrusdal",
+    "malmesbury", "swellendam", "riebeek", "heidelberg", "witsand", "paternoster", "velddrif", "yzerfontein",
+    "darling", "struisbaai", "de hoop", "onrus", "stanford", "kleinmond", "betty's bay", "bettys bay", "pringle bay",
+    "napier", "vredenburg", "st helena bay", "lambert's bay", "lamberts bay", "piketberg", "moorreesburg"]],
   [Z.GR, ["garden route", "plettenberg bay", "plett", "knysna", "george", "mossel bay", "oudtshoorn", "de rust",
     "calitzdorp", "wilderness", "sedgefield", "storms river", "tsitsikamma", "nature's valley", "natures valley",
     "keurboomstrand", "stilbaai", "still bay", "riversdale", "albertinia", "herolds bay", "great brak",
@@ -94,9 +122,10 @@ const TOWN_ZONE_KEYWORDS = [
   [Z.KZN, ["durban", "pietermaritzburg", "ballito", "st lucia", "hluhluwe", "richards bay", "margate",
     "underberg", "dundee", "greytown", "newcastle", "umhlanga", "drakensberg", "zululand", "port shepstone",
     "scottburgh", "eshowe", "pongola"]],
-  [Z.GP, ["johannesburg", "pretoria", "soweto", "sandton", "hartbeespoort", "magaliesburg", "rustenburg",
-    "sun city", "vanderbijlpark", "krugersdorp", "benoni", "centurion", "midrand", "vereeniging", "potchefstroom",
-    "mahikeng", "mafikeng", "klerksdorp"]],
+  [Z.GP, ["johannesburg", "pretoria", "soweto", "sandton", "magaliesburg", "vanderbijlpark", "krugersdorp",
+    "benoni", "centurion", "midrand", "vereeniging", "randburg", "roodepoort", "boksburg", "germiston"]],
+  [Z.NW, ["hartbeespoort", "rustenburg", "sun city", "potchefstroom", "mahikeng", "mafikeng", "klerksdorp",
+    "lichtenburg", "vryburg", "zeerust", "pilanesberg"]],
   [Z.MP, ["nelspruit", "mbombela", "hazyview", "sabie", "graskop", "barberton", "white river",
     "kruger", "malelane", "komatipoort", "pilgrim's rest", "pilgrims rest", "dullstroom", "lydenburg"]],
   [Z.LP, ["polokwane", "phalaborwa", "musina", "tzaneen", "louis trichardt", "makhado", "modimolle",
