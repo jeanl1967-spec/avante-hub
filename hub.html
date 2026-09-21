@@ -3586,7 +3586,7 @@
       // regardless of allocation). Built with DOM APIs rather than HTML
       // string concatenation so town/suburb names never need manual
       // escaping.
-      var HOOK_ZONE_ORDER = ['Western Cape (Cape Town & Winelands)', 'Garden Route', 'Eastern Cape', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng & North West', 'Mpumalanga', 'Limpopo'];
+      var HOOK_ZONE_ORDER = ['Cape Town', 'Winelands', 'West Coast & Overberg', 'Garden Route', 'Eastern Cape', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng', 'North West', 'Mpumalanga', 'Limpopo'];
 
       function buildLocationOptionsFragment(towns){
         var frag = document.createDocumentFragment();
@@ -4296,7 +4296,7 @@
       var loaded = false;
       var locTree = null;
 
-      var EM_ZONE_ORDER = ['Western Cape (Cape Town & Winelands)', 'Garden Route', 'Eastern Cape', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng & North West', 'Mpumalanga', 'Limpopo'];
+      var EM_ZONE_ORDER = ['Cape Town', 'Winelands', 'West Coast & Overberg', 'Garden Route', 'Eastern Cape', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng', 'North West', 'Mpumalanga', 'Limpopo'];
 
       // Cascading multi-select browse tree — same behavior as admin's Map &
       // Activities master map (see the shared-utilities comment there for
@@ -4600,13 +4600,16 @@
       // Shaded zone areas behind the pins (polygons from /api/map?shapes=1), in
       // the same zone colours as the admin Master map.
       var EM_ZONE_COLORS = {
-        'Western Cape (Cape Town & Winelands)': '#8074dd',
+        'Cape Town': '#8074dd',
+        'Winelands': '#b565a7',
+        'West Coast & Overberg': '#4fa3b5',
         'Garden Route': '#e6a000',
         'Eastern Cape': '#d85a30',
         'Northern Cape': '#888780',
         'Free State': '#b8741a',
         'KwaZulu-Natal': '#1d9e75',
-        'Gauteng & North West': '#3a88e0',
+        'Gauteng': '#3a88e0',
+        'North West': '#1f4e9c',
         'Mpumalanga': '#63982a',
         'Limpopo': '#d4537e'
       };
@@ -4701,9 +4704,16 @@
           if(treeEl){
             locTree = createLocationBrowseTree(treeEl, towns);
             locTree.onChange(applyFilters);
-            // The old combined "Eastern Cape & Garden Route" zone is now two zones.
-            if(affiliateZone === 'Eastern Cape & Garden Route'){
-              affiliateZone = towns.some(function(t){ return t.zone === 'Garden Route'; }) ? 'Garden Route' : 'Eastern Cape';
+            // The old combined zones are now several zones each: use the first
+            // of the zones it covered that has any towns.
+            var LEGACY_HUB_ZONES = {
+              'Eastern Cape & Garden Route': ['Garden Route', 'Eastern Cape'],
+              'Western Cape (Cape Town & Winelands)': ['Cape Town', 'Winelands', 'West Coast & Overberg'],
+              'Gauteng & North West': ['Gauteng', 'North West']
+            };
+            if(LEGACY_HUB_ZONES[affiliateZone]){
+              var covered = LEGACY_HUB_ZONES[affiliateZone];
+              affiliateZone = covered.filter(function(z){ return towns.some(function(t){ return t.zone === z; }); })[0] || covered[0];
             }
             if(affiliateZone && towns.some(function(t){ return t.zone === affiliateZone; })){
               locTree.checkRegion(affiliateZone);
