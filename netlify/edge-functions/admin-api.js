@@ -841,7 +841,11 @@ export default async (request, context) => {
       const email = typeof body.email === "string" ? body.email.trim() : "";
       const siteNr = typeof body.siteNr === "string" ? body.siteNr.trim() : "";
       const zones = Array.isArray(body.zones)
-        ? [...new Set(body.zones.filter((z) => typeof z === "string" && ZONES.includes(z)))]
+        // The old combined "Eastern Cape & Garden Route" zone was split into two
+        // (2026-09-21); an old value saved from a stale form counts as both.
+        ? [...new Set(body.zones
+            .flatMap((z) => (z === "Eastern Cape & Garden Route" ? ["Garden Route", "Eastern Cape"] : [z]))
+            .filter((z) => typeof z === "string" && ZONES.includes(z)))]
         : [];
       const ALLOWED_TYPES = ["franchise", "property", "agent"];
       const types = Array.isArray(body.types)
