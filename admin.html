@@ -538,13 +538,16 @@
       <p class="modal-sub" style="margin:-2px 0 8px;">The StockNetwork site number this affiliate's accommodation bookings are linked to. Shown read-only in their Hub.</p>
       <label>Zones (optional — select all that apply)</label>
       <div class="row" id="affZoneCheckboxes" style="flex-wrap:wrap; gap:8px 16px; margin-bottom:8px;">
-        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Western Cape (Cape Town &amp; Winelands)" class="aff-zone-cb"> Western Cape (Cape Town &amp; Winelands)</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Cape Town" class="aff-zone-cb"> Cape Town</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Winelands" class="aff-zone-cb"> Winelands</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="West Coast &amp; Overberg" class="aff-zone-cb"> West Coast &amp; Overberg</label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Garden Route" class="aff-zone-cb"> Garden Route</label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Eastern Cape" class="aff-zone-cb"> Eastern Cape</label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Northern Cape" class="aff-zone-cb"> Northern Cape</label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Free State" class="aff-zone-cb"> Free State</label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="KwaZulu-Natal" class="aff-zone-cb"> KwaZulu-Natal</label>
-        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Gauteng &amp; North West" class="aff-zone-cb"> Gauteng &amp; North West</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Gauteng" class="aff-zone-cb"> Gauteng</label>
+        <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="North West" class="aff-zone-cb"> North West</label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Mpumalanga" class="aff-zone-cb"> Mpumalanga</label>
         <label style="display:flex; align-items:center; gap:6px; font-weight:400;"><input type="checkbox" value="Limpopo" class="aff-zone-cb"> Limpopo</label>
       </div>
@@ -1372,13 +1375,16 @@
           <div><label for="townZoneInput">Zone (optional)</label>
             <select id="townZoneInput">
               <option value="">— No zone —</option>
-              <option value="Western Cape (Cape Town &amp; Winelands)">Western Cape (Cape Town &amp; Winelands)</option>
+              <option value="Cape Town">Cape Town</option>
+              <option value="Winelands">Winelands</option>
+              <option value="West Coast &amp; Overberg">West Coast &amp; Overberg</option>
               <option value="Garden Route">Garden Route</option>
               <option value="Eastern Cape">Eastern Cape</option>
               <option value="Northern Cape">Northern Cape</option>
               <option value="Free State">Free State</option>
               <option value="KwaZulu-Natal">KwaZulu-Natal</option>
-              <option value="Gauteng &amp; North West">Gauteng &amp; North West</option>
+              <option value="Gauteng">Gauteng</option>
+              <option value="North West">North West</option>
               <option value="Mpumalanga">Mpumalanga</option>
               <option value="Limpopo">Limpopo</option>
             </select>
@@ -1435,7 +1441,7 @@
 
         <div style="margin-top:18px; padding-top:16px; border-top:1.5px solid var(--line);">
           <h4 style="margin:0 0 6px; font-size:13.5px;">Merge duplicate towns</h4>
-          <p style="margin:0 0 12px; font-size:13px; color:var(--muted);">Finds towns that are the same place recorded more than once (same name, same country, same zone, close together &mdash; for example the four &ldquo;Cape Town&rdquo; entries) and joins them into one. Their suburbs, photos and everything tagged to them (properties, activities, hooks) move to the town that is kept. Towns that only share a name but are in different zones (Heidelberg in the Western Cape and in Gauteng) are <strong>not</strong> touched. <em>Find duplicates</em> only shows you the list &mdash; nothing changes until you press Merge.</p>
+          <p style="margin:0 0 12px; font-size:13px; color:var(--muted);">Finds towns that are the same place recorded more than once (same name, same country, same zone, close together &mdash; for example the four &ldquo;Cape Town&rdquo; entries) and joins them into one. Their suburbs, photos and everything tagged to them (properties, activities, hooks) move to the town that is kept. Towns that only share a name but are in different zones (Heidelberg in the West Coast &amp; Overberg and in Gauteng) are <strong>not</strong> touched. <em>Find duplicates</em> only shows you the list &mdash; nothing changes until you press Merge.</p>
           <div class="btn-row" style="margin-top:0;">
             <button class="btn-outline" id="dupFindBtn">Find duplicate towns</button>
             <button class="primary" id="dupMergeBtn" style="display:none;">Merge them</button>
@@ -2487,7 +2493,7 @@
       label.textContent = n === 0 ? 'No locations selected' : (n + ' location' + (n === 1 ? '' : 's') + ' selected');
     }
 
-    var AFF_ZONE_ORDER = ['Western Cape (Cape Town & Winelands)', 'Garden Route', 'Eastern Cape', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng & North West', 'Mpumalanga', 'Limpopo'];
+    var AFF_ZONE_ORDER = ['Cape Town', 'Winelands', 'West Coast & Overberg', 'Garden Route', 'Eastern Cape', 'Northern Cape', 'Free State', 'KwaZulu-Natal', 'Gauteng', 'North West', 'Mpumalanga', 'Limpopo'];
     // Zones outside South Africa are created automatically (one per province/region), so
     // anything not in the fixed list above is listed after it rather than dropped.
     function affZoneExtras(towns){
@@ -2989,10 +2995,16 @@
       document.getElementById('affEmailInput').value = existing ? (existing.email || '') : '';
       document.getElementById('affSiteNrInput').value = existing ? (existing.siteNr || '') : '';
       var existingZones = existing ? ((existing.zones && existing.zones.length) ? existing.zones : (existing.zone ? [existing.zone] : [])) : [];
-      // The old combined "Eastern Cape & Garden Route" zone is now two zones.
-      if(existingZones.indexOf('Eastern Cape & Garden Route') > -1){
-        existingZones = existingZones.concat(['Garden Route', 'Eastern Cape']);
-      }
+      // The old combined zones are now several zones each: an affiliate who had
+      // the old value has all of the zones it covered ticked.
+      var LEGACY_AFF_ZONES = {
+        'Eastern Cape & Garden Route': ['Garden Route', 'Eastern Cape'],
+        'Western Cape (Cape Town & Winelands)': ['Cape Town', 'Winelands', 'West Coast & Overberg'],
+        'Gauteng & North West': ['Gauteng', 'North West']
+      };
+      existingZones.slice().forEach(function(z){
+        if(LEGACY_AFF_ZONES[z]) existingZones = existingZones.concat(LEGACY_AFF_ZONES[z]);
+      });
       document.querySelectorAll('.aff-zone-cb').forEach(function(cb){
         cb.checked = existingZones.indexOf(cb.value) > -1;
       });
@@ -7151,25 +7163,31 @@
       // "Western Cape" pin sitting in a tight cluster of orange "Garden
       // Route" pins around Knysna is an obvious outlier worth checking.
       var MAP_ZONES = [
-        'Western Cape (Cape Town & Winelands)',
+        'Cape Town',
+        'Winelands',
+        'West Coast & Overberg',
         'Garden Route',
         'Eastern Cape',
         'Northern Cape',
         'Free State',
         'KwaZulu-Natal',
-        'Gauteng & North West',
+        'Gauteng',
+        'North West',
         'Mpumalanga',
         'Limpopo'
       ];
       // Same colours as the zone-areas example map Jean sent (2026-09-21).
       var MAP_ZONE_COLORS = {
-        'Western Cape (Cape Town & Winelands)': '#8074dd',
+        'Cape Town': '#8074dd',
+        'Winelands': '#b565a7',
+        'West Coast & Overberg': '#4fa3b5',
         'Garden Route': '#e6a000',
         'Eastern Cape': '#d85a30',
         'Northern Cape': '#888780',
         'Free State': '#b8741a',
         'KwaZulu-Natal': '#1d9e75',
-        'Gauteng & North West': '#3a88e0',
+        'Gauteng': '#3a88e0',
+        'North West': '#1f4e9c',
         'Mpumalanga': '#63982a',
         'Limpopo': '#d4537e'
       };
