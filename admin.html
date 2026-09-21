@@ -1432,6 +1432,17 @@
           </div>
           <div class="status" id="recheckZonesStatus"></div>
         </div>
+
+        <div style="margin-top:18px; padding-top:16px; border-top:1.5px solid var(--line);">
+          <h4 style="margin:0 0 6px; font-size:13.5px;">Merge duplicate towns</h4>
+          <p style="margin:0 0 12px; font-size:13px; color:var(--muted);">Finds towns that are the same place recorded more than once (same name, same country, same zone, close together &mdash; for example the four &ldquo;Cape Town&rdquo; entries) and joins them into one. Their suburbs, photos and everything tagged to them (properties, activities, hooks) move to the town that is kept. Towns that only share a name but are in different zones (Heidelberg in the Western Cape and in Gauteng) are <strong>not</strong> touched. <em>Find duplicates</em> only shows you the list &mdash; nothing changes until you press Merge.</p>
+          <div class="btn-row" style="margin-top:0;">
+            <button class="btn-outline" id="dupFindBtn">Find duplicate towns</button>
+            <button class="primary" id="dupMergeBtn" style="display:none;">Merge them</button>
+          </div>
+          <div class="status" id="dupStatus"></div>
+          <div id="dupList" style="margin-top:10px; font-size:13px;"></div>
+        </div>
       </div>
 
       <div class="card" style="margin-top:20px;">
@@ -6722,6 +6733,94 @@
           });
           download('Resort Information - improved coordinates.csv', toStockNetworkCsv(out));
           setStatus('Downloaded a copy of your export with ' + swapped + ' high-confidence coordinates swapped in. Every other row and column is unchanged. Check a few before loading it into StockNetwork.');
+        });
+      })();
+
+      // ---- Merge duplicate towns ----
+      // planTownMerges (read-only preview) -> remapTownRefs for each kind of
+      // record that points at a town -> applyTownMerges (fold + delete).
+      // map-api.js explains the order: references move first, so stopping half
+      // way never leaves anything pointing at a deleted town.
+      (function(){
+        var findBtn = document.getElementById('dupFindBtn');
+        var mergeBtn = document.getElementById('dupMergeBtn');
+        var statusEl = document.getElementById('dupStatus');
+        var listEl = document.getElementById('dupList');
+        if(!findBtn || !mergeBtn) return;
+        var plan = null;
+        var busy = false;
+
+        function setStatus(t, ok){ statusEl.textContent = t; statusEl.className = 'status show' + (ok ? ' ok' : ''); }
+        function esc(x){ return String(x == null ? '' : x).replace(/[&<>"]/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); }
+        function post(body){
+          return fetch('/api/map', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(Object.assign({ token: ADMIN_TOKEN }, body))
+          }).then(function(r){
+            if(r.status === 401){ goToLogin(); return Promise.reject(new Error('unauthenticated')); }
+            return r.text().then(function(t){
+              var d = null; try { d = JSON.parse(t); } catch(e){}
+              if(!r.ok || !d || d.error) throw new Error((d && d.error) || ('HTTP ' + r.status));
+              return d;
+            });
+          });
+        }
+
+        function render(){
+          if(!plan || !plan.groups.length){ listEl.innerHTML = ''; return; }
+          var html = '<div style="max-height:320px; overflow:auto; border:1px solid var(--line); border-radius:8px;"><table style="width:100%; border-collapse:collapse;">' +
+            '<tr style="text-align:left; background:var(--mint);"><th style="padding:6px 8px;">Town</th><th style="padding:6px 8px;">Zone</th><th style="padding:6px 8px;">Copies</th><th style="padding:6px 8px;">Suburbs kept / joined</th></tr>';
+          plan.groups.forEach(function(g){
+            html += '<tr style="border-top:1px solid var(--line);"><td style="padding:6px 8px;">' + esc(g.name) + '</td><td style="padding:6px 8px;">' + esc(g.zone || '(none)') +
+              '</td><td style="padding:6px 8px;">' + g.members.length + '</td><td style="padding:6px 8px;">' + g.suburbsMoved + ' / ' + g.suburbsJoined + '</td></tr>';
+          });
+          listEl.innerHTML = html + '</table></div>';
+        }
+
+        findBtn.addEventListener('click', function(){
+          if(busy) return;
+          busy = true; findBtn.disabled = true; mergeBtn.style.display = 'none'; listEl.innerHTML = '';
+          setStatus('Looking for duplicate towns…', true);
+          post({ action: 'planTownMerges' }).then(function(d){
+            plan = d;
+            var extra = Object.keys(d.townMap).length;
+            if(!d.groups.length){ setStatus('No duplicate towns found (' + d.totalTowns + ' towns checked).', true); return; }
+            setStatus(d.groups.length + ' town' + (d.groups.length === 1 ? '' : 's') + ' recorded more than once (' + extra + ' extra copies to remove, out of ' + d.totalTowns + ' towns). Check the list, then press Merge.', true);
+            render();
+            mergeBtn.style.display = '';
+          }).catch(function(e){ setStatus('Could not check: ' + e.message, false); })
+            .then(function(){ busy = false; findBtn.disabled = false; });
+        });
+
+        mergeBtn.addEventListener('click', function(){
+          if(busy || !plan || !plan.groups.length) return;
+          busy = true; findBtn.disabled = true; mergeBtn.disabled = true;
+          var townMap = plan.townMap, subMap = plan.subMap, totals = { changed: 0 };
+          var kinds = [['activities', 'activities'], ['resorts', 'resort list'], ['listings', 'onboarded properties'], ['hooks', 'hooks']];
+
+          function runKind(i){
+            if(i >= kinds.length) return applyNow();
+            var kind = kinds[i][0], label = kinds[i][1];
+            function slice(cursor){
+              setStatus('Moving ' + label + ' to the kept towns…' + (cursor ? ' (' + cursor + ' done)' : ''), true);
+              return post({ action: 'remapTownRefs', kind: kind, townMap: townMap, subMap: subMap, cursor: cursor || 0 }).then(function(d){
+                totals.changed += d.changed || 0;
+                if(d.done === false) return slice(d.cursor);
+                return runKind(i + 1);
+              });
+            }
+            return slice(0);
+          }
+          function applyNow(){
+            setStatus('Joining the duplicate towns…', true);
+            return post({ action: 'applyTownMerges', townMap: townMap, subMap: subMap }).then(function(d){
+              setStatus('Done — ' + d.merged + ' duplicate towns merged (' + d.movedSuburbs + ' suburbs moved, ' + d.joinedSuburbs + ' joined to an existing suburb, ' + totals.changed + ' tagged items re-pointed). ' + d.townsNow + ' towns now. Reload this page to see the cleaned list.', true);
+              plan = null; listEl.innerHTML = ''; mergeBtn.style.display = 'none';
+            });
+          }
+          runKind(0).catch(function(e){ setStatus('Stopped: ' + e.message + ' — nothing was deleted; press Find duplicates and Merge to continue.', false); })
+            .then(function(){ busy = false; findBtn.disabled = false; mergeBtn.disabled = false; });
         });
       })();
 
