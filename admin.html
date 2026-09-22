@@ -892,6 +892,9 @@
            district, so typing "3 Malachite Mews" or "Knysna" both
            autocomplete from the same list. -->
       <datalist id="hookSourceOptions"></datalist>
+      <!-- Every distinct Theme value typed into an Event hook so far (see
+           lib/event-themes.js) — grows on its own, no pre-seeded list. -->
+      <datalist id="eventThemeOptions"></datalist>
     </section>
 
     <!-- ===================== PAYOUTS ===================== -->
@@ -4201,20 +4204,23 @@
         }).catch(function(){ /* best-effort — Auto-build still works by typed text alone */ });
       }
 
-      // Thin wrappers over the shared top-level location-select helpers
-      // (see their definitions, above the Affiliate-modal section, for
-      // why these live at the top level instead of in here) — these just
-      // supply this section's own '#dh<n>-locationSelect' element ids.
-      function loadHookLocationOptions(){
-        var ids = [];
-        for(var n = 1; n <= HOOK_COUNT; n++) ids.push('dh' + n + '-locationSelect');
-        return populateLocationSelects(ids);
-      }
-      function readHookLocation(n){
-        return readLocationSelect(document.getElementById('dh' + n + '-locationSelect'));
-      }
-      function applyHookLocation(n, h){
-        applyLocationSelect(document.getElementById('dh' + n + '-locationSelect'), h);
+      // Each hook's location is now purely a byproduct of the Browse-by-
+      // location tree below (whatever's ticked when Auto-build last ran)
+      // — the old separate "Property location" <select> field (and its
+      // populateLocationSelects/readLocationSelect/applyLocationSelect
+      // wrappers) is gone. This just shows the last-computed label on the
+      // card and remembers it for the save handler, so a plain caption/
+      // link edit doesn't need to touch it at all.
+      var defaultHookLocationLabel = {};
+      function showHookLocationNote(n, label){
+        var note = document.getElementById('dh' + n + '-locationNote');
+        if(!note) return;
+        if(label){
+          note.textContent = 'Location: ' + label;
+          note.style.display = 'block';
+        }else{
+          note.style.display = 'none';
+        }
       }
 
       function renderAutobuildDraft(n){
@@ -4259,15 +4265,34 @@
       // e.g. area queries or hand-typed property names). Cleared the
       // moment the admin edits the field by hand, so a stale exact-match
       // id can never silently apply to a since-changed query.
-      var autobuildPicked = {};
+      // Selected property keys per hook card ("resortId|siteId", see
+      // lib/resort-key.js), ticked in the Browse-by-location tree below —
+      // replaces the old "pick exactly one property, which also fills in
+      // the query text box" flow with a proper multi-select, so one hook
+      // can be built as a campaign across several properties and/or whole
+      // suburbs/towns at once ("select checkboxes so we can select
+      // multiple properties and also multiple suburbs if we want to do a
+      // campaign in a area" — Jean). A ticked town/suburb/zone "select
+      // all" box is just a shortcut for ticking every property currently
+      // listed there (same district/suburb name-matching the old
+      // single-pick tree always used) — the one source of truth is always
+      // this flat Set of property keys, never any town/suburb bookkeeping
+      // of its own, which is what lets a mixed pick (say, all of one
+      // suburb plus one extra property somewhere else) just work.
+      var autobuildSelection = {}; // { [hookN]: Set<resortKey> }
+      function hookSelection(n){
+        if(!autobuildSelection[n]) autobuildSelection[n] = new Set();
+        return autobuildSelection[n];
+      }
 
-      // A read-only zone → town → suburb → property navigation tree for
-      // picking ONE property to auto-build this hook from — same
-      // zone/town/suburb grouping as the Add/Edit Affiliate modal's
-      // assignment tree (admin.html's populateAffTownCheckboxes), but
-      // every level here is just a collapsible <details> for browsing;
-      // only a property row is actually clickable. Rendered once per hook
-      // card the first time its Browse box is opened.
+      // A checkbox zone → town → suburb → property tree for picking one or
+      // more properties (or whole areas) to auto-build this hook from —
+      // same zone/town/suburb grouping and lazy per-node building as the
+      // Add/Edit Affiliate modal's assignment tree (populateAffTownCheckboxes),
+      // but the selection here just feeds "Build draft from selection"
+      // below rather than assigning an affiliate. Rendered once per hook
+      // card the first time its Browse box is opened; its own Clear button
+      // resets and re-opens it fresh.
       function renderPropertyPickerTree(containerEl, n){
         containerEl.innerHTML = '<div style="font-size:12px; color:var(--muted); padding:4px 0;">Loading locations…</div>';
         return Promise.all([affSectionMapPost('adminList'), loadAllResorts()]).then(function(results){
@@ -4279,6 +4304,29 @@
             return;
           }
 
+          var selected = hookSelection(n);
+          // Every checkbox ever built for this tree instance registers
+          // itself here so a toggle anywhere (a single property, or a
+          // whole zone/town/suburb "select all") can refresh every other
+          // checkbox's checked/indeterminate state from the one source of
+          // truth (`selected`) without needing to rebuild the DOM or walk
+          // ancestor/descendant relationships by hand — cheap even at
+          // ~5,900 properties since only already-rendered (expanded) rows
+          // are ever registered.
+          var registry = [];
+          function register(cb, keysFn){ registry.push({ cb: cb, keysFn: keysFn }); }
+          function applyAggregate(cb, keys){
+            if(!keys.length){ cb.checked = false; cb.indeterminate = false; cb.disabled = true; return; }
+            cb.disabled = false;
+            var checkedCount = keys.filter(function(k){ return selected.has(k); }).length;
+            cb.checked = checkedCount === keys.length;
+            cb.indeterminate = checkedCount > 0 && checkedCount < keys.length;
+          }
+          function refreshAll(){
+            registry.forEach(function(e){ applyAggregate(e.cb, e.keysFn()); });
+            updateSummary();
+          }
+
           function propsFor(districtName, suburbName){
             var dKey = (districtName || '').trim().toLowerCase();
             var sKey = suburbName === undefined ? null : (suburbName || '').trim().toLowerCase();
@@ -4288,7 +4336,98 @@
               return (r.suburb || '').trim().toLowerCase() === sKey;
             });
           }
-          function appendPropertyLinks(parentEl, list){
+          function keysFor(list){
+            var out = [];
+            list.forEach(function(r){ var k = resortKeyOf(r); if(k) out.push(k); });
+            return out;
+          }
+          function toggleKeys(keys, on){
+            keys.forEach(function(k){ on ? selected.add(k) : selected.delete(k); });
+          }
+
+          // --- Selection summary + actions bar, shown above the tree ---
+          var bar = document.createElement('div');
+          bar.style.cssText = 'display:flex; align-items:center; gap:8px; padding:2px 0 8px; flex-wrap:wrap;';
+          var summaryText = document.createElement('span');
+          summaryText.style.cssText = 'font-size:12px; color:var(--muted); flex:1; min-width:160px;';
+          var clearBtn = document.createElement('button');
+          clearBtn.type = 'button';
+          clearBtn.className = 'btn-outline';
+          clearBtn.style.cssText = 'font-size:12px; padding:6px 10px;';
+          clearBtn.textContent = 'Clear';
+          var buildBtn = document.createElement('button');
+          buildBtn.type = 'button';
+          buildBtn.className = 'primary';
+          buildBtn.style.cssText = 'font-size:12px; padding:6px 10px;';
+          buildBtn.textContent = 'Build draft from selection';
+          function updateSummary(){
+            var count = selected.size;
+            summaryText.textContent = count === 0
+              ? 'Tick one or more properties, or a whole town/suburb/area, below.'
+              : count + ' propert' + (count === 1 ? 'y' : 'ies') + ' selected';
+            buildBtn.disabled = count === 0;
+            clearBtn.disabled = count === 0;
+          }
+          clearBtn.addEventListener('click', function(){
+            selected.clear();
+            refreshAll();
+          });
+          buildBtn.addEventListener('click', function(){
+            document.getElementById('dh' + n + '-autobuildTree').classList.remove('show');
+            generateAutobuildDraftFromSelection(n, Array.from(selected), computeSelectionLabel());
+          });
+          bar.appendChild(summaryText);
+          bar.appendChild(clearBtn);
+          bar.appendChild(buildBtn);
+          containerEl.appendChild(bar);
+          updateSummary();
+
+          var treeEl = document.createElement('div');
+          containerEl.appendChild(treeEl);
+
+          // A human description of the current selection — whichever whole
+          // towns/suburbs are fully ticked, named directly ("Hermanus,
+          // Voëlklip"), plus a count of anything else picked outside those
+          // ("+ 2 more properties") once naming every individual property
+          // would get unwieldy. Sent to the server as-is (it has no town/
+          // suburb name data of its own) and saved as the hook's
+          // locationLabel once the resulting draft is used.
+          function computeSelectionLabel(){
+            var wholeAreas = [];
+            var usedKeys = new Set();
+            towns.forEach(function(t){
+              var subs = t.suburbs || [];
+              if(subs.length){
+                subs.forEach(function(s){
+                  var ks = keysFor(propsFor(t.name, s.name));
+                  if(ks.length && ks.every(function(k){ return selected.has(k); })){
+                    wholeAreas.push(s.name);
+                    ks.forEach(function(k){ usedKeys.add(k); });
+                  }
+                });
+              } else {
+                var ks2 = keysFor(propsFor(t.name));
+                if(ks2.length && ks2.every(function(k){ return selected.has(k); })){
+                  wholeAreas.push(t.name);
+                  ks2.forEach(function(k){ usedKeys.add(k); });
+                }
+              }
+            });
+            var remaining = Array.from(selected).filter(function(k){ return !usedKeys.has(k); });
+            var parts = wholeAreas.slice();
+            if(remaining.length){
+              if(!wholeAreas.length && remaining.length <= 3){
+                var byKey = {};
+                resorts.forEach(function(r){ var k = resortKeyOf(r); if(k) byKey[k] = r; });
+                remaining.forEach(function(k){ if(byKey[k]) parts.push(byKey[k].name); });
+              } else {
+                parts.push(remaining.length + ' more propert' + (remaining.length === 1 ? 'y' : 'ies'));
+              }
+            }
+            return parts.join(', ');
+          }
+
+          function appendPropertyCheckboxes(parentEl, list){
             if(!list.length){
               var none = document.createElement('div');
               none.style.cssText = 'font-size:12px; color:var(--muted); padding:2px 0 2px 16px;';
@@ -4297,17 +4436,25 @@
               return;
             }
             list.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); }).forEach(function(r){
-              var link = document.createElement('div');
-              link.style.cssText = 'padding:3px 0 3px 16px; font-size:13px; cursor:pointer; color:#1a73e8;';
-              link.textContent = r.name;
-              link.addEventListener('click', function(){
-                var input = document.getElementById('dh' + n + '-autobuildQuery');
-                input.value = r.name;
-                autobuildPicked[n] = { resortId: r.resortId || '', siteId: r.siteId || '' };
-                document.getElementById('dh' + n + '-autobuildTree').classList.remove('show');
-                generateAutobuildDraft(n);
+              var key = resortKeyOf(r);
+              var row = document.createElement('label');
+              row.className = 'loc-tree-flatrow';
+              row.style.paddingLeft = '16px';
+              var cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.style.cssText = 'width:auto; flex:none;';
+              if(!key) cb.disabled = true;
+              cb.checked = !!(key && selected.has(key));
+              cb.addEventListener('change', function(){
+                if(key) toggleKeys([key], cb.checked);
+                refreshAll();
               });
-              parentEl.appendChild(link);
+              var span = document.createElement('span');
+              span.textContent = r.name + (!key ? ' (no StockNetwork ID on file)' : '');
+              row.appendChild(cb);
+              row.appendChild(span);
+              parentEl.appendChild(row);
+              if(key) register(cb, function(){ return [key]; });
             });
           }
 
@@ -4317,70 +4464,143 @@
           if(byZone['']) zoneKeys.push('');
 
           zoneKeys.forEach(function(zoneKey){
+            var zoneTowns = byZone[zoneKey];
+            function zoneKeysList(){
+              var out = [];
+              zoneTowns.forEach(function(t){ out = out.concat(keysFor(propsFor(t.name))); });
+              return out;
+            }
+
             var zoneDet = document.createElement('details');
-            zoneDet.style.cssText = 'margin:2px 0;';
+            zoneDet.className = 'loc-tree-node';
             var zoneSum = document.createElement('summary');
-            zoneSum.style.cssText = 'cursor:pointer; font-size:13px; font-weight:600;';
-            zoneSum.textContent = zoneKey || 'Other (no area set)';
+            var zoneCb = document.createElement('input');
+            zoneCb.type = 'checkbox';
+            zoneCb.style.cssText = 'width:auto; flex:none;';
+            zoneCb.addEventListener('click', function(e){
+              e.stopPropagation();
+              var keys = zoneKeysList();
+              var allOn = keys.length > 0 && keys.every(function(k){ return selected.has(k); });
+              toggleKeys(keys, !allOn);
+              refreshAll();
+            });
+            var zoneLabel = document.createElement('span');
+            zoneLabel.className = 'loc-tree-label';
+            zoneLabel.style.fontWeight = '600';
+            zoneLabel.textContent = zoneKey || 'Other (no area set)';
+            zoneSum.appendChild(zoneCb);
+            zoneSum.appendChild(zoneLabel);
             zoneDet.appendChild(zoneSum);
+            register(zoneCb, zoneKeysList);
+            applyAggregate(zoneCb, zoneKeysList());
+
             var zoneBody = document.createElement('div');
-            zoneBody.style.cssText = 'margin-left:14px;';
+            zoneBody.className = 'loc-tree-indent';
             zoneDet.appendChild(zoneBody);
 
             byZone[zoneKey].slice().sort(function(a,b){ return a.name.localeCompare(b.name); }).forEach(function(t){
               var subs = (t.suburbs || []).slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
+
+              if(!subs.length){
+                // A suburb-less town is itself the leaf "select all"
+                // level — its own checkbox toggles every property
+                // matching it directly, with no intermediate suburb row.
+                var flatRow = document.createElement('label');
+                flatRow.className = 'loc-tree-flatrow';
+                var flatCb = document.createElement('input');
+                flatCb.type = 'checkbox';
+                flatCb.style.cssText = 'width:auto; flex:none;';
+                function townKeysList(){ return keysFor(propsFor(t.name)); }
+                flatCb.addEventListener('click', function(e){
+                  e.stopPropagation();
+                  var keys = townKeysList();
+                  var allOn = keys.length > 0 && keys.every(function(k){ return selected.has(k); });
+                  toggleKeys(keys, !allOn);
+                  refreshAll();
+                });
+                var flatLabel = document.createElement('span');
+                flatLabel.textContent = t.name;
+                flatRow.appendChild(flatCb);
+                flatRow.appendChild(flatLabel);
+                zoneBody.appendChild(flatRow);
+                register(flatCb, townKeysList);
+                applyAggregate(flatCb, townKeysList());
+                return;
+              }
+
               var townDet = document.createElement('details');
-              townDet.style.cssText = 'margin:1px 0;';
+              townDet.className = 'loc-tree-node';
               var townSum = document.createElement('summary');
-              townSum.style.cssText = 'cursor:pointer; font-size:13px;';
-              townSum.textContent = t.name;
+              var townCb = document.createElement('input');
+              townCb.type = 'checkbox';
+              townCb.style.cssText = 'width:auto; flex:none;';
+              function townKeysList2(){ return keysFor(propsFor(t.name)); }
+              townCb.addEventListener('click', function(e){
+                e.stopPropagation();
+                var keys = townKeysList2();
+                var allOn = keys.length > 0 && keys.every(function(k){ return selected.has(k); });
+                toggleKeys(keys, !allOn);
+                refreshAll();
+              });
+              var townLabel = document.createElement('span');
+              townLabel.className = 'loc-tree-label';
+              townLabel.textContent = t.name;
+              townSum.appendChild(townCb);
+              townSum.appendChild(townLabel);
               townDet.appendChild(townSum);
+              register(townCb, townKeysList2);
+              applyAggregate(townCb, townKeysList2());
+
               var townBody = document.createElement('div');
-              townBody.style.cssText = 'margin-left:14px;';
+              townBody.className = 'loc-tree-indent';
               townDet.appendChild(townBody);
 
               var townBuilt = false;
               townDet.addEventListener('toggle', function(){
                 if(!townDet.open || townBuilt) return;
                 townBuilt = true;
-                if(subs.length){
-                  var suburbNamesLower = subs.map(function(s){ return (s.name || '').trim().toLowerCase(); });
-                  subs.forEach(function(s){
-                    var subDet = document.createElement('details');
-                    subDet.style.cssText = 'margin:1px 0;';
-                    var subSum = document.createElement('summary');
-                    subSum.style.cssText = 'cursor:pointer; font-size:13px; color:var(--muted);';
-                    subSum.textContent = s.name;
-                    subDet.appendChild(subSum);
-                    var subBody = document.createElement('div');
-                    subDet.appendChild(subBody);
-                    var subBuilt = false;
-                    subDet.addEventListener('toggle', function(){
-                      if(!subDet.open || subBuilt) return;
-                      subBuilt = true;
-                      appendPropertyLinks(subBody, propsFor(t.name, s.name));
-                    });
-                    townBody.appendChild(subDet);
+                var suburbNamesLower = subs.map(function(s){ return (s.name || '').trim().toLowerCase(); });
+                subs.forEach(function(s){
+                  var subRow = document.createElement('label');
+                  subRow.className = 'loc-tree-flatrow';
+                  var subCb = document.createElement('input');
+                  subCb.type = 'checkbox';
+                  subCb.style.cssText = 'width:auto; flex:none;';
+                  function subKeysList(){ return keysFor(propsFor(t.name, s.name)); }
+                  subCb.addEventListener('change', function(){
+                    var keys = subKeysList();
+                    toggleKeys(keys, subCb.checked);
+                    refreshAll();
                   });
-                  var otherProps = propsFor(t.name).filter(function(r){
-                    return suburbNamesLower.indexOf((r.suburb || '').trim().toLowerCase()) === -1;
-                  });
-                  if(otherProps.length){
-                    var otherLabel = document.createElement('div');
-                    otherLabel.style.cssText = 'font-size:12px; color:var(--muted); padding:2px 0;';
-                    otherLabel.textContent = 'Other properties in ' + t.name + ':';
-                    townBody.appendChild(otherLabel);
-                    appendPropertyLinks(townBody, otherProps);
-                  }
-                } else {
-                  appendPropertyLinks(townBody, propsFor(t.name));
+                  var subLabel = document.createElement('span');
+                  subLabel.textContent = s.name;
+                  subRow.appendChild(subCb);
+                  subRow.appendChild(subLabel);
+                  townBody.appendChild(subRow);
+                  register(subCb, subKeysList);
+                  applyAggregate(subCb, subKeysList());
+
+                  var subPropsWrap = document.createElement('div');
+                  subPropsWrap.style.cssText = 'margin-left:16px;';
+                  appendPropertyCheckboxes(subPropsWrap, propsFor(t.name, s.name));
+                  townBody.appendChild(subPropsWrap);
+                });
+                var otherProps = propsFor(t.name).filter(function(r){
+                  return suburbNamesLower.indexOf((r.suburb || '').trim().toLowerCase()) === -1;
+                });
+                if(otherProps.length){
+                  var otherLabel = document.createElement('div');
+                  otherLabel.style.cssText = 'font-size:12px; color:var(--muted); padding:4px 0 2px;';
+                  otherLabel.textContent = 'Other properties in ' + t.name + ':';
+                  townBody.appendChild(otherLabel);
+                  appendPropertyCheckboxes(townBody, otherProps);
                 }
               });
 
               zoneBody.appendChild(townDet);
             });
 
-            containerEl.appendChild(zoneDet);
+            treeEl.appendChild(zoneDet);
           });
         }).catch(function(){
           containerEl.innerHTML = '<div style="font-size:12px; color:var(--muted); padding:4px 0;">Could not load locations right now.</div>';
@@ -4398,18 +4618,35 @@
         statusEl.textContent = 'Looking up "' + query + '" and drafting a caption…';
         delete autobuildDrafts[n];
         renderAutobuildDraft(n);
+        runGenerateDraft(n, { hook: n, query: query }, statusEl);
+      }
 
-        var picked = autobuildPicked[n];
-        var reqBody = { hook: n, query: query };
-        if(picked && picked.resortId){ reqBody.resortId = picked.resortId; reqBody.siteId = picked.siteId; }
+      // The "Build draft from selection" path — one or more properties
+      // and/or whole suburbs/towns ticked in the Browse-by-location tree,
+      // already flattened to exact resortKeys client-side (see
+      // renderPropertyPickerTree), so unlike the free-text query above,
+      // generateHookDraft does no name-guessing at all here.
+      function generateAutobuildDraftFromSelection(n, resortKeys, label){
+        var statusEl = document.getElementById('dh' + n + '-autobuildStatus');
+        if(!resortKeys.length){
+          statusEl.textContent = 'Tick at least one property first.';
+          return;
+        }
+        statusEl.textContent = 'Looking up ' + resortKeys.length + ' propert' + (resortKeys.length === 1 ? 'y' : 'ies') + ' and drafting a caption…';
+        delete autobuildDrafts[n];
+        renderAutobuildDraft(n);
+        runGenerateDraft(n, { hook: n, resortKeys: resortKeys, label: label }, statusEl);
+      }
+
+      function runGenerateDraft(n, reqBody, statusEl){
         adminPost('generateHookDraft', reqBody).then(function(res){
           if(!res.data || !res.data.ok){
             statusEl.textContent = (res.data && res.data.error) || 'Could not build a draft for that.';
             return;
           }
           var d = res.data;
-          statusEl.textContent = d.mode === 'area'
-            ? 'Built from ' + d.sourceCount + ' ' + d.label + ' propert' + (d.sourceCount === 1 ? 'y' : 'ies') + '.'
+          statusEl.textContent = (d.mode === 'area' || d.mode === 'selection')
+            ? 'Built from ' + d.sourceCount + ' propert' + (d.sourceCount === 1 ? 'y' : 'ies') + ' (' + d.label + ').'
             : 'Built from ' + d.label + '.';
           if(!d.captionGenerated){
             statusEl.textContent += ' (Caption drafting is unavailable right now — photos and booking link still generated; write your own caption below.)';
@@ -4417,14 +4654,19 @@
           autobuildDrafts[n] = {
             mode: d.mode,
             label: d.label,
+            // Where this draft's property (or campaign selection) is —
+            // replaces the old separate "Property location" field; saved
+            // as the hook's locationLabel once this draft is used (see
+            // useAutobuildDraft below).
+            locationLabel: d.locationLabel || d.label || '',
             caption: d.caption || '',
             hashtags: d.hashtags || null,
             booking: d.booking || '',
             photos: d.photos || [],
             picked: (d.photos || []).slice(0, 4).map(function(_, idx){ return idx; }),
             // Rich source metadata (property/area name, description,
-            // attractions, room type, and — for area mode — the distinct
-            // property names it was built from) — forwarded to
+            // attractions, room type, and — for area/selection mode — the
+            // distinct property names it was built from) — forwarded to
             // saveHookPhotos on "Use this draft" so hook-landing.html has
             // real content to show, and used for the "Built from" note.
             description: d.description || '',
@@ -4457,6 +4699,13 @@
         document.getElementById('dh' + n + '-caption').value = draft.caption || '';
         if(draft.booking) document.getElementById('dh' + n + '-booking').value = draft.booking;
         defaultHookHashtags[n] = draft.hashtags || null;
+        // Replaces the old separate "Property location" field — this
+        // draft's location (a single property's name, or the tree
+        // selection's own computed label) becomes this hook's location
+        // the moment its draft is used, saved for real on the next "Save
+        // default" click.
+        defaultHookLocationLabel[n] = draft.locationLabel || '';
+        showHookLocationNote(n, defaultHookLocationLabel[n]);
 
         // Auto-fill the landing page link with the new "Full Details" page
         // for this hook, but only when the admin hasn't already set a
@@ -4488,7 +4737,7 @@
           // that call never happens, so showing the note here would
           // claim something saved that a page refresh will show was
           // never actually stored.
-          statusEl.textContent = 'Caption and booking link filled in — remember to click "Save default" below. (No photos were picked, so "Built from" won\'t be saved this time.)';
+          statusEl.textContent = 'Caption, booking link and location filled in — remember to click "Save default" below. (No photos were picked, so "Built from" won\'t be saved this time.)';
           return;
         }
 
@@ -4526,6 +4775,12 @@
         html +=
           '<div class="hook-card">' +
             '<div class="hook-badge">Hook ' + i + '</div>' +
+            '<label for="dh' + i + '-category" style="margin-top:0;">Hook type</label>' +
+            '<select id="dh' + i + '-category" data-category-select="' + i + '">' +
+              '<option value="property">Property / resort stay</option>' +
+              '<option value="event">Event / festival</option>' +
+            '</select>' +
+            '<div class="hint" style="margin-top:-2px;">Switches which flyer layout "Generate flyer" below uses, and which fields this card shows. The cover photo you upload becomes the flyer\'s hero photo either way; for an Event hook, the first gallery photo becomes the smaller supporting photo.</div>' +
             '<div class="hook-image-wrap" id="dh' + i + '-imageWrap">' +
               '<img class="hook-image" id="dh' + i + '-image" alt="Default hook ' + i + ' creative">' +
               '<div class="hook-placeholder" id="dh' + i + '-placeholder">Ad creative placeholder</div>' +
@@ -4538,9 +4793,8 @@
             '<div class="status" id="dh' + i + '-imageStatus"></div>' +
             '<div class="hook-updated" id="dh' + i + '-galleryNote" style="display:none;"></div>' +
             '<div class="hook-updated" id="dh' + i + '-sourceNote" style="display:none;"></div>' +
-            '<label for="dh' + i + '-locationSelect">Property location</label>' +
-            '<select id="dh' + i + '-locationSelect"><option value="">— None selected —</option></select>' +
-            '<div class="hint">Tag which area, town/city, or suburb the property in this hook is in — used to match it up with your location tree, separate from who can see it.</div>' +
+            '<div class="hook-updated" id="dh' + i + '-locationNote" style="display:none;"></div>' +
+            '<div id="dh' + i + '-propertyOnlyFields">' +
             '<button type="button" class="btn-outline autobuild-toggle" data-autobuild-toggle="' + i + '">✨ Auto-build from property or area</button>' +
             '<div class="autobuild-box" id="dh' + i + '-autobuildBox">' +
               '<label for="dh' + i + '-autobuildQuery">Property name or area</label>' +
@@ -4549,6 +4803,7 @@
                 '<button type="button" class="btn-outline" data-autobuild-generate="' + i + '">Generate</button>' +
               '</div>' +
               '<button type="button" class="btn-outline" style="margin-top:6px; font-size:12px; padding:6px 10px;" data-autobuild-tree-toggle="' + i + '">🌳 Browse properties by location</button>' +
+              '<div class="hint" style="margin-top:2px;">Tick one or more properties, or a whole town/suburb/area, to build one hook as a campaign across all of them at once. This also replaces the old separate "Property location" field — the location shown on this hook is whatever you tick here.</div>' +
               '<div class="autobuild-tree-box" id="dh' + i + '-autobuildTree"></div>' +
               '<div class="autobuild-status" id="dh' + i + '-autobuildStatus"></div>' +
               '<div class="autobuild-draft" id="dh' + i + '-autobuildDraft">' +
@@ -4602,6 +4857,34 @@
             '<textarea id="dh' + i + '-flyerPrice" rows="2" placeholder="R3500 PER DAY&#10;Under R600 p/p"></textarea>' +
             '<label for="dh' + i + '-flyerDates">Flyer stay dates / availability window</label>' +
             '<input id="dh' + i + '-flyerDates" placeholder="e.g. 18 December to 1 January – Peak Season Stay (14 Days)">' +
+            '</div>' +
+            '<div id="dh' + i + '-eventOnlyFields" style="display:none;">' +
+              '<label for="dh' + i + '-eventNameLine1" style="margin-top:16px;">Event name — line 1</label>' +
+              '<input id="dh' + i + '-eventNameLine1" placeholder="e.g. Hermanus">' +
+              '<label for="dh' + i + '-eventNameLine2">Event name — line 2 / tagline</label>' +
+              '<input id="dh' + i + '-eventNameLine2" placeholder="e.g. Whale Festival">' +
+              '<label for="dh' + i + '-eventSubtitle">Subtitle — one-line hook describing the event</label>' +
+              '<textarea id="dh' + i + '-eventSubtitle" rows="2" placeholder="e.g. South Africa\'s biggest eco-marine celebration"></textarea>' +
+              '<label for="dh' + i + '-eventTheme">Theme</label>' +
+              '<div class="hint" style="margin-top:-2px;">What kind of event this is, e.g. whale watching, cycling, music. Every new theme you type is saved and shows up as a pick here on future Event hooks too.</div>' +
+              '<input id="dh' + i + '-eventTheme" list="eventThemeOptions" placeholder="e.g. Whale watching">' +
+              '<label for="dh' + i + '-eventSectionHeading" style="margin-top:16px;">Highlights section heading</label>' +
+              '<input id="dh' + i + '-eventSectionHeading" placeholder="e.g. Highlights">' +
+              '<label for="dh' + i + '-eventHighlight1">Highlight 1</label>' +
+              '<input id="dh' + i + '-eventHighlight1" placeholder="e.g. Live whale-watching boat cruises">' +
+              '<label for="dh' + i + '-eventHighlight2">Highlight 2</label>' +
+              '<input id="dh' + i + '-eventHighlight2" placeholder="e.g. Craft market & food stalls">' +
+              '<label for="dh' + i + '-eventHighlight3">Highlight 3</label>' +
+              '<input id="dh' + i + '-eventHighlight3" placeholder="e.g. Live music on the cliff path">' +
+              '<label for="dh' + i + '-eventHighlight4">Highlight 4</label>' +
+              '<input id="dh' + i + '-eventHighlight4" placeholder="e.g. Kids eco-education zone">' +
+              '<label for="dh' + i + '-eventDate" style="margin-top:16px;">Event date(s)</label>' +
+              '<input id="dh' + i + '-eventDate" placeholder="e.g. 25 - 28 September 2026">' +
+              '<label for="dh' + i + '-eventLocationName">Location name</label>' +
+              '<input id="dh' + i + '-eventLocationName" list="hookSourceOptions" placeholder="e.g. Hermanus">' +
+              '<label for="dh' + i + '-eventLocationDetail">Location detail</label>' +
+              '<input id="dh' + i + '-eventLocationDetail" placeholder="e.g. Old Harbour, Marine Drive">' +
+            '</div>' +
             '<button class="primary" data-hook-save="' + i + '">Save default</button>' +
             '<div class="status" id="dh' + i + '-errorStatus"></div>' +
             '<div class="hook-updated" id="dh' + i + '-updated"></div>' +
@@ -4615,9 +4898,11 @@
               '<div id="dh' + i + '-flyerFields"></div>' +
               '<div class="btn-row" style="margin-top:8px;">' +
                 '<button type="button" class="btn-outline" data-flyer-update="' + i + '">Update preview</button>' +
+                '<button type="button" class="primary" data-flyer-use="' + i + '">Set as this hook’s photo</button>' +
                 '<button type="button" class="btn-outline" data-flyer-download-svg="' + i + '">Download SVG</button>' +
                 '<button type="button" class="btn-outline" data-flyer-download-png="' + i + '">Download PNG</button>' +
               '</div>' +
+              '<div class="hint" style="margin-top:4px;">“Set as this hook’s photo” uploads the flyer above as this hook’s ad creative — the image affiliates and customers actually see — the same as picking a file with Upload image.</div>' +
             '</div>' +
           '</div>';
       }
@@ -4954,6 +5239,21 @@
         var flyerPromoTag = document.getElementById(p + 'flyerPromoTag').value.trim();
         var flyerPrice = document.getElementById(p + 'flyerPrice').value.trim();
         var flyerDates = document.getElementById(p + 'flyerDates').value.trim();
+        var category = document.getElementById(p + 'category').value;
+        var eventFields = {
+          eventNameLine1: document.getElementById(p + 'eventNameLine1').value.trim(),
+          eventNameLine2: document.getElementById(p + 'eventNameLine2').value.trim(),
+          eventSubtitle: document.getElementById(p + 'eventSubtitle').value.trim(),
+          eventSectionHeading: document.getElementById(p + 'eventSectionHeading').value.trim(),
+          eventHighlight1: document.getElementById(p + 'eventHighlight1').value.trim(),
+          eventHighlight2: document.getElementById(p + 'eventHighlight2').value.trim(),
+          eventHighlight3: document.getElementById(p + 'eventHighlight3').value.trim(),
+          eventHighlight4: document.getElementById(p + 'eventHighlight4').value.trim(),
+          eventDate: document.getElementById(p + 'eventDate').value.trim(),
+          eventLocationName: document.getElementById(p + 'eventLocationName').value.trim(),
+          eventLocationDetail: document.getElementById(p + 'eventLocationDetail').value.trim(),
+          eventTheme: document.getElementById(p + 'eventTheme').value.trim(),
+        };
         var errorEl = document.getElementById(p + 'errorStatus');
         errorEl.className = 'status';
         errorEl.textContent = '';
@@ -4969,12 +5269,23 @@
           return;
         }
 
-        var loc = readHookLocation(n);
-        adminPost('setDefaultHook', { hook: n, booking: booking, landing: landing, caption: caption, zone: loc.zone, townId: loc.townId, suburbId: loc.suburbId, locationLabel: loc.locationLabel, flyerPromoTag: flyerPromoTag, flyerPrice: flyerPrice, flyerDates: flyerDates }).then(function(res){
+        // locationLabel is only ever sent when Auto-build has freshly set
+        // one for this hook this session (defaultHookLocationLabel) — a
+        // plain caption/link edit with no Auto-build run this session
+        // omits it entirely, so the server keeps whatever was last saved
+        // instead of blanking it (see admin-api.js's setDefaultHook).
+        var savePayload = { hook: n, booking: booking, landing: landing, caption: caption, flyerPromoTag: flyerPromoTag, flyerPrice: flyerPrice, flyerDates: flyerDates, category: category };
+        for(var ek in eventFields){ savePayload[ek] = eventFields[ek]; }
+        if(typeof defaultHookLocationLabel[n] === 'string') savePayload.locationLabel = defaultHookLocationLabel[n];
+        adminPost('setDefaultHook', savePayload).then(function(res){
           if(res.data && res.data.ok){
             showToast('Default hook ' + n + ' saved');
             document.getElementById(p + 'updated').textContent = fmtDate(res.data.record && res.data.record.updatedAt);
             defaultHookHashtags[n] = (res.data.record && res.data.record.hashtags) || null;
+            // A newly-typed theme is remembered server-side immediately
+            // (see admin-api.js's setDefaultHook) — refresh the shared
+            // dropdown so it's pickable on every card without a reload.
+            if(eventFields.eventTheme) loadEventThemeOptions();
           }else{
             errorEl.textContent = (res.data && res.data.error) || 'Could not save this default hook.';
             errorEl.className = 'status show';
@@ -4985,9 +5296,30 @@
         });
       }
 
+      // Shows/hides a hook card's property-only vs event-only sections to
+      // match its "Hook type" select — called on that select's change
+      // event and once per card right after loadDefaultHooks fills it in.
+      function applyHookCategoryVisibility(n){
+        var category = document.getElementById('dh' + n + '-category').value;
+        document.getElementById('dh' + n + '-propertyOnlyFields').style.display = (category === 'event') ? 'none' : '';
+        document.getElementById('dh' + n + '-eventOnlyFields').style.display = (category === 'event') ? '' : 'none';
+      }
+
+      // Every distinct Theme value typed into an Event hook so far (see
+      // lib/event-themes.js) — populates the shared <datalist> every
+      // Theme input on this page points at. Called once on load and again
+      // right after a save that typed a new theme, so it's pickable
+      // without a page refresh.
+      function loadEventThemeOptions(){
+        return adminPost('listEventThemes', {}).then(function(res){
+          if(!res.data || !res.data.ok) return;
+          var list = document.getElementById('eventThemeOptions');
+          list.innerHTML = (res.data.themes || []).map(function(t){ return '<option value="' + escapeHtml(t) + '">'; }).join('');
+        });
+      }
+
       function loadDefaultHooks(){
-        return Promise.all([loadHookLocationOptions(), adminGet('defaultHooks')]).then(function(results){
-          var data = results[1];
+        return adminGet('defaultHooks').then(function(data){
           if(!data || !data.ok || !data.hooks) return;
           data.hooks.forEach(function(h){
             document.getElementById('dh' + h.hook + '-booking').value = h.booking || '';
@@ -4996,9 +5328,24 @@
             document.getElementById('dh' + h.hook + '-flyerPromoTag').value = h.flyerPromoTag || '';
             document.getElementById('dh' + h.hook + '-flyerPrice').value = h.flyerPrice || '';
             document.getElementById('dh' + h.hook + '-flyerDates').value = h.flyerDates || '';
+            document.getElementById('dh' + h.hook + '-category').value = h.category || 'property';
+            document.getElementById('dh' + h.hook + '-eventNameLine1').value = h.eventNameLine1 || '';
+            document.getElementById('dh' + h.hook + '-eventNameLine2').value = h.eventNameLine2 || '';
+            document.getElementById('dh' + h.hook + '-eventSubtitle').value = h.eventSubtitle || '';
+            document.getElementById('dh' + h.hook + '-eventSectionHeading').value = h.eventSectionHeading || '';
+            document.getElementById('dh' + h.hook + '-eventHighlight1').value = h.eventHighlight1 || '';
+            document.getElementById('dh' + h.hook + '-eventHighlight2').value = h.eventHighlight2 || '';
+            document.getElementById('dh' + h.hook + '-eventHighlight3').value = h.eventHighlight3 || '';
+            document.getElementById('dh' + h.hook + '-eventHighlight4').value = h.eventHighlight4 || '';
+            document.getElementById('dh' + h.hook + '-eventDate').value = h.eventDate || '';
+            document.getElementById('dh' + h.hook + '-eventLocationName').value = h.eventLocationName || '';
+            document.getElementById('dh' + h.hook + '-eventLocationDetail').value = h.eventLocationDetail || '';
+            document.getElementById('dh' + h.hook + '-eventTheme').value = h.eventTheme || '';
+            applyHookCategoryVisibility(h.hook);
             document.getElementById('dh' + h.hook + '-updated').textContent = fmtDate(h.updatedAt);
             defaultHookHashtags[h.hook] = h.hashtags || null;
-            applyHookLocation(h.hook, h);
+            defaultHookLocationLabel[h.hook] = h.locationLabel || '';
+            showHookLocationNote(h.hook, h.locationLabel || '');
             setImageSrc(h.hook);
             var galleryNote = document.getElementById('dh' + h.hook + '-galleryNote');
             if(h.galleryCount > 0){
@@ -5107,22 +5454,22 @@
         setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
       }
 
-      // Best-effort PNG export: rasterizes the same SVG via <canvas>. An
+      // Best-effort PNG rasterization: draws the same SVG via <canvas>. An
       // SVG loaded through an <img>/blob URL (rather than inserted inline
       // into the page) has no access to this page's own Google Fonts
       // <link>, so a small <style>@import…</style> of the same
       // stylesheet is embedded directly in this copy of the SVG first.
-      // Chrome/Edge support this; if a browser doesn't, the catch below
+      // Chrome/Edge support this; if a browser doesn't, onError below
       // points to Download SVG instead rather than failing silently.
-      function downloadFlyerPng(n){
-        var st = flyerState[n];
-        var statusEl = document.getElementById('dh' + n + '-flyerStatus');
-        if(!st || !st.svg) return;
+      // Shared by both downloadFlyerPng (saves a file) and
+      // useFlyerAsHookPhoto (uploads it straight in as this hook's own ad
+      // creative) — same pixels, two different next steps.
+      function rasterizeFlyerToPng(svg, onBlob, onError){
         try{
-          var openTagEnd = st.svg.indexOf('>') + 1;
-          var withStyle = st.svg.slice(0, openTagEnd) +
+          var openTagEnd = svg.indexOf('>') + 1;
+          var withStyle = svg.slice(0, openTagEnd) +
             '<style>@import url(\'https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&amp;family=Noto+Sans:wght@400;500;600;700&amp;display=swap\');</style>' +
-            st.svg.slice(openTagEnd);
+            svg.slice(openTagEnd);
           var blob = new Blob([withStyle], { type: 'image/svg+xml' });
           var url = URL.createObjectURL(blob);
           var img = new Image();
@@ -5133,28 +5480,52 @@
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             URL.revokeObjectURL(url);
             canvas.toBlob(function(pngBlob){
-              if(!pngBlob){
-                statusEl.textContent = 'Could not convert to PNG in this browser — use Download SVG instead.';
-                statusEl.className = 'status show';
-                return;
-              }
-              var pngUrl = URL.createObjectURL(pngBlob);
-              var a = document.createElement('a');
-              a.href = pngUrl; a.download = 'flyer-hook-' + n + '.png';
-              document.body.appendChild(a); a.click(); a.remove();
-              setTimeout(function(){ URL.revokeObjectURL(pngUrl); }, 2000);
+              if(!pngBlob){ onError(); return; }
+              onBlob(pngBlob);
             }, 'image/png');
           };
-          img.onerror = function(){
-            URL.revokeObjectURL(url);
-            statusEl.textContent = 'Could not convert to PNG in this browser — use Download SVG instead.';
-            statusEl.className = 'status show';
-          };
+          img.onerror = function(){ URL.revokeObjectURL(url); onError(); };
           img.src = url;
         }catch(e){
+          onError();
+        }
+      }
+
+      function downloadFlyerPng(n){
+        var st = flyerState[n];
+        var statusEl = document.getElementById('dh' + n + '-flyerStatus');
+        if(!st || !st.svg) return;
+        rasterizeFlyerToPng(st.svg, function(pngBlob){
+          var pngUrl = URL.createObjectURL(pngBlob);
+          var a = document.createElement('a');
+          a.href = pngUrl; a.download = 'flyer-hook-' + n + '.png';
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(function(){ URL.revokeObjectURL(pngUrl); }, 2000);
+        }, function(){
           statusEl.textContent = 'Could not convert to PNG in this browser — use Download SVG instead.';
           statusEl.className = 'status show';
-        }
+        });
+      }
+
+      // "Use as hook photo" — this is the answer to "where do I set this as
+      // the hook": it rasterizes the current flyer preview to PNG and
+      // uploads it through the exact same path as clicking "Upload image"
+      // and picking a file by hand (uploadImage, below), so the flyer
+      // becomes this hook's actual ad creative — what /api/hook-image
+      // serves, what shows instead of the "Ad creative placeholder", and
+      // what Get Shareable Content hands out.
+      function useFlyerAsHookPhoto(n){
+        var st = flyerState[n];
+        var statusEl = document.getElementById('dh' + n + '-flyerStatus');
+        if(!st || !st.svg) return;
+        statusEl.textContent = 'Setting this as the hook’s photo…';
+        statusEl.className = 'status show';
+        rasterizeFlyerToPng(st.svg, function(pngBlob){
+          uploadImage(n, pngBlob);
+        }, function(){
+          statusEl.textContent = 'Could not convert this flyer to an image in this browser — try Download PNG instead, then use Upload image on this hook.';
+          statusEl.className = 'status show';
+        });
       }
 
       // ---------- Flyer contact info (shared across every generated flyer) ----------
@@ -5193,6 +5564,8 @@
         if(flyerGenN){ generateFlyer(flyerGenN); return; }
         var flyerUpdateN = e.target.getAttribute('data-flyer-update');
         if(flyerUpdateN){ updateFlyerPreview(flyerUpdateN); return; }
+        var flyerUseN = e.target.getAttribute('data-flyer-use');
+        if(flyerUseN){ useFlyerAsHookPhoto(flyerUseN); return; }
         var flyerSvgN = e.target.getAttribute('data-flyer-download-svg');
         if(flyerSvgN){ downloadFlyerSvg(flyerSvgN); return; }
         var flyerPngN = e.target.getAttribute('data-flyer-download-png');
@@ -5321,14 +5694,6 @@
         }
       });
 
-      // Hand-editing the query field invalidates any exact resortId/siteId
-      // stashed from a tree pick (renderPropertyPickerTree) — otherwise a
-      // changed query would still silently resolve to the old pick.
-      grid.addEventListener('input', function(e){
-        var m = e.target.id && e.target.id.match(/^dh(\d+)-autobuildQuery$/);
-        if(m) delete autobuildPicked[m[1]];
-      });
-
       grid.addEventListener('change', function(e){
         var m = e.target.id && e.target.id.match(/^dh(\d+)-imageInput$/);
         if(m && e.target.files && e.target.files[0]){
@@ -5341,13 +5706,20 @@
           uploadDefaultHookPdf(pm[1], e.target.files[0]);
           e.target.value = '';
         }
+        var cm = e.target.dataset && e.target.dataset.categorySelect;
+        if(cm){
+          applyHookCategoryVisibility(cm);
+        }
       });
 
       // Load once, the first time the Default Hooks tab is opened.
       document.querySelectorAll('.tab').forEach(function(btn){
         if(btn.dataset.panel === 'defaultHooks'){
           btn.addEventListener('click', function(){
-            if(!loaded) loadDefaultHooks();
+            if(!loaded){
+              loadDefaultHooks();
+              loadEventThemeOptions();
+            }
           });
         }
       });
