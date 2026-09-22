@@ -3,6 +3,8 @@ import { generateHashtags } from "./lib/hashtag-helper.js";
 import { resolveShortLink as resolveShortLinkShared, isShortLink } from "./lib/short-link.js";
 import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-link.js";
 import { resolveHookMode } from "./lib/hook-mode.js";
+import { buildHookDraft } from "./lib/hook-draft.js";
+import { saveHookPhotoUrls } from "./lib/hook-photos.js";
 
 // Special affiliate key reserved for admin-managed default hook content.
 // Chosen so it can never collide with a real affiliate ID (StockNetwork
@@ -88,6 +90,56 @@ export default async (request, context) => {
   try {
     if (request.method === "POST") {
       const body = await request.json();
+
+      // Auto-build for a self-managed hook — the same "draft from a
+      // property or area" flow admin-api.js's generateHookDraft action has
+      // always offered for Default Hooks, available here too so an
+      // affiliate can build their own hook the identical way (hub.html's
+      // "Auto-build" panel). Nothing about the plain manual save path
+      // below changes — this is purely an extra, opt-in action reached by
+      // sending action: "draft" instead of the usual field updates.
+      // `aff` doubles as this affiliate's own real StockNetwork site GUID
+      // (see personalizeStockNetworkUrl's comment above and the "Add
+      // Affiliate" modal, which requires exactly that) — used directly as
+      // the booking link's site identifier here, unlike the admin's
+      // placeholder-then-personalize approach, since it's already this
+      // affiliate's own link and needs no re-attribution.
+      if (body.action === "draft") {
+        const resortStore = getStore({ name: "resort-list", consistency: "strong" });
+        const draft = await buildHookDraft(resortStore, {
+          resortId: body.resortId,
+          siteId: body.siteId,
+          query: body.query,
+          bookingSiteGuid: aff,
+        });
+        return new Response(JSON.stringify(draft), {
+          status: draft.ok ? 200 : draft.status || 400,
+          headers: { "content-type": "application/json", ...cors },
+        });
+      }
+
+      // Saves the photos an affiliate picked from a "draft" call above —
+      // the self-managed equivalent of admin-api.js's saveHookPhotos
+      // action. Keyed by this exact hook's own aff:hook key, same as
+      // every other store/read on this hook already is.
+      if (body.action === "savePhotos") {
+        const urls = Array.isArray(body.urls)
+          ? body.urls.filter((u) => typeof u === "string" && u.trim()).slice(0, 6)
+          : [];
+        if (!urls.length) {
+          return new Response(JSON.stringify({ ok: false, error: "No photos selected." }), {
+            status: 400,
+            headers: { "content-type": "application/json", ...cors },
+          });
+        }
+        const imageStore = getStore({ name: "promo-hook-images", consistency: "strong" });
+        const result = await saveHookPhotoUrls(store, imageStore, key, urls, body.source);
+        return new Response(JSON.stringify(result), {
+          status: result.ok ? 200 : 502,
+          headers: { "content-type": "application/json", ...cors },
+        });
+      }
+
       const existing = (await store.get(key, { type: "json" })) || {};
       const record = { ...existing };
 
