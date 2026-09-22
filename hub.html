@@ -3171,6 +3171,18 @@
             '</div>' +
             '</div>' +
             '<button type="button" class="btn-outline sharekit-btn" data-sharekit="' + i + '">Get Shareable Content</button>' +
+            '<button type="button" class="btn-outline" style="margin-top:8px;" data-flyer-gen="' + i + '">🖼️ Generate flyer</button>' +
+            '<div class="hint" style="margin-top:-2px;">Builds a finished flyer image from this hook’s own saved data and Avante’s flyer template layout — no Canva needed. Auto-build this hook and Save it first so there’s real content to draw from.</div>' +
+            '<div id="h' + i + '-flyerPanel" style="display:none; margin-top:10px; border:1px solid #e2e2e2; border-radius:10px; padding:12px;">' +
+              '<div class="status" id="h' + i + '-flyerStatus"></div>' +
+              '<div id="h' + i + '-flyerPreview" style="max-width:340px; margin:8px 0;"></div>' +
+              '<div id="h' + i + '-flyerFields"></div>' +
+              '<div class="btn-row" style="margin-top:8px;">' +
+                '<button type="button" class="btn-outline" data-flyer-update="' + i + '">Update preview</button>' +
+                '<button type="button" class="btn-outline" data-flyer-download-svg="' + i + '">Download SVG</button>' +
+                '<button type="button" class="btn-outline" data-flyer-download-png="' + i + '">Download PNG</button>' +
+              '</div>' +
+            '</div>' +
           '</div>';
       }
       grid.innerHTML = html;
@@ -4210,7 +4222,183 @@
         }
       });
 
+      // ---------- Generate flyer (Canva-free, from lib/hook-flyer-svg.js) ----------
+      // Same feature as admin.html's Default Hooks, for an affiliate's own
+      // self-managed hook — builds a finished flyer straight from this
+      // hook's own saved Auto-build data (name/description/photos),
+      // whatever this affiliate typed into the flyer price/dates/promo
+      // fields above, and Avante's shared contact info, using the exact
+      // layout captured from the master Canva template. No Canva call.
+      var flyerState = {};
+
+      function flyerEscapeHtml(s){
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function(ch){
+          return ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '"' ? '&quot;' : '&#39;';
+        });
+      }
+
+      function renderFlyerFieldsForm(n, fieldsMeta, values, missing){
+        var el = document.getElementById('h' + n + '-flyerFields');
+        var missingSet = {};
+        (missing || []).forEach(function(k){ missingSet[k] = true; });
+        var html = '';
+        fieldsMeta.forEach(function(f){
+          var val = (values && values[f.key]) || '';
+          var isLong = f.key === 'description' || f.key === 'priceBadge';
+          html +=
+            '<label for="h' + n + '-ff-' + f.key + '"' + (missingSet[f.key] ? ' style="color:#c0453a;"' : '') + '>' +
+              flyerEscapeHtml(f.key) + (missingSet[f.key] ? ' — needs a value' : '') +
+            '</label>' +
+            '<div class="hint" style="margin-top:-2px;">' + flyerEscapeHtml(f.role) + '</div>' +
+            (isLong
+              ? '<textarea id="h' + n + '-ff-' + f.key + '" rows="' + (f.key === 'description' ? 4 : 2) + '">' + flyerEscapeHtml(val) + '</textarea>'
+              : '<input id="h' + n + '-ff-' + f.key + '" value="' + flyerEscapeHtml(val) + '">');
+        });
+        el.innerHTML = html;
+      }
+
+      function collectFlyerOverrides(n, fieldsMeta){
+        var out = {};
+        fieldsMeta.forEach(function(f){
+          var input = document.getElementById('h' + n + '-ff-' + f.key);
+          if(input) out[f.key] = input.value;
+        });
+        return out;
+      }
+
+      function showFlyerResult(n, data){
+        flyerState[n] = { fieldsMeta: data.fields, svg: data.svg };
+        document.getElementById('h' + n + '-flyerPreview').innerHTML = data.svg;
+        renderFlyerFieldsForm(n, data.fields, data.values, data.missing);
+        var statusEl = document.getElementById('h' + n + '-flyerStatus');
+        if(data.missing && data.missing.length){
+          statusEl.textContent = 'Generated — ' + data.missing.length + ' field' + (data.missing.length === 1 ? '' : 's') + ' still need' + (data.missing.length === 1 ? 's' : '') + ' a value (see below) before this is ready to send.';
+        }else{
+          statusEl.textContent = 'Generated — every field has a real value.';
+        }
+        statusEl.className = 'status show';
+      }
+
+      function flyerAffId(){
+        var bEl = document.getElementById('h1-booking');
+        return AFF_ID || (bEl && bEl.value.trim() ? extractAffiliateId(bEl.value.trim()) : '');
+      }
+
+      function generateFlyer(n){
+        var statusEl = document.getElementById('h' + n + '-flyerStatus');
+        document.getElementById('h' + n + '-flyerPanel').style.display = 'block';
+        var affId = flyerAffId();
+        if(!affId){
+          statusEl.textContent = 'Save this hook with a booking link first — a flyer needs to know which affiliate account it belongs to.';
+          statusEl.className = 'status show';
+          return;
+        }
+        statusEl.textContent = 'Generating…';
+        statusEl.className = 'status show';
+        fetch('/api/hook?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'renderFlyer' })
+        }).then(function(r){ return r.json(); }).then(function(data){
+          if(data && data.ok){
+            showFlyerResult(n, data);
+          }else{
+            statusEl.textContent = (data && data.error) || 'Could not generate a flyer for this hook.';
+            statusEl.className = 'status show';
+          }
+        }).catch(function(){
+          statusEl.textContent = 'Could not reach the server — please try again.';
+          statusEl.className = 'status show';
+        });
+      }
+
+      function updateFlyerPreview(n){
+        var st = flyerState[n];
+        if(!st) return;
+        var affId = flyerAffId();
+        if(!affId) return;
+        var overrides = collectFlyerOverrides(n, st.fieldsMeta);
+        var statusEl = document.getElementById('h' + n + '-flyerStatus');
+        statusEl.textContent = 'Updating…';
+        statusEl.className = 'status show';
+        fetch('/api/hook?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'renderFlyer', fields: overrides })
+        }).then(function(r){ return r.json(); }).then(function(data){
+          if(data && data.ok) showFlyerResult(n, data);
+        });
+      }
+
+      function downloadFlyerSvg(n){
+        var st = flyerState[n];
+        if(!st || !st.svg) return;
+        var blob = new Blob([st.svg], { type: 'image/svg+xml' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = 'flyer-hook-' + n + '.svg';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+      }
+
+      // Best-effort PNG export — see admin.html's identical function for
+      // why the Google Fonts stylesheet is embedded directly in this copy
+      // of the SVG (an <img>/blob-loaded SVG can't reach this page's own
+      // <link> fonts) and why a browser that can't do this falls back to
+      // pointing at Download SVG instead of failing silently.
+      function downloadFlyerPng(n){
+        var st = flyerState[n];
+        var statusEl = document.getElementById('h' + n + '-flyerStatus');
+        if(!st || !st.svg) return;
+        try{
+          var openTagEnd = st.svg.indexOf('>') + 1;
+          var withStyle = st.svg.slice(0, openTagEnd) +
+            '<style>@import url(\'https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&amp;family=Noto+Sans:wght@400;500;600;700&amp;display=swap\');</style>' +
+            st.svg.slice(openTagEnd);
+          var blob = new Blob([withStyle], { type: 'image/svg+xml' });
+          var url = URL.createObjectURL(blob);
+          var img = new Image();
+          img.onload = function(){
+            var canvas = document.createElement('canvas');
+            canvas.width = 1080; canvas.height = 1350;
+            var ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            URL.revokeObjectURL(url);
+            canvas.toBlob(function(pngBlob){
+              if(!pngBlob){
+                statusEl.textContent = 'Could not convert to PNG in this browser — use Download SVG instead.';
+                statusEl.className = 'status show';
+                return;
+              }
+              var pngUrl = URL.createObjectURL(pngBlob);
+              var a = document.createElement('a');
+              a.href = pngUrl; a.download = 'flyer-hook-' + n + '.png';
+              document.body.appendChild(a); a.click(); a.remove();
+              setTimeout(function(){ URL.revokeObjectURL(pngUrl); }, 2000);
+            }, 'image/png');
+          };
+          img.onerror = function(){
+            URL.revokeObjectURL(url);
+            statusEl.textContent = 'Could not convert to PNG in this browser — use Download SVG instead.';
+            statusEl.className = 'status show';
+          };
+          img.src = url;
+        }catch(e){
+          statusEl.textContent = 'Could not convert to PNG in this browser — use Download SVG instead.';
+          statusEl.className = 'status show';
+        }
+      }
+
       grid.addEventListener('click', function(e){
+        var flyerGenN = e.target.getAttribute('data-flyer-gen');
+        if(flyerGenN){ generateFlyer(flyerGenN); return; }
+        var flyerUpdateN = e.target.getAttribute('data-flyer-update');
+        if(flyerUpdateN){ updateFlyerPreview(flyerUpdateN); return; }
+        var flyerSvgN = e.target.getAttribute('data-flyer-download-svg');
+        if(flyerSvgN){ downloadFlyerSvg(flyerSvgN); return; }
+        var flyerPngN = e.target.getAttribute('data-flyer-download-png');
+        if(flyerPngN){ downloadFlyerPng(flyerPngN); return; }
+
         var saveN = e.target.getAttribute('data-hook-save');
         if(saveN){
           saveHook(saveN);

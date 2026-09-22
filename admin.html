@@ -876,6 +876,16 @@
           <button type="button" class="btn-danger" id="clearBookingLinksApplyBtn" style="margin-top:10px;">Clear all booking links</button>
         </div>
       </div>
+      <div class="card" style="margin-bottom:20px;">
+        <h3 style="margin-top:0;">Flyer contact info</h3>
+        <p class="modal-sub" style="margin:-4px 0 10px;">The phone number and email shown on every generated flyer (see "Generate flyer" on each hook below) — one shared setting, not typed per hook, since it's your own contact info rather than per-property data.</p>
+        <label for="flyerSettingsPhone">Contact phone number</label>
+        <input id="flyerSettingsPhone" placeholder="e.g. 071 605 0055">
+        <label for="flyerSettingsEmail">Contact email address</label>
+        <input id="flyerSettingsEmail" placeholder="e.g. marketing@avantehospitality.co.za">
+        <button type="button" class="primary" id="flyerSettingsSaveBtn" style="margin-top:10px;">Save contact info</button>
+        <div class="status" id="flyerSettingsStatus"></div>
+      </div>
       <div class="hook-grid" id="defaultHookGrid"></div>
       <!-- Shared across every hook card's Auto-build field — populated once
            from /api/resorts with every resort name plus every unique
@@ -4597,6 +4607,18 @@
             '<div class="hook-updated" id="dh' + i + '-updated"></div>' +
             '<button type="button" class="btn-outline sharekit-btn" data-sharekit="' + i + '">Get Shareable Content</button>' +
             '<button type="button" class="btn-outline sharekit-btn" data-full-details="' + i + '">View Full Details Page</button>' +
+            '<button type="button" class="btn-outline" style="margin-top:8px;" data-flyer-gen="' + i + '">🖼️ Generate flyer</button>' +
+            '<div class="hint" style="margin-top:-2px;">Builds a finished flyer image from this hook’s own saved data and your master Canva template’s layout — no Canva needed. Save this hook first (Auto-build + Save default above) so there’s real content to draw from.</div>' +
+            '<div id="dh' + i + '-flyerPanel" style="display:none; margin-top:10px; border:1px solid #e2e2e2; border-radius:10px; padding:12px;">' +
+              '<div class="status" id="dh' + i + '-flyerStatus"></div>' +
+              '<div id="dh' + i + '-flyerPreview" style="max-width:340px; margin:8px 0;"></div>' +
+              '<div id="dh' + i + '-flyerFields"></div>' +
+              '<div class="btn-row" style="margin-top:8px;">' +
+                '<button type="button" class="btn-outline" data-flyer-update="' + i + '">Update preview</button>' +
+                '<button type="button" class="btn-outline" data-flyer-download-svg="' + i + '">Download SVG</button>' +
+                '<button type="button" class="btn-outline" data-flyer-download-png="' + i + '">Download PNG</button>' +
+              '</div>' +
+            '</div>' +
           '</div>';
       }
       grid.innerHTML = html;
@@ -4991,7 +5013,191 @@
         });
       }
 
+      // ---------- Generate flyer (Canva-free, from lib/hook-flyer-svg.js) ----------
+      // flyerState[n] = { fieldsMeta: [{key, role}], svg: "<svg>...</svg>" } —
+      // fieldsMeta+svg from the most recent renderFlyer call for that hook,
+      // used to collect edited field values and to build the download files.
+      var flyerState = {};
+
+      function renderFlyerFieldsForm(n, fieldsMeta, values, missing){
+        var el = document.getElementById('dh' + n + '-flyerFields');
+        var missingSet = {};
+        (missing || []).forEach(function(k){ missingSet[k] = true; });
+        var html = '';
+        fieldsMeta.forEach(function(f){
+          var val = (values && values[f.key]) || '';
+          var isLong = f.key === 'description' || f.key === 'priceBadge';
+          html +=
+            '<label for="dh' + n + '-ff-' + f.key + '"' + (missingSet[f.key] ? ' style="color:#c0453a;"' : '') + '>' +
+              escapeHtml(f.key) + (missingSet[f.key] ? ' — needs a value' : '') +
+            '</label>' +
+            '<div class="hint" style="margin-top:-2px;">' + escapeHtml(f.role) + '</div>' +
+            (isLong
+              ? '<textarea id="dh' + n + '-ff-' + f.key + '" rows="' + (f.key === 'description' ? 4 : 2) + '">' + escapeHtml(val) + '</textarea>'
+              : '<input id="dh' + n + '-ff-' + f.key + '" value="' + escapeHtml(val) + '">');
+        });
+        el.innerHTML = html;
+      }
+
+      function collectFlyerOverrides(n, fieldsMeta){
+        var out = {};
+        fieldsMeta.forEach(function(f){
+          var input = document.getElementById('dh' + n + '-ff-' + f.key);
+          if(input) out[f.key] = input.value;
+        });
+        return out;
+      }
+
+      function showFlyerResult(n, data){
+        flyerState[n] = { fieldsMeta: data.fields, svg: data.svg };
+        document.getElementById('dh' + n + '-flyerPreview').innerHTML = data.svg;
+        renderFlyerFieldsForm(n, data.fields, data.values, data.missing);
+        var statusEl = document.getElementById('dh' + n + '-flyerStatus');
+        if(data.missing && data.missing.length){
+          statusEl.textContent = 'Generated — ' + data.missing.length + ' field' + (data.missing.length === 1 ? '' : 's') + ' still need' + (data.missing.length === 1 ? 's' : '') + ' a value (see below) before this is ready to send.';
+        }else{
+          statusEl.textContent = 'Generated — every field has a real value.';
+        }
+        statusEl.className = 'status show';
+      }
+
+      function generateFlyer(n){
+        var statusEl = document.getElementById('dh' + n + '-flyerStatus');
+        document.getElementById('dh' + n + '-flyerPanel').style.display = 'block';
+        statusEl.textContent = 'Generating…';
+        statusEl.className = 'status show';
+        adminPost('renderFlyer', { hook: n }).then(function(res){
+          if(res.data && res.data.ok){
+            showFlyerResult(n, res.data);
+          }else{
+            statusEl.textContent = (res.data && res.data.error) || 'Could not generate a flyer for this hook.';
+            statusEl.className = 'status show';
+          }
+        }).catch(function(){
+          statusEl.textContent = 'Could not reach the server — please try again.';
+          statusEl.className = 'status show';
+        });
+      }
+
+      function updateFlyerPreview(n){
+        var st = flyerState[n];
+        if(!st) return;
+        var overrides = collectFlyerOverrides(n, st.fieldsMeta);
+        var statusEl = document.getElementById('dh' + n + '-flyerStatus');
+        statusEl.textContent = 'Updating…';
+        statusEl.className = 'status show';
+        adminPost('renderFlyer', { hook: n, fields: overrides }).then(function(res){
+          if(res.data && res.data.ok){
+            showFlyerResult(n, res.data);
+          }else{
+            statusEl.textContent = (res.data && res.data.error) || 'Could not update the preview.';
+            statusEl.className = 'status show';
+          }
+        });
+      }
+
+      function downloadFlyerSvg(n){
+        var st = flyerState[n];
+        if(!st || !st.svg) return;
+        var blob = new Blob([st.svg], { type: 'image/svg+xml' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = 'flyer-hook-' + n + '.svg';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+      }
+
+      // Best-effort PNG export: rasterizes the same SVG via <canvas>. An
+      // SVG loaded through an <img>/blob URL (rather than inserted inline
+      // into the page) has no access to this page's own Google Fonts
+      // <link>, so a small <style>@import…</style> of the same
+      // stylesheet is embedded directly in this copy of the SVG first.
+      // Chrome/Edge support this; if a browser doesn't, the catch below
+      // points to Download SVG instead rather than failing silently.
+      function downloadFlyerPng(n){
+        var st = flyerState[n];
+        var statusEl = document.getElementById('dh' + n + '-flyerStatus');
+        if(!st || !st.svg) return;
+        try{
+          var openTagEnd = st.svg.indexOf('>') + 1;
+          var withStyle = st.svg.slice(0, openTagEnd) +
+            '<style>@import url(\'https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&amp;family=Noto+Sans:wght@400;500;600;700&amp;display=swap\');</style>' +
+            st.svg.slice(openTagEnd);
+          var blob = new Blob([withStyle], { type: 'image/svg+xml' });
+          var url = URL.createObjectURL(blob);
+          var img = new Image();
+          img.onload = function(){
+            var canvas = document.createElement('canvas');
+            canvas.width = 1080; canvas.height = 1350;
+            var ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            URL.revokeObjectURL(url);
+            canvas.toBlob(function(pngBlob){
+              if(!pngBlob){
+                statusEl.textContent = 'Could not convert to PNG in this browser — use Download SVG instead.';
+                statusEl.className = 'status show';
+                return;
+              }
+              var pngUrl = URL.createObjectURL(pngBlob);
+              var a = document.createElement('a');
+              a.href = pngUrl; a.download = 'flyer-hook-' + n + '.png';
+              document.body.appendChild(a); a.click(); a.remove();
+              setTimeout(function(){ URL.revokeObjectURL(pngUrl); }, 2000);
+            }, 'image/png');
+          };
+          img.onerror = function(){
+            URL.revokeObjectURL(url);
+            statusEl.textContent = 'Could not convert to PNG in this browser — use Download SVG instead.';
+            statusEl.className = 'status show';
+          };
+          img.src = url;
+        }catch(e){
+          statusEl.textContent = 'Could not convert to PNG in this browser — use Download SVG instead.';
+          statusEl.className = 'status show';
+        }
+      }
+
+      // ---------- Flyer contact info (shared across every generated flyer) ----------
+      (function(){
+        var phoneEl = document.getElementById('flyerSettingsPhone');
+        var emailEl = document.getElementById('flyerSettingsEmail');
+        var statusEl = document.getElementById('flyerSettingsStatus');
+        var loaded = false;
+        function load(){
+          if(loaded) return;
+          adminGet('flyerSettings').then(function(res){
+            if(res && res.ok){
+              phoneEl.value = res.contactPhone || '';
+              emailEl.value = res.contactEmail || '';
+              loaded = true;
+            }
+          });
+        }
+        document.querySelector('[data-panel="defaultHooks"]').addEventListener('click', load);
+        document.getElementById('flyerSettingsSaveBtn').addEventListener('click', function(){
+          statusEl.textContent = 'Saving…';
+          statusEl.className = 'status show';
+          adminPost('setFlyerSettings', { contactPhone: phoneEl.value.trim(), contactEmail: emailEl.value.trim() }).then(function(res){
+            statusEl.textContent = (res.data && res.data.ok) ? 'Saved.' : ((res.data && res.data.error) || 'Could not save.');
+            statusEl.className = 'status show';
+          }).catch(function(){
+            statusEl.textContent = 'Could not reach the server — please try again.';
+            statusEl.className = 'status show';
+          });
+        });
+        load();
+      })();
+
       grid.addEventListener('click', function(e){
+        var flyerGenN = e.target.getAttribute('data-flyer-gen');
+        if(flyerGenN){ generateFlyer(flyerGenN); return; }
+        var flyerUpdateN = e.target.getAttribute('data-flyer-update');
+        if(flyerUpdateN){ updateFlyerPreview(flyerUpdateN); return; }
+        var flyerSvgN = e.target.getAttribute('data-flyer-download-svg');
+        if(flyerSvgN){ downloadFlyerSvg(flyerSvgN); return; }
+        var flyerPngN = e.target.getAttribute('data-flyer-download-png');
+        if(flyerPngN){ downloadFlyerPng(flyerPngN); return; }
+
         var saveN = e.target.getAttribute('data-hook-save');
         if(saveN){
           saveHook(saveN);
