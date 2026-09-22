@@ -3102,6 +3102,14 @@
             '</div>' +
             '<label for="h' + i + '-caption">Caption</label>' +
             '<textarea id="h' + i + '-caption" placeholder="Ready-to-paste caption for this promo"></textarea>' +
+            '<label for="h' + i + '-flyerPromoTag" style="margin-top:16px;">Flyer promo banner</label>' +
+            '<div class="hint" style="margin-top:-2px;">For the flyer template only — a short offer/release banner, e.g. "December Late Release in Keurbooms". Leave blank if this promo has no banner text.</div>' +
+            '<input id="h' + i + '-flyerPromoTag" placeholder="e.g. December Late Release in Keurbooms">' +
+            '<label for="h' + i + '-flyerPrice">Flyer price badge (2 lines)</label>' +
+            '<div class="hint" style="margin-top:-2px;">There\'s no automatic price lookup — type in the rate you want shown.</div>' +
+            '<textarea id="h' + i + '-flyerPrice" rows="2" placeholder="R3500 PER DAY&#10;Under R600 p/p"></textarea>' +
+            '<label for="h' + i + '-flyerDates">Flyer stay dates / availability window</label>' +
+            '<input id="h' + i + '-flyerDates" placeholder="e.g. 18 December to 1 January – Peak Season Stay (14 Days)">' +
             '</div>' +
             '<div class="hook-mode-label">Who manages this hook?</div>' +
             '<div class="hook-mode-toggle" data-mode-toggle="' + i + '">' +
@@ -4080,6 +4088,9 @@
         var booking = document.getElementById(p + 'booking').value.trim();
         var landing = document.getElementById(p + 'landing').value.trim();
         var caption = document.getElementById(p + 'caption').value.trim();
+        var flyerPromoTag = document.getElementById(p + 'flyerPromoTag').value.trim();
+        var flyerPrice = document.getElementById(p + 'flyerPrice').value.trim();
+        var flyerDates = document.getElementById(p + 'flyerDates').value.trim();
         var errorEl = document.getElementById(p + 'errorStatus');
         errorEl.className = 'status';
         errorEl.textContent = '';
@@ -4127,6 +4138,9 @@
         affSave('hook' + n + 'townId', loc.townId);
         affSave('hook' + n + 'suburbId', loc.suburbId);
         affSave('hook' + n + 'locationLabel', loc.locationLabel);
+        affSave('hook' + n + 'flyerPromoTag', flyerPromoTag);
+        affSave('hook' + n + 'flyerPrice', flyerPrice);
+        affSave('hook' + n + 'flyerDates', flyerDates);
 
         // Give this affiliate a single client-facing URL for this hook — a
         // read-only page their customers can open on any device. Requires an
@@ -4142,7 +4156,7 @@
           fetch('/api/hook?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ booking: booking, landing: landing, caption: caption, zone: loc.zone, townId: loc.townId, suburbId: loc.suburbId, locationLabel: loc.locationLabel })
+            body: JSON.stringify({ booking: booking, landing: landing, caption: caption, zone: loc.zone, townId: loc.townId, suburbId: loc.suburbId, locationLabel: loc.locationLabel, flyerPromoTag: flyerPromoTag, flyerPrice: flyerPrice, flyerDates: flyerDates })
           }).catch(function(){ /* saved to this browser regardless; backend sync is best-effort */ });
         }else{
           clientRow.style.display = 'none';
@@ -4162,12 +4176,18 @@
           var bEl = document.getElementById('h' + hi + '-booking');
           var lEl = document.getElementById('h' + hi + '-landing');
           var cEl = document.getElementById('h' + hi + '-caption');
+          var promoTagEl = document.getElementById('h' + hi + '-flyerPromoTag');
+          var priceEl = document.getElementById('h' + hi + '-flyerPrice');
+          var datesEl = document.getElementById('h' + hi + '-flyerDates');
           var savedB = affLoad('hook' + hi + 'booking');
           var savedL = affLoad('hook' + hi + 'landing');
           var savedC = affLoad('hook' + hi + 'caption');
           var savedZone = affLoad('hook' + hi + 'zone');
           var savedTownId = affLoad('hook' + hi + 'townId');
           var savedSuburbId = affLoad('hook' + hi + 'suburbId');
+          var savedPromoTag = affLoad('hook' + hi + 'flyerPromoTag');
+          var savedPrice = affLoad('hook' + hi + 'flyerPrice');
+          var savedDates = affLoad('hook' + hi + 'flyerDates');
           applyHookLocation(hi, { zone: savedZone, townId: savedTownId, suburbId: savedSuburbId });
           if(savedB){
             bEl.value = savedB;
@@ -4176,7 +4196,10 @@
           }
           if(savedL) lEl.value = savedL;
           if(savedC) cEl.value = savedC;
-          if(savedB || savedL || savedC || savedZone || savedTownId){
+          if(savedPromoTag) promoTagEl.value = savedPromoTag;
+          if(savedPrice) priceEl.value = savedPrice;
+          if(savedDates) datesEl.value = savedDates;
+          if(savedB || savedL || savedC || savedZone || savedTownId || savedPromoTag || savedPrice || savedDates){
             saveHook(hi);
           }else{
             var affIdForImage = AFF_ID || (bEl.value.trim() ? extractAffiliateId(bEl.value.trim()) : '');
