@@ -4256,6 +4256,105 @@
         renderAutobuildDraft(n);
       }
 
+      // ---- Event hook: "Find area photo" / "Find theme photo" (Google
+      // Places, see lib/places-images.js) ----
+      //
+      // kind is "area" (hero slot) or "theme" (secondary slot) — picks the
+      // right box/status/grid element ids and the server-side savePlacePhoto
+      // slot. Candidate photos returned by findPlaceImages already come
+      // back as data: URIs (the server never hands us a raw Google URL —
+      // see that action's own comment for why), so picking one just
+      // re-sends that exact data: URI to savePlacePhoto rather than
+      // fetching anything a second time.
+      var placePhotoResults = {}; // { "area:3": [{dataUri,...}], "theme:3": [...] }
+
+      function placePhotoIds(n, kind){
+        var p = 'dh' + n + '-' + kind + 'Photo';
+        return { box: p + 'Box', query: p + 'Query', status: p + 'Status', grid: p + 'Grid' };
+      }
+
+      function togglePlacePhotoBox(n, kind){
+        var ids = placePhotoIds(n, kind);
+        var box = document.getElementById(ids.box);
+        var willShow = !box.classList.contains('show');
+        box.classList.toggle('show', willShow);
+        if(willShow){
+          var queryEl = document.getElementById(ids.query);
+          if(!queryEl.value.trim()){
+            var seedField = kind === 'area' ? 'dh' + n + '-eventLocationName' : 'dh' + n + '-eventTheme';
+            queryEl.value = document.getElementById(seedField).value.trim();
+          }
+        }
+      }
+
+      function searchPlacePhotos(n, kind){
+        var ids = placePhotoIds(n, kind);
+        var query = document.getElementById(ids.query).value.trim();
+        var statusEl = document.getElementById(ids.status);
+        var gridEl = document.getElementById(ids.grid);
+        gridEl.innerHTML = '';
+        if(!query){
+          statusEl.textContent = 'Type something to search for first.';
+          return;
+        }
+        statusEl.textContent = 'Searching…';
+        adminPost('findPlaceImages', { query: query, limit: 6 }).then(function(res){
+          var data = res.data;
+          if(data && data.ok && data.images && data.images.length){
+            placePhotoResults[kind + ':' + n] = data.images;
+            var matched = data.place && data.place.name ? (' — matched "' + data.place.name + '"') : '';
+            statusEl.textContent = data.images.length + ' photo' + (data.images.length === 1 ? '' : 's') + ' found' + matched + '. Click one to use it.';
+            gridEl.innerHTML = data.images.map(function(img, idx){
+              return '<div class="autobuild-photo" data-place-photo-pick="' + kind + ':' + n + ':' + idx + '" title="' + escapeHtml(img.attribution || '') + '">' +
+                '<img src="' + img.dataUri + '" loading="lazy" alt="Candidate photo ' + (idx + 1) + '">' +
+              '</div>';
+            }).join('');
+          }else{
+            placePhotoResults[kind + ':' + n] = [];
+            statusEl.textContent = placePhotoErrorMessage(data);
+          }
+        }).catch(function(){
+          statusEl.textContent = 'Could not reach the server — please try again.';
+        });
+      }
+
+      function placePhotoErrorMessage(data){
+        if(data && data.message) return data.message;
+        var reason = data && data.reason;
+        if(reason === 'no_api_key') return 'Places image search isn\'t set up yet — add GOOGLE_PLACES_API_KEY in Netlify.';
+        if(reason === 'empty_query') return 'Type something to search for first.';
+        if(reason === 'ZERO_RESULTS') return 'No matching place found on Google — try a more specific or different search.';
+        if(reason === 'no_photos') return 'Google found a match but it has no photos on file — try a different search.';
+        if(reason === 'photo_fetch_failed') return 'Found matching photos but couldn\'t download them — please try again.';
+        return 'Could not find any photos for that search.';
+      }
+
+      function pickPlacePhoto(kind, n, idx){
+        var images = placePhotoResults[kind + ':' + n] || [];
+        var img = images[idx];
+        if(!img) return;
+        var ids = placePhotoIds(n, kind);
+        var statusEl = document.getElementById(ids.status);
+        var gridEl = document.getElementById(ids.grid);
+        Array.prototype.forEach.call(gridEl.children, function(el, i){ el.classList.toggle('picked', i === idx); });
+        statusEl.textContent = 'Saving…';
+        var slot = kind === 'area' ? 'hero' : 'secondary';
+        adminPost('savePlacePhoto', { hook: n, slot: slot, dataUri: img.dataUri }).then(function(res){
+          if(res.data && res.data.ok){
+            statusEl.textContent = 'Saved as this hook\'s ' + (slot === 'hero' ? 'hero' : 'secondary') + ' flyer photo.';
+            showToast((kind === 'area' ? 'Area' : 'Theme') + ' photo saved');
+            // If the flyer preview is already open for this hook, refresh
+            // it so the new photo shows up without a manual re-click.
+            var panel = document.getElementById('dh' + n + '-flyerPanel');
+            if(panel && panel.style.display !== 'none') generateFlyer(n);
+          }else{
+            statusEl.textContent = (res.data && res.data.error) || 'Could not save this photo — please try again.';
+          }
+        }).catch(function(){
+          statusEl.textContent = 'Could not reach the server — please try again.';
+        });
+      }
+
       // Exact {resortId, siteId} stashed per hook number when the admin
       // picks a property from the Browse tree (renderPropertyPickerTree,
       // below) instead of typing — lets generateAutobuildDraft send an
@@ -4868,6 +4967,17 @@
               '<label for="dh' + i + '-eventTheme">Theme</label>' +
               '<div class="hint" style="margin-top:-2px;">What kind of event this is, e.g. whale watching, cycling, music. Every new theme you type is saved and shows up as a pick here on future Event hooks too.</div>' +
               '<input id="dh' + i + '-eventTheme" list="eventThemeOptions" placeholder="e.g. Whale watching">' +
+              '<button type="button" class="btn-outline autobuild-toggle" style="border-color:var(--navy); color:var(--navy);" data-theme-photo-toggle="' + i + '">🖼️ Find theme photo</button>' +
+              '<div class="autobuild-box" id="dh' + i + '-themePhotoBox">' +
+                '<label>Search Google for a theme photo</label>' +
+                '<div class="autobuild-row">' +
+                  '<input id="dh' + i + '-themePhotoQuery" placeholder="e.g. Whale watching boat tour">' +
+                  '<button type="button" class="btn-outline" data-theme-photo-search="' + i + '">Search</button>' +
+                '</div>' +
+                '<div class="hint" style="margin-top:4px;">Places search works best on specific, searchable places or activities — a bare theme word like "music" may return nothing. Becomes this hook\'s secondary flyer photo.</div>' +
+                '<div class="autobuild-status" id="dh' + i + '-themePhotoStatus"></div>' +
+                '<div class="autobuild-photo-grid" id="dh' + i + '-themePhotoGrid"></div>' +
+              '</div>' +
               '<label for="dh' + i + '-eventSectionHeading" style="margin-top:16px;">Highlights section heading</label>' +
               '<input id="dh' + i + '-eventSectionHeading" placeholder="e.g. Highlights">' +
               '<label for="dh' + i + '-eventHighlight1">Highlight 1</label>' +
@@ -4882,6 +4992,17 @@
               '<input id="dh' + i + '-eventDate" placeholder="e.g. 25 - 28 September 2026">' +
               '<label for="dh' + i + '-eventLocationName">Location name</label>' +
               '<input id="dh' + i + '-eventLocationName" list="hookSourceOptions" placeholder="e.g. Hermanus">' +
+              '<button type="button" class="btn-outline autobuild-toggle" style="border-color:var(--navy); color:var(--navy);" data-area-photo-toggle="' + i + '">🖼️ Find area photo</button>' +
+              '<div class="autobuild-box" id="dh' + i + '-areaPhotoBox">' +
+                '<label>Search Google for a town/area photo</label>' +
+                '<div class="autobuild-row">' +
+                  '<input id="dh' + i + '-areaPhotoQuery" placeholder="e.g. Hermanus, South Africa">' +
+                  '<button type="button" class="btn-outline" data-area-photo-search="' + i + '">Search</button>' +
+                '</div>' +
+                '<div class="hint" style="margin-top:4px;">Becomes this hook\'s hero flyer photo.</div>' +
+                '<div class="autobuild-status" id="dh' + i + '-areaPhotoStatus"></div>' +
+                '<div class="autobuild-photo-grid" id="dh' + i + '-areaPhotoGrid"></div>' +
+              '</div>' +
               '<label for="dh' + i + '-eventLocationDetail">Location detail</label>' +
               '<input id="dh' + i + '-eventLocationDetail" placeholder="e.g. Old Harbour, Marine Drive">' +
             '</div>' +
@@ -5683,6 +5804,21 @@
           toggleAutobuildPhoto(parts[0], Number(parts[1]));
           return;
         }
+
+        var areaToggleN = e.target.getAttribute('data-area-photo-toggle');
+        if(areaToggleN){ togglePlacePhotoBox(areaToggleN, 'area'); return; }
+        var themeToggleN = e.target.getAttribute('data-theme-photo-toggle');
+        if(themeToggleN){ togglePlacePhotoBox(themeToggleN, 'theme'); return; }
+        var areaSearchN = e.target.getAttribute('data-area-photo-search');
+        if(areaSearchN){ searchPlacePhotos(areaSearchN, 'area'); return; }
+        var themeSearchN = e.target.getAttribute('data-theme-photo-search');
+        if(themeSearchN){ searchPlacePhotos(themeSearchN, 'theme'); return; }
+        var placePhotoEl = e.target.closest && e.target.closest('[data-place-photo-pick]');
+        if(placePhotoEl){
+          var ppParts = placePhotoEl.getAttribute('data-place-photo-pick').split(':');
+          pickPlacePhoto(ppParts[0], ppParts[1], Number(ppParts[2]));
+          return;
+        }
       });
 
       grid.addEventListener('keydown', function(e){
@@ -5691,7 +5827,12 @@
         if(m){
           e.preventDefault();
           generateAutobuildDraft(m[1]);
+          return;
         }
+        var am = e.target.id && e.target.id.match(/^dh(\d+)-areaPhotoQuery$/);
+        if(am){ e.preventDefault(); searchPlacePhotos(am[1], 'area'); return; }
+        var tm = e.target.id && e.target.id.match(/^dh(\d+)-themePhotoQuery$/);
+        if(tm){ e.preventDefault(); searchPlacePhotos(tm[1], 'theme'); return; }
       });
 
       grid.addEventListener('change', function(e){
