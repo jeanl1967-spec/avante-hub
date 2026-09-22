@@ -5,6 +5,10 @@ import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-
 import { resolveHookMode } from "./lib/hook-mode.js";
 import { buildHookDraft } from "./lib/hook-draft.js";
 import { saveHookPhotoUrls } from "./lib/hook-photos.js";
+import { defaultTemplateForCategory } from "./lib/hook-templates.js";
+import { resolveFlyerFields, defaultPhotoSlotOrder } from "./lib/hook-flyer.js";
+import { renderFlyerSVG } from "./lib/hook-flyer-svg.js";
+import { fetchFlyerImages } from "./lib/hook-flyer-images.js";
 
 // Special affiliate key reserved for admin-managed default hook content.
 // Chosen so it can never collide with a real affiliate ID (StockNetwork
@@ -138,6 +142,45 @@ export default async (request, context) => {
           status: result.ok ? 200 : 502,
           headers: { "content-type": "application/json", ...cors },
         });
+      }
+
+      // Builds a finished flyer SVG for THIS hook (admin's or an
+      // affiliate's own self-managed one) — same "nothing invented"
+      // resolution + rendering admin-api.js's renderFlyer action uses for
+      // Default Hooks, no Canva API call. Needs the hook to already have
+      // Auto-build content saved (this exact key's own `source`/photos —
+      // an affiliate generating a flyer for their own self-managed hook
+      // needs to have Auto-built it first, same as admin does for Default
+      // Hooks).
+      if (body.action === "renderFlyer") {
+        const template = defaultTemplateForCategory("property");
+        if (!template) {
+          return new Response(JSON.stringify({ ok: false, error: "No flyer template registered yet." }), {
+            status: 400,
+            headers: { "content-type": "application/json", ...cors },
+          });
+        }
+        const record = await store.get(key, { type: "json" });
+        if (!record) {
+          return new Response(JSON.stringify({ ok: false, error: "This hook has no saved content yet — build or save it first." }), {
+            status: 400,
+            headers: { "content-type": "application/json", ...cors },
+          });
+        }
+        const settingsStore = getStore({ name: "flyer-settings", consistency: "strong" });
+        const contactSettings = (await settingsStore.get("config", { type: "json" })) || {};
+        const overrides = body.fields && typeof body.fields === "object" ? body.fields : null;
+        const { values, missing } = resolveFlyerFields(template, record, contactSettings, overrides);
+
+        const imageStore = getStore({ name: "promo-hook-images", consistency: "strong" });
+        const slotKeys = defaultPhotoSlotOrder(template);
+        const images = await fetchFlyerImages(imageStore, key, record.galleryCount || 0, slotKeys);
+
+        const svg = renderFlyerSVG(template, values, images);
+        return new Response(
+          JSON.stringify({ ok: true, templateId: "property-flyer-v1", fields: template.fields.map((f) => ({ key: f.key, role: f.role })), values: values, missing: missing, svg: svg }),
+          { headers: { "content-type": "application/json", ...cors } }
+        );
       }
 
       const existing = (await store.get(key, { type: "json" })) || {};

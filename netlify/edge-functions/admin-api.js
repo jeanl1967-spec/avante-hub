@@ -7,6 +7,10 @@ import { ZONES, LEGACY_EXPAND } from "./lib/zones.js";
 import { resortKey } from "./lib/resort-key.js";
 import { buildHookDraft } from "./lib/hook-draft.js";
 import { saveHookPhotoUrls } from "./lib/hook-photos.js";
+import { defaultTemplateForCategory } from "./lib/hook-templates.js";
+import { resolveFlyerFields, defaultPhotoSlotOrder } from "./lib/hook-flyer.js";
+import { renderFlyerSVG } from "./lib/hook-flyer-svg.js";
+import { fetchFlyerImages } from "./lib/hook-flyer-images.js";
 import {
   parseStockNetworkCsv,
   normalizeStockNetworkStatus,
@@ -290,6 +294,11 @@ export default async (request, context) => {
   // which StockNetwork's export sometimes has) updates the same record
   // instead of creating a duplicate.
   const transactionsStore = getStore({ name: "stocknetwork-transactions", consistency: "strong" });
+  const imageStore = getStore({ name: "promo-hook-images", consistency: "strong" });
+  // Shared contact details (phone/email) shown on every generated flyer —
+  // one setting, not typed per-hook, since it's Jean's own contact info,
+  // not per-property data. See getFlyerSettings/setFlyerSettings below.
+  const flyerSettingsStore = getStore({ name: "flyer-settings", consistency: "strong" });
   const DEFAULT_HOOK_COUNT = 6;
 
   async function verifyToken(token) {
@@ -370,6 +379,11 @@ export default async (request, context) => {
           });
         }
         return json({ ok: true, hooks: hooks }, 200, cors);
+      }
+
+      if (resource === "flyerSettings") {
+        const settings = (await flyerSettingsStore.get("config", { type: "json" })) || {};
+        return json({ ok: true, contactPhone: settings.contactPhone || "", contactEmail: settings.contactEmail || "" }, 200, cors);
       }
 
       if (resource === "whatsappLog") {
@@ -1051,11 +1065,47 @@ export default async (request, context) => {
         : [];
       if (!urls.length) return json({ ok: false, error: "No photos selected." }, 400, cors);
 
-      const imageStore = getStore({ name: "promo-hook-images", consistency: "strong" });
       const result = await saveHookPhotoUrls(hookStore, imageStore, "__admin__:" + n, urls, body.source);
       return json(result, result.ok ? 200 : 502, cors);
     }
 
+    if (action === "setFlyerSettings") {
+      // Shared contact info baked onto every generated flyer (phone/email)
+      // — one setting for the whole account, edited from the flyer
+      // generation screen, not typed per-hook.
+      const contactPhone = typeof body.contactPhone === "string" ? body.contactPhone.trim().slice(0, 60) : "";
+      const contactEmail = typeof body.contactEmail === "string" ? body.contactEmail.trim().slice(0, 200) : "";
+      await flyerSettingsStore.setJSON("config", { contactPhone: contactPhone, contactEmail: contactEmail });
+      return json({ ok: true, contactPhone: contactPhone, contactEmail: contactEmail }, 200, cors);
+    }
+
+    if (action === "renderFlyer") {
+      // Builds a finished flyer SVG for a Default Hook, entirely from data
+      // already saved on it (Auto-build's scraped source, the flyer-only
+      // fields typed on the hook, and the shared contact settings) — no
+      // Canva API call. See lib/hook-flyer.js and lib/hook-flyer-svg.js for
+      // the "nothing invented" resolution + rendering this delegates to.
+      const n = Number(body.hook);
+      if (!isFinite(n) || n < 1 || n > DEFAULT_HOOK_COUNT) {
+        return json({ ok: false, error: "invalid hook number" }, 400, cors);
+      }
+      const template = defaultTemplateForCategory("property");
+      if (!template) return json({ ok: false, error: "No flyer template registered yet." }, 400, cors);
+
+      const key = "__admin__:" + n;
+      const record = await hookStore.get(key, { type: "json" });
+      if (!record) return json({ ok: false, error: "This hook has no saved content yet — build or save it first." }, 400, cors);
+
+      const contactSettings = (await flyerSettingsStore.get("config", { type: "json" })) || {};
+      const overrides = body.fields && typeof body.fields === "object" ? body.fields : null;
+      const { values, missing } = resolveFlyerFields(template, record, contactSettings, overrides);
+
+      const slotKeys = defaultPhotoSlotOrder(template);
+      const images = await fetchFlyerImages(imageStore, key, record.galleryCount || 0, slotKeys);
+
+      const svg = renderFlyerSVG(template, values, images);
+      return json({ ok: true, templateId: "property-flyer-v1", fields: template.fields.map((f) => ({ key: f.key, role: f.role })), values: values, missing: missing, svg: svg }, 200, cors);
+    }
 
     if (action === "setResortAffId") {
       // Bulk-assigns (or, with affId "", clears) an affiliate on one or
