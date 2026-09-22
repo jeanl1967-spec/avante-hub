@@ -26,7 +26,21 @@
 //   generation preview screen, applied last so anything typed there always
 //   wins over the auto-resolved default.
 // Returns { values: { [fieldKey]: string }, missing: string[] }.
+//
+// Dispatches by template.category: property-flyer-v1 (StockNetwork-backed,
+// the original behavior) vs event-flyer-v1 (every field typed in directly
+// — see resolveEventFlyerFields below). Any future category with nothing
+// implemented here yet just falls back to leaving every field blank rather
+// than throwing, so a generation attempt reports "everything's missing"
+// instead of crashing.
 export function resolveFlyerFields(template, hookRecord, contactSettings, overrides) {
+  if (template && template.category === "event") {
+    return resolveEventFlyerFields(template, hookRecord, overrides);
+  }
+  return resolvePropertyFlyerFields(template, hookRecord, contactSettings, overrides);
+}
+
+function resolvePropertyFlyerFields(template, hookRecord, contactSettings, overrides) {
   const record = hookRecord && typeof hookRecord === "object" ? hookRecord : {};
   const src = record.source && typeof record.source === "object" ? record.source : {};
   const settings = contactSettings && typeof contactSettings === "object" ? contactSettings : {};
@@ -83,6 +97,30 @@ function splitIntoBullets(text, max) {
     .map((s) => s.trim())
     .filter(Boolean);
   return parts.slice(0, max).map((s) => (s.length > 60 ? s.slice(0, 57).trim() + "…" : s));
+}
+
+// event-flyer-v1's resolver — much simpler than the property one above
+// since there's no StockNetwork scrape to pull from: an event isn't a
+// listed property, so every field here is Jean's (or an affiliate's) own
+// typed input, saved directly onto the hook record under the matching
+// eventXxx key (see admin-api.js's setDefaultHook / hook-api.js's plain
+// save path). A field left blank on the form comes back blank here too —
+// never invented — same "missing" reporting the property resolver uses.
+function resolveEventFlyerFields(template, hookRecord, overrides) {
+  const record = hookRecord && typeof hookRecord === "object" ? hookRecord : {};
+  const values = {};
+  for (const field of template.fields) {
+    const raw = record[field.key];
+    values[field.key] = typeof raw === "string" ? raw.trim() : "";
+  }
+  if (overrides && typeof overrides === "object") {
+    for (const field of template.fields) {
+      const key = field.key;
+      if (typeof overrides[key] === "string") values[key] = overrides[key].trim().slice(0, 2000);
+    }
+  }
+  const missing = template.fields.filter((f) => !values[f.key]).map((f) => f.key);
+  return { values: values, missing: missing };
 }
 
 // Which of a hook's saved photos (in save order: cover first, then

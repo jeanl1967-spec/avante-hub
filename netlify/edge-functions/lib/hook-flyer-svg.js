@@ -207,6 +207,120 @@ function imageFieldSvg(imgField, dataUri, uid) {
   );
 }
 
+// Rotated soft blob approximating one of event-flyer-v1's "wave motif"
+// swirl shapes — the master's real shapes are built from a Canva-hosted
+// image mask that isn't reachable at generation time (same asset-access
+// limit the logo hits everywhere in this file), so this draws a plain
+// ellipse across the same bounding box/rotation/color instead. A disclosed
+// simplification, not the source artwork — see hook-templates.js's note on
+// event-flyer-v1.chrome.waveShapes.
+function waveShapeChrome(spec) {
+  const g = spec.geometry;
+  const cx = g.left + g.width / 2;
+  const cy = g.top + g.height / 2;
+  return (
+    '<ellipse cx="' + cx + '" cy="' + cy + '" rx="' + g.width / 2 + '" ry="' + g.height / 2 +
+    '" fill="' + spec.color + '" transform="rotate(' + (spec.rotation || 0) + " " + cx + " " + cy + ')"/>'
+  );
+}
+
+// A circular photo slot with a solid-color ring stroke around it (event-
+// flyer-v1's hero/secondary photo circles both have one — property-flyer-
+// v1's photo shapes don't, hence this being separate from imageFieldSvg
+// rather than adding an unused optional stroke param there). Same "leave
+// it visibly empty, never invented" rule for a slot with no saved photo.
+function ringedCircleImageSvg(imgField, dataUri, strokeSpec, uid) {
+  const g = imgField.geometry;
+  const cx = g.left + g.width / 2;
+  const cy = g.top + g.height / 2;
+  const r = g.width / 2;
+  const strokeAttrs = strokeSpec ? ' stroke="' + strokeSpec.color + '" stroke-width="' + strokeSpec.weight + '"' : "";
+  if (!dataUri) {
+    return '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="#12405c" stroke="#7f97a6" stroke-width="2" stroke-dasharray="8,6"/>';
+  }
+  const clipId = "eventclip-" + imgField.key + "-" + uid;
+  return (
+    '<defs><clipPath id="' + clipId + '"><circle cx="' + g.width / 2 + '" cy="' + g.height / 2 + '" r="' + g.width / 2 + '"/></clipPath></defs>' +
+    '<g transform="translate(' + g.left + "," + g.top + ')" clip-path="url(#' + clipId + ')">' +
+    '<image href="' + dataUri + '" x="0" y="0" width="' + g.width + '" height="' + g.height +
+    '" preserveAspectRatio="xMidYMid slice"/></g>' +
+    '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none"' + strokeAttrs + "/>"
+  );
+}
+
+// Simple monochrome calendar silhouette (body + two hanger tabs) — no
+// raster icon asset reachable at generation time, same limit as the logo.
+function calendarIconSvg(spec) {
+  const g = spec.geometry;
+  const bodyY = g.top + g.height * 0.18;
+  const bodyH = g.height * 0.72;
+  const rx = g.width * 0.12;
+  return (
+    '<g fill="' + spec.color + '">' +
+    '<rect x="' + g.left + '" y="' + bodyY + '" width="' + g.width + '" height="' + bodyH + '" rx="' + rx + '"/>' +
+    '<rect x="' + (g.left + g.width * 0.15) + '" y="' + g.top + '" width="' + g.width * 0.12 + '" height="' + g.height * 0.28 + '" rx="' + g.width * 0.04 + '"/>' +
+    '<rect x="' + (g.left + g.width * 0.73) + '" y="' + g.top + '" width="' + g.width * 0.12 + '" height="' + g.height * 0.28 + '" rx="' + g.width * 0.04 + '"/>' +
+    "</g>"
+  );
+}
+
+// Simple monochrome map-pin silhouette (teardrop with a punched-out hole
+// in the page background color, the classic pin look) — same asset limit.
+function pinIconSvg(spec, bgColor) {
+  const g = spec.geometry;
+  const cx = g.left + g.width / 2;
+  const topY = g.top;
+  const r = g.width / 2;
+  const tipY = g.top + g.height;
+  const path =
+    "M" + cx + " " + tipY +
+    " C" + (cx - r * 1.15) + " " + (topY + r * 1.3) + " " + (cx - r) + " " + topY + " " + cx + " " + topY +
+    " C" + (cx + r) + " " + topY + " " + (cx + r * 1.15) + " " + (topY + r * 1.3) + " " + cx + " " + tipY + " Z";
+  const holeR = r * 0.38;
+  const holeCy = topY + r * 0.85;
+  return (
+    '<path d="' + path + '" fill="' + spec.color + '"/>' +
+    '<circle cx="' + cx + '" cy="' + holeCy + '" r="' + holeR + '" fill="' + bgColor + '"/>'
+  );
+}
+
+// event-flyer-v1's renderer — same building blocks as the property
+// renderer below (text fitting, circleChrome, checkIconSvg, logoSvg) plus
+// the few event-only pieces above (wave shapes, ringed photo circles,
+// calendar/pin icons). Z-order matches the captured source design's own
+// element order: backdrop circles → wave shapes → hero photo → secondary
+// photo (drawn last/on top, since it visually overlaps the hero circle) →
+// highlight check icons → date/location icons → logo → all text.
+function renderEventFlyerSVG(template, values, images) {
+  const W = template.canvasSize.width;
+  const H = template.canvasSize.height;
+  const chrome = template.chrome;
+  const imgs = images && typeof images === "object" ? images : {};
+  const uid = Math.random().toString(36).slice(2, 8);
+  const findImg = (key) => template.images.find((i) => i.key === key);
+
+  let svg =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + " " + H +
+    '" style="width:100%;height:auto;display:block;">';
+  svg += '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="' + chrome.backgroundColor + '"/>';
+
+  for (const c of chrome.backdropCircles) svg += circleChrome(c);
+  for (const w of chrome.waveShapes) svg += waveShapeChrome(w);
+  svg += ringedCircleImageSvg(findImg("heroImage"), imgs.heroImage, chrome.heroStroke, uid);
+  svg += ringedCircleImageSvg(findImg("secondaryImage"), imgs.secondaryImage, chrome.secondaryStroke, uid);
+  for (const icon of chrome.highlightIcons) svg += checkIconSvg(icon, chrome.highlightIconBg);
+  svg += calendarIconSvg(chrome.dateIcon);
+  svg += pinIconSvg(chrome.locationIcon, chrome.backgroundColor);
+  svg += logoSvg(chrome.logo);
+
+  for (const field of template.fields) {
+    svg += renderTextField(field, values ? values[field.key] : "");
+  }
+
+  svg += "</svg>";
+  return svg;
+}
+
 // template: a HOOK_TEMPLATES entry (see lib/hook-templates.js).
 // values: { [fieldKey]: string } from resolveFlyerFields.
 // images: { heroImage?, featureImage?, lifestyleImage? } — each a data:
@@ -214,7 +328,17 @@ function imageFieldSvg(imgField, dataUri, uid) {
 // Returns a self-contained <svg>...</svg> string sized to the template's
 // canvasSize, safe to insert inline into a page (innerHTML) or save as a
 // standalone .svg file.
+//
+// Dispatches by template.category — property-flyer-v1's original layout
+// below, or event-flyer-v1's above.
 export function renderFlyerSVG(template, values, images) {
+  if (template && template.category === "event") {
+    return renderEventFlyerSVG(template, values, images);
+  }
+  return renderPropertyFlyerSVG(template, values, images);
+}
+
+function renderPropertyFlyerSVG(template, values, images) {
   const W = template.canvasSize.width;
   const H = template.canvasSize.height;
   const chrome = template.chrome;

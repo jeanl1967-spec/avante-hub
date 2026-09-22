@@ -267,16 +267,231 @@ export const HOOK_TEMPLATES = {
   },
 };
 
+// -----------------------------------------------------------------------
+// Template: event-flyer-v1
+// -----------------------------------------------------------------------
+// Source design: Jean's "AVANTE BLANK EVENT TEMPLATE — reference only
+// (descriptions)" (Canva design id below, linked via
+// https://canva.link/ijooqoifg3f5g98). Category: a standalone event/
+// festival promo (e.g. the Hermanus Whale Festival) — not tied to any one
+// property, so unlike property-flyer-v1 nothing here comes from
+// StockNetwork; every field is typed in directly (source: "jean"), same
+// "nothing invented, blank if unknown" rule as everywhere else in this app.
+//
+// This master design is itself a labeled reference/wireframe rather than a
+// filled example (its own title says so) — every text element's captured
+// content below ("EVENT NAME — line 1", "HIGHLIGHT 1 — short activity or
+// feature", etc.) is an instructional label, not real example copy, so it's
+// used here purely as matchText/role documentation of what each box is for,
+// exactly like property-flyer-v1 already does with its own captured
+// matchText. Two small floating text elements in the source design merely
+// label where the two photo circles are ("HERO IMAGE — main event photo",
+// "SECONDARY IMAGE — supporting photo") — those are guidance for a human
+// reading the reference design and are intentionally left out of `fields`/
+// `chrome` below; they never render on a generated flyer.
+//
+// Three distinct Canva font references are used across this design's text
+// (fontRef ids only — Canva's API doesn't hand back a resolvable font
+// family name here). Rather than guess three different real fonts, each is
+// mapped onto the same two already-loaded brand fonts property-flyer-v1
+// uses — large/display-scale text (event name lines, location name) →
+// "heading" (Montserrat); everything else (subtitle, section heading,
+// highlights, date, location detail) → "body" (Noto Sans) — a disclosed
+// approximation, flagged here the same way the logo swap was on
+// property-flyer-v1. Colors, sizes, weights and every geometry number below
+// are the real captured values from the design, unchanged.
+//
+// canvasSize is this design's own real page size (794x1123 — different
+// proportions than property-flyer-v1's 1080x1350, which is fine:
+// hook-flyer-svg.js sizes its SVG viewBox per-template).
+export const EVENT_TEMPLATE_V1 = {
+  category: "event",
+  label: "Event / festival flyer",
+  masterDesignId: "DAHV6Dr6wAQ",
+  canvasSize: { width: 794, height: 1123 },
+  fields: [
+    {
+      key: "eventNameLine1",
+      type: "text",
+      role: "Event name — line 1.",
+      matchText: "EVENT NAME — line 1",
+      source: "jean",
+      geometry: { top: 180.81, left: 60.98, width: 353.32, height: 35.53 },
+      style: { fontSize: 30, fontWeight: "normal", color: "#8c97a3", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "eventNameLine2",
+      type: "text",
+      role: "Event name — line 2 / tagline.",
+      matchText: "EVENT NAME — line 2 / tagline",
+      source: "jean",
+      geometry: { top: 277.5, left: 60.98, width: 335.87, height: 27.99 },
+      style: { fontSize: 24, fontWeight: "normal", color: "#8c97a3", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "eventSubtitle",
+      type: "text",
+      role: "One-line hook describing the event.",
+      matchText: "SUBTITLE — one-line hook describing the event",
+      source: "jean",
+      geometry: { top: 402.16, left: 60.98, width: 353.32, height: 51.9 },
+      style: { fontSize: 20, fontWeight: "bold", color: "#8c97a3", textAlign: "start", font: "body" },
+    },
+    {
+      key: "eventSectionHeading",
+      type: "text",
+      role: "Heading above the highlights list, e.g. \"Highlights\".",
+      matchText: "SECTION HEADING — e.g. Highlights",
+      source: "jean",
+      geometry: { top: 594.28, left: 60.98, width: 274.48, height: 51.63 },
+      style: { fontSize: 20, fontWeight: "bold", color: "#c9d2da", textAlign: "start", font: "body" },
+    },
+    {
+      key: "eventHighlight1",
+      type: "text",
+      role: "Highlight / activity bullet 1.",
+      matchText: "HIGHLIGHT 1 — short activity or feature",
+      source: "jean",
+      geometry: { top: 650.89, left: 93.93, width: 289.3, height: 40.13 },
+      style: { fontSize: 16, fontWeight: "normal", color: "#c9d2da", textAlign: "start", font: "body" },
+    },
+    {
+      key: "eventHighlight2",
+      type: "text",
+      role: "Highlight / activity bullet 2.",
+      matchText: "HIGHLIGHT 2",
+      source: "jean",
+      geometry: { top: 691.39, left: 93.93, width: 161.35, height: 18.47 },
+      style: { fontSize: 16, fontWeight: "normal", color: "#c9d2da", textAlign: "start", font: "body" },
+    },
+    {
+      key: "eventHighlight3",
+      type: "text",
+      role: "Highlight / activity bullet 3.",
+      matchText: "HIGHLIGHT 3",
+      source: "jean",
+      geometry: { top: 731.88, left: 93.93, width: 166.77, height: 18.47 },
+      style: { fontSize: 16, fontWeight: "normal", color: "#c9d2da", textAlign: "start", font: "body" },
+    },
+    {
+      key: "eventHighlight4",
+      type: "text",
+      role: "Highlight / activity bullet 4.",
+      matchText: "HIGHLIGHT 4",
+      source: "jean",
+      geometry: { top: 774.34, left: 93.93, width: 211.21, height: 18.47 },
+      style: { fontSize: 16, fontWeight: "normal", color: "#c9d2da", textAlign: "start", font: "body" },
+    },
+    {
+      key: "eventDate",
+      type: "text",
+      role: "Event date(s).",
+      matchText: "DATE — event date(s)",
+      source: "jean",
+      geometry: { top: 869.9, left: 140.96, width: 308.13, height: 21.4 },
+      style: { fontSize: 18, fontWeight: "bold", color: "#c9d2da", textAlign: "start", font: "body" },
+    },
+    {
+      key: "eventLocationName",
+      type: "text",
+      role: "Location name — town/area, e.g. \"Hermanus\".",
+      matchText: "LOCATION NAME",
+      source: "jean", // Jean types this; may match a town/suburb from the same Browse-by-location tree used elsewhere, but there's no automatic link (yet) the way property-flyer-v1's headlineLine2 has.
+      geometry: { top: 956.85, left: 124.55, width: 278.46, height: 30.8 },
+      style: { fontSize: 26, fontWeight: "normal", color: "#c9d2da", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "eventLocationDetail",
+      type: "text",
+      role: "Location detail — venue name, address, or region.",
+      matchText: "LOCATION DETAIL — address or region",
+      source: "jean",
+      geometry: { top: 1001.64, left: 124.55, width: 342.36, height: 18.8 },
+      style: { fontSize: 16, fontWeight: "bold", color: "#c9d2da", textAlign: "start", font: "body" },
+    },
+  ],
+  // Two circular photo slots (the design's "HERO IMAGE"/"SECONDARY IMAGE"
+  // labeled circles — see note above on why those floating labels
+  // themselves aren't part of this registry). A generated flyer fills each
+  // from this hook's own saved photos, cover-first, exactly like
+  // property-flyer-v1 — an empty slot is left visibly empty, never
+  // duplicated or reused, never a stand-in stock photo.
+  images: [
+    {
+      key: "heroImage",
+      role: "Large circular hero photo — the main event photo.",
+      shape: "circle",
+      geometry: { top: 212.08, left: 424.62, width: 542.65, height: 542.65 },
+    },
+    {
+      key: "secondaryImage",
+      role: "Smaller circular supporting photo, overlapping the hero circle.",
+      shape: "circle",
+      geometry: { top: 63.5, left: 424.62, width: 339.33, height: 339.33 },
+    },
+  ],
+  // Brand chrome — decorative shapes, icons, and the logo — drawn on every
+  // event flyer exactly as captured, never touched per-event.
+  chrome: {
+    backgroundColor: "#0e2f44",
+    // Two large soft off-canvas circles peeking in at the top-left corner.
+    backdropCircles: [
+      { geometry: { top: -149.73, left: -103.02, width: 710.99, height: 710.99 }, color: "#cdaf6f" },
+      { geometry: { top: -180.0, left: -144.48, width: 710.99, height: 710.99 }, color: "#e1e1e0" },
+    ],
+    // The master's "wave motif" — four large rotated organic swirl shapes
+    // (two gold, two gray) built from a Canva-hosted image mask that isn't
+    // reachable at flyer-generation time (same asset-access limit
+    // property-flyer-v1's logo hit). Approximated here as soft rotated
+    // blobs in the same two brand colors, at the same bounding geometry and
+    // rotation, rather than left out entirely — a disclosed simplification,
+    // not the exact source artwork.
+    waveShapes: [
+      { geometry: { top: 456.25, left: 412.12, width: 810.1, height: 762.5 }, rotation: 133.01, color: "#cdaf6f" },
+      { geometry: { top: -201.17, left: 650.37, width: 592.64, height: 557.82 }, rotation: 115.84, color: "#cdaf6f" },
+      { geometry: { top: 490.7, left: 443.0, width: 810.1, height: 762.5 }, rotation: 133.01, color: "#e1e1e0" },
+      { geometry: { top: -183.76, left: 679.39, width: 592.64, height: 557.82 }, rotation: 115.84, color: "#e1e1e0" },
+    ],
+    heroStroke: { color: "#ffffff", weight: 20 },
+    secondaryStroke: { color: "#ffffff", weight: 17 },
+    // Four small check-mark icons, one beside each highlight bullet.
+    highlightIcons: [
+      { geometry: { top: 651.72, left: 60.98, width: 27.03, height: 27.03 } },
+      { geometry: { top: 692.21, left: 60.98, width: 27.03, height: 27.03 } },
+      { geometry: { top: 732.7, left: 60.98, width: 27.03, height: 27.03 } },
+      { geometry: { top: 775.16, left: 60.98, width: 27.03, height: 27.03 } },
+    ],
+    highlightIconColor: "#ffffff",
+    highlightIconBg: "#5b612f",
+    // Calendar icon beside the date line, location-pin icon beside the
+    // location name/detail lines. No raster copy of the real glyph icons is
+    // bundled here (same Canva-asset-CDN limit as everywhere else) —
+    // rendered as simple drawn glyphs in the captured box/color instead.
+    dateIcon: { geometry: { top: 854.73, left: 60.98, width: 66.92, height: 66.92 }, color: "#ffffff" },
+    locationIcon: { geometry: { top: 962.96, left: 60.98, width: 52.9, height: 69.15 }, color: "#ffffff" },
+    // Avante Travel logo (top-left) — same typeset-wordmark fallback as
+    // property-flyer-v1, for the same reason (no reachable logo asset at
+    // generation time); swap in a real logo file whenever Jean can supply
+    // one.
+    logo: { geometry: { top: 8.84, left: 40.45, width: 170.57, height: 116.97 }, textFallback: { line1: "AVANTE", line2: "TRAVEL", color: "#0dcdc2" } },
+  },
+  notEditable: ["brand logo", "wave motif shapes", "backdrop circles", "highlight check icons", "date icon", "location pin icon"],
+};
+
+// Registers event-flyer-v1 alongside property-flyer-v1 in the same lookup
+// table used everywhere else in this file.
+HOOK_TEMPLATES["event-flyer-v1"] = EVENT_TEMPLATE_V1;
+
 // Look up a template by id. Returns undefined if unknown.
 export function getHookTemplate(templateId) {
   return HOOK_TEMPLATES[templateId];
 }
 
-// The template a given hook category should use by default. Only one
-// category exists so far (property/resort flyers); this indirection just
-// keeps room for the landing-page template and other hook categories that
-// are still to come, without another lookup table needing to change shape.
+// The template a given hook category should use by default. "property"/
+// "resort" (the original, still-default category) maps to the resort stay
+// flyer; "event" maps to the new standalone event/festival flyer above.
 export function defaultTemplateForCategory(category) {
-  if (category === "property" || category === "resort") return HOOK_TEMPLATES["property-flyer-v1"];
+  if (category === "event") return HOOK_TEMPLATES["event-flyer-v1"];
+  if (category === "property" || category === "resort" || !category) return HOOK_TEMPLATES["property-flyer-v1"];
   return undefined;
 }

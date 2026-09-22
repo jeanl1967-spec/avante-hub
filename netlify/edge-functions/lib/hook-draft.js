@@ -14,31 +14,76 @@
 import { fetchResortInfo, draftHookCaption } from "./hook-source.js";
 import { generateHashtags } from "./hashtag-helper.js";
 import { ADMIN_MASTER_SITE_GUID } from "./booking-link.js";
+import { resortKey } from "./resort-key.js";
+
+// The most properties a single "selection" draft (explicit resortKeys —
+// see below) will ever fetch info for in one go. A picked whole suburb/
+// town/zone can easily match more StockNetwork rows than anyone actually
+// wants in one flyer/caption; this is a sanity ceiling, not a design
+// target — the tree UI itself is expected to nudge toward sane campaign
+// sizes, this just stops a mis-click from firing 200 scrape requests.
+const MAX_SELECTION_PROPERTIES = 24;
 
 // resortStore: the "resort-list" Netlify Blobs store (read-only here).
-// input: { resortId?, siteId?, query?, bookingSiteGuid? } — bookingSiteGuid
-// is the placeholder StockNetwork site GUID to build the booking link
-// against (ADMIN_MASTER_SITE_GUID for an admin default hook, so
-// hook-api.js's existing personalizeStockNetworkUrl can re-attribute it
+// input: { resortId?, siteId?, query?, resortKeys?, label?, bookingSiteGuid? }
+// — bookingSiteGuid is the placeholder StockNetwork site GUID to build the
+// booking link against (ADMIN_MASTER_SITE_GUID for an admin default hook,
+// so hook-api.js's existing personalizeStockNetworkUrl can re-attribute it
 // per-viewer the same way it already does; an affiliate's own real
 // StockNetwork site GUID for a self-managed hook, which needs no
 // re-attribution since it's already that affiliate's own link).
+//
+// resortKeys (new): an explicit list of "resortId|siteId" strings — from
+// the Auto-build "Browse properties by location" checkbox tree, where the
+// admin/affiliate ticked one or more individual properties and/or whole
+// suburbs/towns/areas (each a shortcut for "every property currently
+// listed there"). This is the "campaign across several properties/an
+// area" path Jean asked for — distinct from the older free-text `query`
+// area mode below, which guesses at a district by substring match;
+// resortKeys is an exact, already-resolved list, so no guessing happens
+// here at all. `label` is the human-readable description of the
+// selection the tree already computed client-side (e.g. "Hermanus (all),
+// Voëlklip" or "3 properties") — used as-is for the draft's label/
+// locationLabel, since the server has no town/suburb name data to
+// reconstruct it from.
 // Returns { ok: true, ...draft } or { ok: false, error, status }.
 export async function buildHookDraft(resortStore, input) {
   const bodyResortId = typeof input.resortId === "string" ? input.resortId.trim() : "";
   const bodySiteId = typeof input.siteId === "string" ? input.siteId.trim() : "";
   const query = typeof input.query === "string" ? input.query.trim() : "";
+  const resortKeys = Array.isArray(input.resortKeys)
+    ? input.resortKeys.filter((k) => typeof k === "string" && k.trim()).slice(0, MAX_SELECTION_PROPERTIES)
+    : [];
+  const selectionLabel = typeof input.label === "string" ? input.label.trim() : "";
   const bookingSiteGuid = input.bookingSiteGuid || ADMIN_MASTER_SITE_GUID;
 
-  if (!bodyResortId && !query) {
+  if (!bodyResortId && !query && !resortKeys.length) {
     return { ok: false, error: "Type or pick a property or area first.", status: 400 };
   }
 
   let mode = "property";
   let label = query;
+  let locationLabel = "";
   let sources = [];
 
-  if (bodyResortId) {
+  if (resortKeys.length) {
+    mode = "selection";
+    const listRecord = await resortStore.get("current", { type: "json" });
+    const allResorts = listRecord && Array.isArray(listRecord.resorts) ? listRecord.resorts : [];
+    const wantedKeys = new Set(resortKeys);
+    const matches = allResorts.filter((r) => wantedKeys.has(resortKey(r)));
+    if (!matches.length) {
+      return { ok: false, error: "None of the selected properties could be found — try re-picking from the tree.", status: 404 };
+    }
+    const fetched = await Promise.all(matches.map((r) => fetchResortInfo(r.resortId, r.siteId)));
+    sources = fetched.filter(Boolean);
+    if (!sources.length) {
+      return { ok: false, error: "Couldn't load info for the selected properties right now. Try again shortly.", status: 502 };
+    }
+    locationLabel = selectionLabel || (sources.length === 1 ? sources[0].name || "" : sources.length + " properties");
+    label = sources.length === 1 ? sources[0].name || locationLabel : locationLabel;
+    if (sources.length === 1) mode = "property";
+  } else if (bodyResortId) {
     const info = await fetchResortInfo(bodyResortId, bodySiteId);
     if (!info) {
       return { ok: false, error: "Couldn't load that property's info page. Try again, or pick a different one.", status: 502 };
@@ -99,6 +144,14 @@ export async function buildHookDraft(resortStore, input) {
     }
   }
 
+  // Every mode ends up with a sensible locationLabel — the "selection"
+  // path already set its own (from the tree's computed summary, or a
+  // property/property-count fallback); property and area (free-text
+  // query) modes never had a separate notion of "location" from "label"
+  // to begin with, so the same string does double duty there, same as
+  // before this field existed.
+  if (!locationLabel) locationLabel = label;
+
   const caption = await draftHookCaption({ mode: mode, label: label, sources: sources });
   const hashtags = caption ? await generateHashtags(caption) : null;
 
@@ -133,6 +186,7 @@ export async function buildHookDraft(resortStore, input) {
     ok: true,
     mode: mode,
     label: label,
+    locationLabel: locationLabel,
     caption: caption || "",
     captionGenerated: !!caption,
     hashtags: hashtags,
