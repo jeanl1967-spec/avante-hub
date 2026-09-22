@@ -1,4 +1,5 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
+import { mergeResorts } from "./lib/resort-key.js";
 
 // Minimal CSV field-splitter (handles quoted fields, embedded commas, and
 // "" escaped quotes) — we only need the first column (the resort name), but
@@ -125,13 +126,23 @@ export default async (request, context) => {
         });
       }
 
-      const resorts = parseResortsFromCsv(text);
-      if (!resorts.length) {
+      const freshResorts = parseResortsFromCsv(text);
+      if (!freshResorts.length) {
         return new Response(JSON.stringify({ ok: false, error: "Could not find any resort names in that file." }), {
           status: 400,
           headers: { "content-type": "application/json", ...cors },
         });
       }
+
+      // Merge onto the previous list rather than replacing it outright, so
+      // any property an admin assigned to an affiliate (see admin-api.js's
+      // setResortAffId) keeps that assignment across this re-import — every
+      // other field (name/district/suburb/zoneHint/lat/lng) still comes
+      // fresh from this file, only affId carries forward. See
+      // lib/resort-key.js for the matching rules.
+      const previousRecord = await store.get("current", { type: "json" });
+      const previousResorts = previousRecord && Array.isArray(previousRecord.resorts) ? previousRecord.resorts : [];
+      const resorts = mergeResorts(previousResorts, freshResorts);
 
       const updatedAt = new Date().toISOString();
       await store.setJSON("current", { resorts, updatedAt });
