@@ -1,16 +1,12 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { generateHashtags } from "./lib/hashtag-helper.js";
-import { fetchResortInfo, draftHookCaption } from "./lib/hook-source.js";
-// Aliased — this file already has its own sha256Hex(str) below, used for
-// password hashing (string input, not an image buffer); the shared one
-// from lib/image-hash.js hashes raw bytes, a different job worth keeping
-// separate rather than merging into one function with branching for both.
-import { sha256Hex as sha256HexBytes } from "./lib/image-hash.js";
-import { mergeIntoRecord, AI_SCAN_CACHE_FIELDS_CLEARED } from "./lib/record-merge.js";
 import { isShortLink, resolveShortLink, findExistingShortLink, createShortLink } from "./lib/short-link.js";
 import { correctBookingLinkSiteId, ADMIN_MASTER_SITE_GUID } from "./lib/booking-link.js";
 import { resolveHookMode } from "./lib/hook-mode.js";
 import { ZONES, LEGACY_EXPAND } from "./lib/zones.js";
+import { resortKey } from "./lib/resort-key.js";
+import { buildHookDraft } from "./lib/hook-draft.js";
+import { saveHookPhotoUrls } from "./lib/hook-photos.js";
 import {
   parseStockNetworkCsv,
   normalizeStockNetworkStatus,
@@ -952,177 +948,17 @@ export default async (request, context) => {
       // Builds a hook's caption + hashtags + candidate photos + booking
       // link from just a property or an area — nothing is saved here, this
       // only returns a draft for the admin to review and (optionally) hand
-      // to setDefaultHook below. The existing manual fields/flow are
-      // completely untouched by this action; it's purely an added option
-      // that pre-fills the same fields a manual save already uses.
-      // A single free-text field drives this — the admin never has to say
-      // "this is a property" vs "this is an area" up front. If the client
-      // already resolved an exact resortId (e.g. the admin picked one from
-      // the datalist), that's used directly; otherwise the query is
-      // resolved server-side against the resort list: an exact or partial
-      // property-name match wins first, and only falls back to a
-      // district/area match if nothing named that was found.
-      const bodyResortId = typeof body.resortId === "string" ? body.resortId.trim() : "";
-      const bodySiteId = typeof body.siteId === "string" ? body.siteId.trim() : "";
-      const query = typeof body.query === "string" ? body.query.trim() : "";
-      if (!bodyResortId && !query) {
-        return json({ ok: false, error: "Type or pick a property or area first." }, 400, cors);
-      }
-
-      let mode = "property";
-      let label = query;
-      let sources = [];
-
-      if (bodyResortId) {
-        const info = await fetchResortInfo(bodyResortId, bodySiteId);
-        if (!info) {
-          return json(
-            { ok: false, error: "Couldn't load that property's info page. Try again, or pick a different one." },
-            502,
-            cors
-          );
-        }
-        sources = [info];
-        label = info.name || label;
-      } else {
-        const listRecord = await resortStore.get("current", { type: "json" });
-        const allResorts = listRecord && Array.isArray(listRecord.resorts) ? listRecord.resorts : [];
-        const queryLower = query.toLowerCase();
-
-        let propertyMatch = allResorts.find((r) => r.name && r.name.toLowerCase() === queryLower);
-        // Only fall back to a loose "name contains this text" match if there
-        // isn't an exact area match available. Without this check, typing an
-        // area name like "Knysna" could wrongly match a property whose name
-        // happens to contain that word (e.g. "63 Milkwood Knysna") instead
-        // of correctly building an area-wide draft — confirmed live before
-        // this fix shipped.
-        if (!propertyMatch) {
-          const hasExactDistrictMatch = allResorts.some(
-            (r) => r.district && r.district.toLowerCase() === queryLower
-          );
-          if (!hasExactDistrictMatch) {
-            propertyMatch = allResorts.find((r) => r.name && r.name.toLowerCase().includes(queryLower));
-          }
-        }
-
-        if (propertyMatch) {
-          label = propertyMatch.name;
-          const info = await fetchResortInfo(propertyMatch.resortId, propertyMatch.siteId);
-          if (!info) {
-            return json(
-              { ok: false, error: "Couldn't load that property's info page. Try again, or pick a different one." },
-              502,
-              cors
-            );
-          }
-          sources = [info];
-        } else {
-          mode = "area";
-          let matches = allResorts.filter((r) => r.district && r.district.toLowerCase() === queryLower);
-          if (!matches.length) {
-            matches = allResorts.filter((r) => r.district && r.district.toLowerCase().includes(queryLower));
-          }
-          if (!matches.length) {
-            return json(
-              { ok: false, error: 'Couldn\'t find a property or area matching "' + query + '" in the resort list.' },
-              404,
-              cors
-            );
-          }
-
-          // StockNetwork lists the same physical resort under multiple
-          // SiteIDs — dedupe by ResortID so an area draft draws on distinct
-          // properties, not the same one three times.
-          const seenResortIds = new Set();
-          const distinct = [];
-          for (const r of matches) {
-            if (!r.resortId || seenResortIds.has(r.resortId)) continue;
-            seenResortIds.add(r.resortId);
-            distinct.push(r);
-            if (distinct.length >= 5) break;
-          }
-
-          const fetched = await Promise.all(distinct.map((r) => fetchResortInfo(r.resortId, r.siteId)));
-          sources = fetched.filter(Boolean);
-          if (!sources.length) {
-            return json(
-              { ok: false, error: "Couldn't load property info for that area right now. Try again shortly." },
-              502,
-              cors
-            );
-          }
-        }
-      }
-
-      const caption = await draftHookCaption({ mode: mode, label: label, sources: sources });
-      // Reuses the exact same hashtag generator setDefaultHook already
-      // calls — hashtags stay consistent no matter how the caption got
-      // written.
-      const hashtags = caption ? await generateHashtags(caption) : null;
-
-      // Pool candidate photos across every source, deduped, capped at 12 —
-      // real StockNetwork listing photography, not stock images.
-      const photos = [];
-      outer: for (const s of sources) {
-        for (const url of s.images) {
-          if (!photos.includes(url)) photos.push(url);
-          if (photos.length >= 12) break outer;
-        }
-      }
-
-      // Built off ADMIN_MASTER_SITE_GUID — Jean's own real StockNetwork
-      // site GUID, used as a placeholder — which hook-api.js's
-      // personalizeStockNetworkUrl already swaps for whichever affiliate
-      // is actually viewing the hook. Dates default to one month out for a
-      // one-night stay — a viewer picks their own dates on the landing
-      // page before booking; this is only the fallback if they don't.
-      const today = new Date();
-      const checkIn = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, today.getUTCDate()));
-      const checkOut = new Date(checkIn.getTime() + 86400000);
-      const fmtDate = (d) => d.toISOString().slice(0, 10);
-      const bookingParams = new URLSearchParams({
-        CheckInDT: fmtDate(checkIn),
-        CheckOutDT: fmtDate(checkOut),
-        Filter: label,
+      // to setDefaultHook below. Delegates to lib/hook-draft.js's
+      // buildHookDraft, shared with hook-api.js's identical self-managed
+      // equivalent for affiliates (hub.html) — see that file for the full
+      // design notes this used to carry inline.
+      const draft = await buildHookDraft(resortStore, {
+        resortId: body.resortId,
+        siteId: body.siteId,
+        query: body.query,
+        bookingSiteGuid: ADMIN_MASTER_SITE_GUID,
       });
-      const booking =
-        "https://stock.stocknetwork.co.za/ui/" + encodeURIComponent(ADMIN_MASTER_SITE_GUID) + "?" + bookingParams.toString();
-
-      // Merged real content from every source — carried back to the client
-      // so a later saveHookPhotos call can persist it onto the hook record
-      // without re-scraping. This is what powers the landing page's "full
-      // details" (description/attractions/room type) and the "Built from"
-      // label on the hook card.
-      const description = sources
-        .map((s) => s.description)
-        .filter(Boolean)
-        .join(" ");
-      const attractions = sources
-        .map((s) => s.attractions)
-        .filter(Boolean)
-        .join(" ");
-      const roomType = sources.length === 1 ? sources[0].roomType || "" : "";
-      const sourceNames = sources.map((s) => s.name).filter(Boolean);
-
-      return json(
-        {
-          ok: true,
-          mode: mode,
-          label: label,
-          caption: caption || "",
-          captionGenerated: !!caption,
-          hashtags: hashtags,
-          booking: booking,
-          photos: photos,
-          sourceCount: sources.length,
-          sourceNames: sourceNames,
-          description: description,
-          attractions: attractions,
-          roomType: roomType,
-        },
-        200,
-        cors
-      );
+      return json(draft, draft.ok ? 200 : draft.status || 400, cors);
     }
 
     if (action === "setDefaultHook") {
@@ -1182,13 +1018,11 @@ export default async (request, context) => {
       // Transfers admin-picked candidate photos (real StockNetwork listing
       // URLs returned by generateHookDraft) into our own image store, so a
       // hook's photos keep working even if StockNetwork later reshuffles or
-      // removes that listing. The first picked photo becomes the hook's
-      // normal single "cover" image — the exact same bare aff:hook key
-      // hook-image.js and every existing display path already use, so a
-      // hook saved this way looks no different to old code than one whose
-      // cover photo was uploaded manually. Any additional photos go into
-      // new, purely additive numbered slots that only the gallery-aware UI
-      // reads — nothing about the existing single-image flow changes.
+      // removes that listing. Delegates to lib/hook-photos.js's
+      // saveHookPhotoUrls, shared with hook-api.js's identical self-managed
+      // equivalent for affiliates (hub.html) — see that file for the full
+      // design notes (cover-slot keying, gallery cleanup, AI-cache
+      // invalidation) this used to carry inline.
       const n = Number(body.hook);
       if (!isFinite(n) || n < 1 || n > DEFAULT_HOOK_COUNT) {
         return json({ ok: false, error: "invalid hook number" }, 400, cors);
@@ -1199,133 +1033,46 @@ export default async (request, context) => {
       if (!urls.length) return json({ ok: false, error: "No photos selected." }, 400, cors);
 
       const imageStore = getStore({ name: "promo-hook-images", consistency: "strong" });
-      let saved = 0;
-      let coverBuf = null; // the exact bytes written to the cover slot ("saved === 0" below), for imageHash
-      const failed = [];
-      for (let i = 0; i < urls.length; i++) {
-        const url = urls[i].trim();
-        try {
-          const res = await fetch(url);
-          if (!res.ok) {
-            failed.push(url);
-            continue;
-          }
-          const contentType = res.headers.get("content-type") || "image/jpeg";
-          if (!contentType.startsWith("image/")) {
-            failed.push(url);
-            continue;
-          }
-          const buf = await res.arrayBuffer();
-          if (buf.byteLength > 5 * 1024 * 1024 || buf.byteLength < 1) {
-            failed.push(url);
-            continue;
-          }
-          // Keyed by how many photos have actually saved so far (`saved`),
-          // not by this URL's original position in `urls` (`i`) — a
-          // download failing partway through the batch must not leave a
-          // gap between the keys written here and the contiguous 0..N
-          // range galleryCount below promises hook-image.js's rotation.
-          const isCover = saved === 0;
-          const key = isCover ? "__admin__:" + n : "__admin__:" + n + ":" + saved;
-          await imageStore.set(key, buf, { metadata: { contentType: contentType, sourceUrl: url } });
-          if (isCover) coverBuf = buf;
-          saved++;
-        } catch (e) {
-          failed.push(url);
+      const result = await saveHookPhotoUrls(hookStore, imageStore, "__admin__:" + n, urls, body.source);
+      return json(result, result.ok ? 200 : 502, cors);
+    }
+
+
+    if (action === "setResortAffId") {
+      // Bulk-assigns (or, with affId "", clears) an affiliate on one or
+      // more individual StockNetwork properties from the admin's
+      // location-tree "Properties" checkboxes (Add/Edit Affiliate modal,
+      // admin.html) — the property-level counterpart to updateTown/
+      // updateSuburb in map-api.js. Properties are matched by the same
+      // resortId+siteId key resorts-api.js's CSV merge already preserves
+      // across re-imports (see lib/resort-key.js), so an assignment made
+      // here survives the next StockNetwork upload instead of being wiped
+      // by it.
+      const affId = typeof body.affId === "string" ? body.affId.trim() : "";
+      const keys = Array.isArray(body.resortKeys)
+        ? Array.from(new Set(body.resortKeys.filter((k) => typeof k === "string" && k.trim()).map((k) => k.trim())))
+        : [];
+      if (!keys.length) return json({ ok: false, error: "No properties selected." }, 400, cors);
+
+      const listRecord = await resortStore.get("current", { type: "json" });
+      const resorts = listRecord && Array.isArray(listRecord.resorts) ? listRecord.resorts : [];
+      if (!resorts.length) return json({ ok: false, error: "No resort list loaded yet." }, 400, cors);
+
+      const keySet = new Set(keys);
+      let changed = 0;
+      for (const r of resorts) {
+        const key = resortKey(r);
+        if (key && keySet.has(key)) {
+          r.affId = affId;
+          changed++;
         }
       }
-
-      const galleryCount = Math.max(0, saved - 1);
-
-      // Every candidate photo can fail to download (dead/expired
-      // StockNetwork URLs, a network blip) — saved stays 0 and the
-      // response below already reports that as a failure. Don't touch
-      // the hook's stored record in that case: this hook may already
-      // have a working gallery from an earlier successful save, and
-      // unconditionally overwriting galleryCount to 0 here would silently
-      // wipe that out (orphaning its still-live image blobs) despite the
-      // API telling the caller nothing was saved.
-      if (saved > 0) {
-        // Only ever read to decide *whether* previously-covered gallery
-        // slots need cleaning up below (previousGalleryCount) — never
-        // written back directly. sha256HexBytes below is itself an await,
-        // so holding this record in memory across it and writing it back
-        // wholesale would risk clobbering a concurrent write to this same
-        // record (a caption/booking save via setDefaultHook, or an
-        // overlapping image upload) — the same lost-update hazard already
-        // fixed for hook-image.js and hook-share-content.js. mergeIntoRecord
-        // re-reads fresh immediately before writing instead.
-        const existing = (await hookStore.get("__admin__:" + n, { type: "json" })) || {};
-        const previousGalleryCount = existing.galleryCount || 0;
-
-        const fields = { galleryCount: galleryCount, updatedAt: new Date().toISOString() };
-        // The cover image (the "saved === 0" slot above) was just
-        // (re-)written — recompute its hash, and only drop the AI cache
-        // (hook-share-content.js) if that hash actually changed. Re-
-        // selecting the exact same cover photo (only the other gallery
-        // slots changed) hashes identically, and force-clearing the cache
-        // in that case would just cost an unnecessary billed Claude call
-        // on the next "Get Shareable Content" open for no real change —
-        // the same reasoning hook-image.js's own upload path already
-        // follows by leaving this to the hash comparison instead of
-        // clearing unconditionally.
-        // Known, accepted narrow race, symmetric to the one documented in
-        // hook-image.js's own upload path: this hash describes the cover
-        // *this save* just wrote, but if a manual hook-image.js upload for
-        // the identical hook lands in the moment between here and this
-        // branch's write below, mergeIntoRecord's re-read-before-write
-        // protects every other field, not the correctness of this specific
-        // decision — fields.imageHash could still overwrite that upload's
-        // own (also real, possibly now more current) hash. Not fixed for
-        // the same reason: two different admin actions racing on the
-        // identical hook within the same sub-second window, recoverable by
-        // simply re-uploading or re-running the save that lost the race.
-        if (coverBuf) {
-          const newImageHash = await sha256HexBytes(coverBuf);
-          if (newImageHash !== existing.imageHash) {
-            Object.assign(fields, AI_SCAN_CACHE_FIELDS_CLEARED);
-          }
-          fields.imageHash = newImageHash;
-        }
-        // Optional — carried straight through from generateHookDraft's
-        // response rather than re-scraped here, so a hook remembers what
-        // property/area it was built from (shown on the hook card and on
-        // the new landing page's "full details"). Left untouched if this
-        // save didn't come from an Auto-build draft (e.g. a future manual
-        // photo save with no source context).
-        if (body.source && typeof body.source === "object") {
-          fields.source = {
-            mode: body.source.mode === "area" ? "area" : "property",
-            label: typeof body.source.label === "string" ? body.source.label.trim().slice(0, 200) : "",
-            description: typeof body.source.description === "string" ? body.source.description.trim().slice(0, 2000) : "",
-            attractions: typeof body.source.attractions === "string" ? body.source.attractions.trim().slice(0, 2000) : "",
-            roomType: typeof body.source.roomType === "string" ? body.source.roomType.trim().slice(0, 100) : "",
-            names: Array.isArray(body.source.names)
-              ? body.source.names.filter((x) => typeof x === "string").slice(0, 10)
-              : [],
-          };
-        }
-        await mergeIntoRecord(hookStore, "__admin__:" + n, fields);
-
-        // A previous save may have covered more gallery slots than this
-        // one did (e.g. 4 photos saved before, only 2 saved this time) —
-        // without this, the extra slots' image blobs would sit in
-        // storage forever, orphaned: no longer referenced by galleryCount
-        // above, but never deleted either.
-        if (previousGalleryCount > galleryCount) {
-          const staleSlots = [];
-          for (let slot = galleryCount + 1; slot <= previousGalleryCount; slot++) staleSlots.push(slot);
-          await mapWithConcurrency(staleSlots, (slot) =>
-            imageStore.delete("__admin__:" + n + ":" + slot).catch(() => {})
-          );
-        }
+      if (!changed) {
+        return json({ ok: false, error: "Couldn't find those properties in the current resort list — try re-loading and re-selecting them." }, 404, cors);
       }
 
-      return json(
-        { ok: saved > 0, saved: saved, failed: failed.length, galleryCount: galleryCount },
-        saved > 0 ? 200 : 502,
-        cors
-      );
+      await resortStore.setJSON("current", { resorts: resorts, updatedAt: listRecord.updatedAt || new Date().toISOString() });
+      return json({ ok: true, changed: changed, affId: affId }, 200, cors);
     }
 
     if (action === "fixCollapsedHookLinks") {
