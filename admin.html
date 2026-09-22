@@ -4584,6 +4584,14 @@
             '<div class="shorten-status" id="dh' + i + '-landingShortenStatus"></div>' +
             '<label for="dh' + i + '-caption">Caption</label>' +
             '<textarea id="dh' + i + '-caption" placeholder="Ready-to-paste caption affiliates will get with this ad"></textarea>' +
+            '<label for="dh' + i + '-flyerPromoTag" style="margin-top:16px;">Flyer promo banner</label>' +
+            '<div class="hint" style="margin-top:-2px;">For the flyer template only — a short offer/release banner, e.g. "December Late Release in Keurbooms". Nothing here is invented for you; StockNetwork has no such field, so this stays blank until typed in.</div>' +
+            '<input id="dh' + i + '-flyerPromoTag" placeholder="e.g. December Late Release in Keurbooms">' +
+            '<label for="dh' + i + '-flyerPrice">Flyer price badge (2 lines)</label>' +
+            '<div class="hint" style="margin-top:-2px;">StockNetwork has no static rate field — price is dates-dependent, so this always has to be typed in, never guessed.</div>' +
+            '<textarea id="dh' + i + '-flyerPrice" rows="2" placeholder="R3500 PER DAY&#10;Under R600 p/p"></textarea>' +
+            '<label for="dh' + i + '-flyerDates">Flyer stay dates / availability window</label>' +
+            '<input id="dh' + i + '-flyerDates" placeholder="e.g. 18 December to 1 January – Peak Season Stay (14 Days)">' +
             '<button class="primary" data-hook-save="' + i + '">Save default</button>' +
             '<div class="status" id="dh' + i + '-errorStatus"></div>' +
             '<div class="hook-updated" id="dh' + i + '-updated"></div>' +
@@ -4921,6 +4929,9 @@
         var booking = document.getElementById(p + 'booking').value.trim();
         var landing = document.getElementById(p + 'landing').value.trim();
         var caption = document.getElementById(p + 'caption').value.trim();
+        var flyerPromoTag = document.getElementById(p + 'flyerPromoTag').value.trim();
+        var flyerPrice = document.getElementById(p + 'flyerPrice').value.trim();
+        var flyerDates = document.getElementById(p + 'flyerDates').value.trim();
         var errorEl = document.getElementById(p + 'errorStatus');
         errorEl.className = 'status';
         errorEl.textContent = '';
@@ -4937,7 +4948,7 @@
         }
 
         var loc = readHookLocation(n);
-        adminPost('setDefaultHook', { hook: n, booking: booking, landing: landing, caption: caption, zone: loc.zone, townId: loc.townId, suburbId: loc.suburbId, locationLabel: loc.locationLabel }).then(function(res){
+        adminPost('setDefaultHook', { hook: n, booking: booking, landing: landing, caption: caption, zone: loc.zone, townId: loc.townId, suburbId: loc.suburbId, locationLabel: loc.locationLabel, flyerPromoTag: flyerPromoTag, flyerPrice: flyerPrice, flyerDates: flyerDates }).then(function(res){
           if(res.data && res.data.ok){
             showToast('Default hook ' + n + ' saved');
             document.getElementById(p + 'updated').textContent = fmtDate(res.data.record && res.data.record.updatedAt);
@@ -4960,6 +4971,9 @@
             document.getElementById('dh' + h.hook + '-booking').value = h.booking || '';
             document.getElementById('dh' + h.hook + '-landing').value = h.landing || '';
             document.getElementById('dh' + h.hook + '-caption').value = h.caption || '';
+            document.getElementById('dh' + h.hook + '-flyerPromoTag').value = h.flyerPromoTag || '';
+            document.getElementById('dh' + h.hook + '-flyerPrice').value = h.flyerPrice || '';
+            document.getElementById('dh' + h.hook + '-flyerDates').value = h.flyerDates || '';
             document.getElementById('dh' + h.hook + '-updated').textContent = fmtDate(h.updatedAt);
             defaultHookHashtags[h.hook] = h.hashtags || null;
             applyHookLocation(h.hook, h);
