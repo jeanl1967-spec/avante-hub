@@ -1,18 +1,24 @@
 // Registry of hook flyer templates — Canva designs that a Default Hook or a
 // self-managed affiliate hook can be turned into a finished, branded flyer
-// image from. This file only *registers* what each template's placeholders
-// are and where each one's real-world content has to come from; it does not
-// itself generate a flyer. That generation pipeline (copy the master design
-// in Canva, fill in each placeholder from real data, export an image, and
-// the matching landing-page template) is a separate, later piece of work —
-// this registry is what that pipeline will be built against.
+// image from, WITHOUT calling Canva at all when a flyer is actually
+// generated. Every field below (text position, size, color, font weight,
+// and — for the three photos — exact crop box) was captured once, directly
+// from Jean's real master design in Canva (see masterDesignId), by reading
+// its full structured page content. That's a one-time capture, done here in
+// this registry; lib/hook-flyer-svg.js then draws a fresh flyer from these
+// exact numbers plus a hook's real data — no live Canva call, no Canva API
+// credential needed, at generation time.
 //
 // Per Jean's standing rule (see flyer-template-system.md): nothing on a
 // flyer may ever be invented by Claude. Every field below must be filled
 // from one of three sources only — StockNetwork property data (via
-// buildHookDraft / hook-source.js), Jean's own direct input, or plain web
-// research she's asked for. A field with no real value for a given
-// property must be left blank/omitted, never guessed.
+// buildHookDraft / hook-source.js, saved onto the hook record's `source` by
+// saveHookPhotoUrls), Jean's own direct input (the flyerPromoTag/flyerPrice/
+// flyerDates fields, or the shared contact-info settings), or plain web
+// research she's asked for. lib/hook-flyer.js (the field resolver) leaves a
+// field blank rather than guessing when a hook has nothing real to fill it
+// with — the generation UI shows that as an empty box for a human to fill
+// in, never a placeholder value standing in for real content.
 //
 // -----------------------------------------------------------------------
 // Template: property-flyer-v1
@@ -23,18 +29,20 @@
 // category of Default Hooks and self-managed property hooks. The paired
 // landing-page template for this hook is intentionally not built yet.
 //
-// masterDesignId is the one to `copy-design` from every time a flyer is
-// generated — never edit it directly (Jean's own instruction, baked into
-// the design's title in Canva). Each generation run gets its own copy with
-// its own fresh locator_ids, so this registry deliberately does NOT store
-// locator_ids (they don't survive a copy). Instead each field's `matchText`
-// (for text) or `matchAltText` (for images) is what the generation code
-// should use to find the right element on that fresh copy — search
-// design_content for the element whose current text/alt-text equals the
-// placeholder value captured here, then edit that element's own
-// locator_id. Falling back to `geometry` (approximate top/left/width/height
-// in the template's 1080x1350 canvas) is the tie-breaker if a placeholder's
-// text has visibly already been changed by hand in Canva before a copy.
+// masterDesignId is kept here purely as a record of where this layout came
+// from — it is NOT read from again at generation time. canvasSize is the
+// exact page size (px) every geometry number below is relative to;
+// hook-flyer-svg.js draws its SVG viewBox at this same size so nothing
+// needs rescaling.
+//
+// Each text field's `geometry` (top/left/width/height, in canvasSize px)
+// and `style` (fontSize/fontWeight/color/textAlign/decoration, plus which
+// of the two brand fonts already loaded in admin.html/hub.html —
+// Montserrat or Noto Sans — it uses) are the exact values captured from the
+// master design's own text elements. `font: "heading"` = Montserrat (the
+// bold display font used for headlines/stats/price on the master);
+// `font: "body"` = Noto Sans (used for paragraph copy, the perks list, and
+// contact details on the master).
 export const HOOK_TEMPLATES = {
   "property-flyer-v1": {
     category: "property",
@@ -49,20 +57,26 @@ export const HOOK_TEMPLATES = {
         role: "Small banner strip across the top — a short promo/offer tag, e.g. a release window or sale name.",
         matchText: "December Late Release in Keurbooms",
         source: "jean", // Jean names the promo/offer; not something StockNetwork provides.
+        geometry: { top: 8.43, left: 120.74, width: 400, height: 64.93 },
+        style: { fontSize: 25.33, fontWeight: "bold", color: "#ffffff", textAlign: "center", decoration: "underline", font: "heading" },
       },
       {
         key: "headlineLine1",
         type: "text",
         role: "Headline, line 1 — short punchy lead-in (e.g. property type).",
         matchText: "Holiday House",
-        source: "stocknetwork+jean",
+        source: "jean", // no reliable "property type" field scraped from StockNetwork — typed in, same as promo/price/dates.
+        geometry: { top: 65.3, left: 225.4, width: 429.71, height: 85.4 },
+        style: { fontSize: 71.33, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" },
       },
       {
         key: "headlineLine2",
         type: "text",
         role: "Headline, line 2 — usually the destination/area, e.g. \"In <Town>!\"",
         matchText: "In Plett!",
-        source: "stocknetwork+jean",
+        source: "stocknetwork+jean", // built from the hook's own Location picker (locationLabel) — real data Jean selected, not invented.
+        geometry: { top: 149.36, left: 312, width: 564.16, height: 73.75 },
+        style: { fontSize: 62, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" },
       },
       {
         key: "priceBadge",
@@ -70,13 +84,17 @@ export const HOOK_TEMPLATES = {
         role: "Price badge — two lines: the headline rate, then a per-person/qualifier line.",
         matchText: "R3500 PER DAY\nUnder R600 p/p",
         source: "jean", // confirmed in automated-flyer-form-spec.md: StockNetwork's ResortInfo page carries no static rate — price is dates-dependent and lives in the booking/rate engine, not a resort field. Never invented; always typed in.
+        geometry: { top: 203.79, left: 110.01, width: 158.69, height: 150.4 },
+        style: { fontSize: 28, fontWeight: "bold", color: "#ffde59", textAlign: "center", font: "heading" },
       },
       {
         key: "keyStat",
         type: "text",
         role: "Big single stat under the headline — usually sleeps/occupancy count.",
         matchText: "6 Sleeper",
-        source: "stocknetwork",
+        source: "stocknetwork", // from the scraped Room Type field.
+        geometry: { top: 475.4, left: 82.38, width: 414.86, height: 73.6 },
+        style: { fontSize: 62, fontWeight: "normal", color: "#0e2f44", textAlign: "start", font: "heading" },
       },
       {
         key: "propertyNameArea",
@@ -84,6 +102,8 @@ export const HOOK_TEMPLATES = {
         role: "Property name and area, e.g. \"<Resort Name> • <Suburb/Town>\".",
         matchText: "The Dunes Resort & Hotel • Keurboomstrand",
         source: "stocknetwork",
+        geometry: { top: 433, left: 82, width: 480, height: 18.8 },
+        style: { fontSize: 16, fontWeight: "normal", color: "#0e2f44", textAlign: "start", font: "body" },
       },
       {
         key: "dateRange",
@@ -91,6 +111,8 @@ export const HOOK_TEMPLATES = {
         role: "Availability/stay window for the promo, e.g. peak-season dates and length of stay.",
         matchText: "18 December to 1 January – Peak Season Stay (14 Days)",
         source: "jean",
+        geometry: { top: 567, left: 82, width: 460, height: 18.8 },
+        style: { fontSize: 16, fontWeight: "normal", color: "#0e2f44", textAlign: "start", font: "body" },
       },
       {
         key: "description",
@@ -98,7 +120,9 @@ export const HOOK_TEMPLATES = {
         role: "Main body paragraph — room configuration, key amenities, walking distance to notable features.",
         matchText:
           "2 Spacious Bedrooms | 2 Modern Bathrooms. Fully Equipped Self-Catering Kitchen & Open-Plan Living (4 adults 2 kids under 12). Enclosed Private Garden & Shaded Patio with Built-In Braai. 3-min Walk to Private Beach, Wooden Decks & Ocean-side Picnic Spots.",
-        source: "stocknetwork", // drafted the same way draftHookCaption already works from scraped resort info.
+        source: "stocknetwork", // the property's own scraped "About" text, used as-is — never rewritten or embellished.
+        geometry: { top: 594.61, left: 87.72, width: 530.72, height: 322.13 },
+        style: { fontSize: 22, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "body" }, // fontSize trimmed from the master's 29.3 — real scraped paragraphs run longer than the placeholder text, see hook-flyer-svg.js's wrap/shrink-to-fit.
       },
       {
         key: "sectionHeading",
@@ -106,6 +130,8 @@ export const HOOK_TEMPLATES = {
         role: "Heading over the amenities list, e.g. \"<Resort> Perks Included\".",
         matchText: "Resort Perks Included",
         source: "stocknetwork+jean",
+        geometry: { top: 941.79, left: 82.38, width: 480, height: 32.72 },
+        style: { fontSize: 28, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "body" },
       },
       {
         key: "amenity1",
@@ -113,6 +139,8 @@ export const HOOK_TEMPLATES = {
         role: "Amenity bullet 1.",
         matchText: "2 Sparkling Pools and Beach Access ",
         source: "stocknetwork",
+        geometry: { top: 1008.72, left: 144.26, width: 352.98, height: 57.47 },
+        style: { fontSize: 22.67, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "body" },
       },
       {
         key: "amenity2",
@@ -120,6 +148,8 @@ export const HOOK_TEMPLATES = {
         role: "Amenity bullet 2.",
         matchText: "24/7 Gated Security, Private Parking",
         source: "stocknetwork",
+        geometry: { top: 1062.07, left: 144.26, width: 352.98, height: 57.47 },
+        style: { fontSize: 22.67, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "body" },
       },
       {
         key: "amenity3",
@@ -127,6 +157,8 @@ export const HOOK_TEMPLATES = {
         role: "Amenity bullet 3.",
         matchText: "High-Speed Wi-Fi, Cafe & Laundromat",
         source: "stocknetwork",
+        geometry: { top: 1115.42, left: 144.26, width: 352.98, height: 57.47 },
+        style: { fontSize: 22.67, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "body" },
       },
       {
         key: "contactLabel",
@@ -134,53 +166,103 @@ export const HOOK_TEMPLATES = {
         role: "Small label above the contact phone number, e.g. \"Contact us\".",
         matchText: "Contact us",
         source: "fixed", // brand copy, same on every flyer — not per-property.
+        geometry: { top: 1217.16, left: 191.61, width: 144.86, height: 27.39 },
+        style: { fontSize: 23, fontWeight: "normal", color: "#ffffff", textAlign: "start", font: "body" },
       },
       {
         key: "contactPhone",
         type: "text",
         role: "Contact phone number.",
         matchText: "071 605 0055",
-        source: "jean",
+        source: "jean-settings", // shared "Flyer contact info" setting (admin-managed), same on every flyer — not typed per-hook.
+        geometry: { top: 1244.55, left: 191.61, width: 260.74, height: 37.73 },
+        style: { fontSize: 28, fontWeight: "bold", color: "#ffffff", textAlign: "start", font: "body" },
       },
       {
         key: "contactEmail",
         type: "text",
         role: "Contact email address.",
         matchText: "marketing@avantehospitality.co.za",
-        source: "jean",
+        source: "jean-settings",
+        geometry: { top: 1290, left: 191, width: 290, height: 18.8 },
+        style: { fontSize: 14, fontWeight: "normal", color: "#ffffff", textAlign: "start", font: "body" },
       },
     ],
-    // Image fields. altText survives on the master design (Canva keeps it on
-    // the element, not tied to the specific media file), so it's the
-    // primary match key; geometry is the fallback if altText was cleared.
+    // Image fields — geometry is each photo's real box on the flyer
+    // (rect for heroImage, a circle inscribed in the box for the two
+    // insets). A generated flyer fills each box with one of the hook's own
+    // saved photos using a "cover" crop (fills the box, centered, no
+    // stretching) — never a stand-in stock image — and simply leaves the
+    // box empty if the hook doesn't have that many photos saved yet, rather
+    // than reusing or duplicating one.
     images: [
       {
         key: "heroImage",
         role: "Large hero photo filling the right-hand panel of the flyer.",
-        matchAltText: null, // no alt text set on the master's hero element — match by geometry.
+        shape: "rect",
         geometry: { top: 476.61, left: 623.92, width: 456.08, height: 869.39 },
-        source: "stocknetwork", // pulled from the property's photo gallery, same pool buildHookDraft already builds.
       },
       {
         key: "featureImage",
         role: "Upper circular inset photo — a wide/establishing shot (e.g. beach, coastline, grounds).",
-        matchAltText: "Aerial view of Keurboomstrand beach and coastline",
+        shape: "circle",
         geometry: { top: -80.98, left: 574.46, width: 678.27, height: 678.27 },
-        source: "stocknetwork",
       },
       {
         key: "lifestyleImage",
         role: "Lower circular inset photo — an interior/amenity close-up (e.g. kitchen, living area).",
-        matchAltText: "Open-plan kitchen and living area",
-        geometry: { top: 450.42, left: 633.32, width: 397.86, height: 397.86 },
-        source: "stocknetwork",
+        // Corrected this round: the master's actual photo element for this
+        // slot is the smaller inset circle (see chrome's lifestyleBacking
+        // for the larger teal circle sitting behind it) — a prior capture
+        // of this registry pointed at that backing circle's geometry
+        // instead of the photo itself.
+        shape: "circle",
+        geometry: { top: 476.61, left: 659.52, width: 345.47, height: 345.47 },
       },
     ],
+    // Brand chrome — decorative shapes, icons, and the logo — drawn on
+    // every flyer exactly as captured, never touched per-property.
+    // `pathShape` entries carry the Canva shape's own path `d` plus the
+    // viewBox it's defined in, so hook-flyer-svg.js can place it exactly
+    // (translate+scale from that viewBox onto `geometry`) without needing
+    // any special-casing per shape.
+    chrome: {
+      // Two overlapping full-bleed circles behind the hero photo panel.
+      backdropCircles: [
+        { geometry: { top: -109.68, left: 540, width: 763.25, height: 763.25 }, color: "#0e2f44" },
+        { geometry: { top: -109.68, left: 574.46, width: 763.25, height: 763.25 }, color: "#0dcdc2" },
+      ],
+      // The teal circle sitting behind/around the lifestyle inset photo.
+      lifestyleBacking: { geometry: { top: 450.42, left: 633.32, width: 397.86, height: 397.86 }, color: "#0dcdc2" },
+      // Promo-tag pill background (top banner).
+      promoTagBanner: { geometry: { top: 6.3, left: 82, width: 480, height: 71.51 }, color: "#0dcdc2", rx: 20 },
+      // Rounded diamond/badge sitting behind the price badge text.
+      priceBadge: {
+        geometry: { top: 174.72, left: 87.72, width: 209.28, height: 209.28 },
+        color: "#0e2f44",
+        pathShape: { viewBox: { width: 64, height: 64 }, d: "M57.7466 0H6.25339C6.25339 3.44086 3.47078 6.25339 0 6.25339V57.7466C3.44086 57.7466 6.25339 60.5292 6.25339 64H57.7466C57.7466 60.5591 60.5292 57.7466 64 57.7466V6.25339C60.5591 6.25339 57.7466 3.47078 57.7466 0Z" },
+      },
+      // The three amenity check-mark icons — same fixed glyph, recolored,
+      // one per amenity row.
+      amenityIcons: [
+        { geometry: { top: 1007.68, left: 82.38, width: 36.62, height: 36.62 } },
+        { geometry: { top: 1061.03, left: 82.38, width: 36.62, height: 36.62 } },
+        { geometry: { top: 1114.39, left: 82.38, width: 36.62, height: 36.62 } },
+      ],
+      amenityIconColor: "#6bb2e3",
+      // Contact block background (navy rounded panel, bottom-left) and its
+      // phone icon.
+      contactBlock: { geometry: { top: 1196.01, left: 82.38, width: 414.86, height: 150 }, color: "#0e2f44", rx: 24 },
+      contactPhoneIcon: { geometry: { top: 1217.16, left: 108.94, width: 65.12, height: 65.12 }, color: "#ffffff" },
+      // The Avante Travel logo (top-left). No raster copy of the real logo
+      // graphic is bundled here (Canva's own asset CDN isn't reachable at
+      // generation time) — rendered as a typeset wordmark in the exact same
+      // box/brand colors instead. Swap in a real logo file whenever Jean
+      // can supply one; see flyer-generation-button-scope.md.
+      logo: { geometry: { top: 65.3, left: 35.95, width: 128.1, height: 84.06 }, textFallback: { line1: "AVANTE", line2: "TRAVEL", color: "#0dcdc2" } },
+    },
     // Elements on the master that are brand chrome, not per-flyer content —
-    // the generation pipeline must leave these untouched:
-    //  - the Avante Travel logo (top-left)
-    //  - the three amenity check-mark icons and the phone icon
-    //  - all decorative background shapes (circles, banner pills)
+    // rendered from the `chrome` block above, untouched per-property.
     notEditable: ["brand logo", "amenity check icons", "phone icon", "decorative shapes"],
   },
 };
