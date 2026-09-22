@@ -360,6 +360,12 @@ export default async (request, context) => {
             townId: (rec && rec.townId) || "",
             suburbId: (rec && rec.suburbId) || "",
             locationLabel: (rec && rec.locationLabel) || "",
+            // Flyer-template-only fields (see lib/hook-templates.js) —
+            // price and the promo banner/date range, both typed in here
+            // since StockNetwork carries neither as static data.
+            flyerPromoTag: (rec && rec.flyerPromoTag) || "",
+            flyerPrice: (rec && rec.flyerPrice) || "",
+            flyerDates: (rec && rec.flyerDates) || "",
             updatedAt: (rec && rec.updatedAt) || null,
           });
         }
@@ -985,6 +991,16 @@ export default async (request, context) => {
       const townId = typeof body.townId === "string" ? body.townId.trim() : "";
       const suburbId = typeof body.suburbId === "string" ? body.suburbId.trim() : "";
       const locationLabel = typeof body.locationLabel === "string" ? body.locationLabel.trim() : "";
+      // Flyer-template-only fields (see lib/hook-templates.js) that
+      // StockNetwork has no source for at all — price is dates-dependent
+      // (no static rate field on the resort record) and the promo
+      // banner/date-range are campaign-specific, so both always have to be
+      // typed in here rather than pulled from Auto-build. Optional: an
+      // empty value just leaves that box unfilled on the flyer, same
+      // "blank = untouched, nothing invented" rule as everywhere else.
+      const flyerPromoTag = typeof body.flyerPromoTag === "string" ? body.flyerPromoTag.trim().slice(0, 200) : "";
+      const flyerPrice = typeof body.flyerPrice === "string" ? body.flyerPrice.trim().slice(0, 200) : "";
+      const flyerDates = typeof body.flyerDates === "string" ? body.flyerDates.trim().slice(0, 200) : "";
       // Regenerate platform hashtags whenever the default hook is saved.
       // Best-effort: a failed/unavailable AI call just clears the cached
       // set rather than blocking the save.
@@ -1008,6 +1024,9 @@ export default async (request, context) => {
         townId: townId,
         suburbId: suburbId,
         locationLabel: locationLabel,
+        flyerPromoTag: flyerPromoTag,
+        flyerPrice: flyerPrice,
+        flyerDates: flyerDates,
         updatedAt: new Date().toISOString(),
       };
       await hookStore.setJSON("__admin__:" + n, record);
