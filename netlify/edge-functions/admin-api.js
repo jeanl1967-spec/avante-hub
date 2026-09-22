@@ -11,6 +11,7 @@ import { defaultTemplateForCategory } from "./lib/hook-templates.js";
 import { resolveFlyerFields, defaultPhotoSlotOrder } from "./lib/hook-flyer.js";
 import { renderFlyerSVG } from "./lib/hook-flyer-svg.js";
 import { fetchFlyerImages } from "./lib/hook-flyer-images.js";
+import { listThemes, rememberTheme } from "./lib/event-themes.js";
 import {
   parseStockNetworkCsv,
   normalizeStockNetworkStatus,
@@ -299,6 +300,10 @@ export default async (request, context) => {
   // one setting, not typed per-hook, since it's Jean's own contact info,
   // not per-property data. See getFlyerSettings/setFlyerSettings below.
   const flyerSettingsStore = getStore({ name: "flyer-settings", consistency: "strong" });
+  // Every distinct Theme value ever typed into an Event hook (see
+  // lib/event-themes.js) — grows on its own, powers the Theme dropdown on
+  // the Event hook form.
+  const eventThemeStore = getStore({ name: "event-themes", consistency: "strong" });
   const DEFAULT_HOOK_COUNT = 6;
 
   async function verifyToken(token) {
@@ -358,16 +363,15 @@ export default async (request, context) => {
             hashtags: (rec && rec.hashtags) || null,
             galleryCount: (rec && rec.galleryCount) || 0,
             source: (rec && rec.source) || null,
-            // Which area/town/suburb the property in this hook is in —
-            // set via setDefaultHook below from the admin's location-tree
-            // picker in the Default Hooks UI. zone/townId/suburbId are the
-            // ids to match against the location tree; locationLabel is a
-            // snapshot of the picked option's display text at save time,
-            // shown as a fallback if that zone/town/suburb is later
-            // renamed or deleted.
-            zone: (rec && rec.zone) || "",
-            townId: (rec && rec.townId) || "",
-            suburbId: (rec && rec.suburbId) || "",
+            // A human-readable description of where this hook's property
+            // (or campaign selection) is — computed from the Browse-by-
+            // location tree's ticked properties/suburbs/towns whenever
+            // Auto-build runs (see lib/hook-draft.js's locationLabel), and
+            // just carried forward on every other save. There's no
+            // separate "pick a location" field any more — the tree is the
+            // only source of location for a hook. zone/townId/suburbId
+            // may still linger on older records from before this changed;
+            // they're no longer read or written by anything.
             locationLabel: (rec && rec.locationLabel) || "",
             // Flyer-template-only fields (see lib/hook-templates.js) —
             // price and the promo banner/date range, both typed in here
@@ -375,6 +379,22 @@ export default async (request, context) => {
             flyerPromoTag: (rec && rec.flyerPromoTag) || "",
             flyerPrice: (rec && rec.flyerPrice) || "",
             flyerDates: (rec && rec.flyerDates) || "",
+            // Which flyer template this hook slot uses, and (when it's an
+            // Event hook) the event-only fields — see lib/hook-templates.js's
+            // event-flyer-v1 and setDefaultHook above.
+            category: (rec && rec.category) || "property",
+            eventNameLine1: (rec && rec.eventNameLine1) || "",
+            eventNameLine2: (rec && rec.eventNameLine2) || "",
+            eventSubtitle: (rec && rec.eventSubtitle) || "",
+            eventSectionHeading: (rec && rec.eventSectionHeading) || "",
+            eventHighlight1: (rec && rec.eventHighlight1) || "",
+            eventHighlight2: (rec && rec.eventHighlight2) || "",
+            eventHighlight3: (rec && rec.eventHighlight3) || "",
+            eventHighlight4: (rec && rec.eventHighlight4) || "",
+            eventDate: (rec && rec.eventDate) || "",
+            eventLocationName: (rec && rec.eventLocationName) || "",
+            eventLocationDetail: (rec && rec.eventLocationDetail) || "",
+            eventTheme: (rec && rec.eventTheme) || "",
             updatedAt: (rec && rec.updatedAt) || null,
           });
         }
@@ -976,6 +996,14 @@ export default async (request, context) => {
         resortId: body.resortId,
         siteId: body.siteId,
         query: body.query,
+        // resortKeys/label: the multi-select "Browse properties by
+        // location" tree's explicit picks (one or more properties and/or
+        // whole suburbs/towns/areas, already flattened to exact
+        // resortId|siteId keys client-side) — see lib/hook-draft.js for
+        // why this needs no server-side name-guessing the way the
+        // free-text `query` area mode above still does.
+        resortKeys: body.resortKeys,
+        label: body.label,
         bookingSiteGuid: ADMIN_MASTER_SITE_GUID,
       });
       return json(draft, draft.ok ? 200 : draft.status || 400, cors);
@@ -995,16 +1023,6 @@ export default async (request, context) => {
       const landingRaw = typeof body.landing === "string" ? body.landing.trim() : "";
       const landing = landingRaw && landingRaw === booking && isShortLink(booking) ? "" : landingRaw;
       const caption = typeof body.caption === "string" ? body.caption.trim() : "";
-      // Which area/town/suburb the property in this hook is in, from the
-      // admin's location-tree picker — all optional, and mutually
-      // exclusive in practice (the UI only ever sends one of zone alone,
-      // townId alone, or townId+suburbId together), but stored plainly
-      // rather than enforced here so a hand-crafted request can't corrupt
-      // anything worse than showing an odd combination back in the form.
-      const zone = typeof body.zone === "string" ? body.zone.trim() : "";
-      const townId = typeof body.townId === "string" ? body.townId.trim() : "";
-      const suburbId = typeof body.suburbId === "string" ? body.suburbId.trim() : "";
-      const locationLabel = typeof body.locationLabel === "string" ? body.locationLabel.trim() : "";
       // Flyer-template-only fields (see lib/hook-templates.js) that
       // StockNetwork has no source for at all — price is dates-dependent
       // (no static rate field on the resort record) and the promo
@@ -1026,25 +1044,72 @@ export default async (request, context) => {
       // scan cache set by hook-image.js's upload and
       // hook-share-content.js's scan) — by spreading the existing record
       // first, rather than rebuilding it field-by-field and silently
-      // dropping whatever this form doesn't know about.
+      // dropping whatever this form doesn't know about. locationLabel
+      // works the same way but explicitly: it's no longer a separate
+      // field the admin picks by hand (the old "Property location"
+      // dropdown, removed — the Browse-by-location tree already covers
+      // this), so this form only ever sends a fresh one right after
+      // Auto-build computes it from the tree selection; any other save
+      // (a plain caption/link edit) omits it entirely and this keeps
+      // whatever was last set, instead of quietly blanking it.
       const existingForSave = await hookStore.get("__admin__:" + n, { type: "json" });
+      const locationLabel = typeof body.locationLabel === "string"
+        ? body.locationLabel.trim().slice(0, 200)
+        : (existingForSave && typeof existingForSave.locationLabel === "string" ? existingForSave.locationLabel : "");
+      // Which flyer template this hook slot uses — "property" (the
+      // original, default) or "event" (see lib/hook-templates.js's
+      // event-flyer-v1). Only ever changed by an explicit pick on the form;
+      // a plain caption/link edit that doesn't send `category` keeps
+      // whatever this slot was already set to.
+      const category = (body.category === "property" || body.category === "event")
+        ? body.category
+        : (existingForSave && existingForSave.category) || "property";
       const record = {
         ...(existingForSave || {}),
         booking: booking,
         landing: landing,
         caption: caption,
         hashtags: hashtags,
-        zone: zone,
-        townId: townId,
-        suburbId: suburbId,
         locationLabel: locationLabel,
         flyerPromoTag: flyerPromoTag,
         flyerPrice: flyerPrice,
         flyerDates: flyerDates,
+        category: category,
         updatedAt: new Date().toISOString(),
       };
+      // Event-only fields (see lib/hook-templates.js's event-flyer-v1) —
+      // every one typed in directly, same optional/blank-if-unknown rule as
+      // the property-only fields above. Saved regardless of `category` so
+      // switching a slot back and forth doesn't lose what was typed.
+      const EVENT_TEXT_FIELDS = [
+        "eventNameLine1", "eventNameLine2", "eventSubtitle", "eventSectionHeading",
+        "eventHighlight1", "eventHighlight2", "eventHighlight3", "eventHighlight4",
+        "eventDate", "eventLocationName", "eventLocationDetail",
+      ];
+      for (const key of EVENT_TEXT_FIELDS) {
+        if (typeof body[key] === "string") record[key] = body[key].trim().slice(0, 400);
+      }
+      // Theme — a short tag describing what kind of event this is (whale
+      // watching, cycling, music, ...). Not itself a field on the flyer
+      // (the captured master design has no slot for it) — it's metadata
+      // used to grow the shared Theme dropdown (see lib/event-themes.js)
+      // and, later, to pick a theme photo. Every new value typed here gets
+      // remembered so it shows up as a pick on every future Event hook.
+      if (typeof body.eventTheme === "string") {
+        record.eventTheme = body.eventTheme.trim().slice(0, 80);
+        if (record.eventTheme) await rememberTheme(eventThemeStore, record.eventTheme);
+      }
       await hookStore.setJSON("__admin__:" + n, record);
       return json({ ok: true, hook: n, record: record }, 200, cors);
+    }
+
+    if (action === "listEventThemes") {
+      // Every distinct Theme value typed into an Event hook so far,
+      // alphabetically — powers the Theme field's dropdown on the Event
+      // hook form (admin.html). Empty list until someone's typed a first
+      // theme; nothing pre-seeded.
+      const themes = await listThemes(eventThemeStore);
+      return json({ ok: true, themes: themes }, 200, cors);
     }
 
     if (action === "saveHookPhotos") {
@@ -1089,12 +1154,16 @@ export default async (request, context) => {
       if (!isFinite(n) || n < 1 || n > DEFAULT_HOOK_COUNT) {
         return json({ ok: false, error: "invalid hook number" }, 400, cors);
       }
-      const template = defaultTemplateForCategory("property");
-      if (!template) return json({ ok: false, error: "No flyer template registered yet." }, 400, cors);
-
       const key = "__admin__:" + n;
       const record = await hookStore.get(key, { type: "json" });
       if (!record) return json({ ok: false, error: "This hook has no saved content yet — build or save it first." }, 400, cors);
+
+      // Which template this hook slot uses — its own saved `category`
+      // (see setDefaultHook above), defaulting to "property" for every
+      // hook saved before Event hooks existed.
+      const template = defaultTemplateForCategory(record.category || "property");
+      if (!template) return json({ ok: false, error: "No flyer template registered yet." }, 400, cors);
+      const templateId = record.category === "event" ? "event-flyer-v1" : "property-flyer-v1";
 
       const contactSettings = (await flyerSettingsStore.get("config", { type: "json" })) || {};
       const overrides = body.fields && typeof body.fields === "object" ? body.fields : null;
@@ -1104,7 +1173,7 @@ export default async (request, context) => {
       const images = await fetchFlyerImages(imageStore, key, record.galleryCount || 0, slotKeys);
 
       const svg = renderFlyerSVG(template, values, images);
-      return json({ ok: true, templateId: "property-flyer-v1", fields: template.fields.map((f) => ({ key: f.key, role: f.role })), values: values, missing: missing, svg: svg }, 200, cors);
+      return json({ ok: true, templateId: templateId, fields: template.fields.map((f) => ({ key: f.key, role: f.role })), values: values, missing: missing, svg: svg }, 200, cors);
     }
 
     if (action === "setResortAffId") {

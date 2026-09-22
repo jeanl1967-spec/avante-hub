@@ -9,6 +9,7 @@ import { defaultTemplateForCategory } from "./lib/hook-templates.js";
 import { resolveFlyerFields, defaultPhotoSlotOrder } from "./lib/hook-flyer.js";
 import { renderFlyerSVG } from "./lib/hook-flyer-svg.js";
 import { fetchFlyerImages } from "./lib/hook-flyer-images.js";
+import { rememberTheme } from "./lib/event-themes.js";
 
 // Special affiliate key reserved for admin-managed default hook content.
 // Chosen so it can never collide with a real affiliate ID (StockNetwork
@@ -114,6 +115,11 @@ export default async (request, context) => {
           resortId: body.resortId,
           siteId: body.siteId,
           query: body.query,
+          // The multi-select Browse-by-location tree's explicit picks —
+          // see admin-api.js's identical forwarding and lib/hook-draft.js
+          // for what these do.
+          resortKeys: body.resortKeys,
+          label: body.label,
           bookingSiteGuid: aff,
         });
         return new Response(JSON.stringify(draft), {
@@ -153,13 +159,6 @@ export default async (request, context) => {
       // needs to have Auto-built it first, same as admin does for Default
       // Hooks).
       if (body.action === "renderFlyer") {
-        const template = defaultTemplateForCategory("property");
-        if (!template) {
-          return new Response(JSON.stringify({ ok: false, error: "No flyer template registered yet." }), {
-            status: 400,
-            headers: { "content-type": "application/json", ...cors },
-          });
-        }
         const record = await store.get(key, { type: "json" });
         if (!record) {
           return new Response(JSON.stringify({ ok: false, error: "This hook has no saved content yet — build or save it first." }), {
@@ -167,6 +166,17 @@ export default async (request, context) => {
             headers: { "content-type": "application/json", ...cors },
           });
         }
+        // Which template this hook uses — its own saved `category` (see
+        // the plain save path below), defaulting to "property" for every
+        // hook saved before Event hooks existed.
+        const template = defaultTemplateForCategory(record.category || "property");
+        if (!template) {
+          return new Response(JSON.stringify({ ok: false, error: "No flyer template registered yet." }), {
+            status: 400,
+            headers: { "content-type": "application/json", ...cors },
+          });
+        }
+        const templateId = record.category === "event" ? "event-flyer-v1" : "property-flyer-v1";
         const settingsStore = getStore({ name: "flyer-settings", consistency: "strong" });
         const contactSettings = (await settingsStore.get("config", { type: "json" })) || {};
         const overrides = body.fields && typeof body.fields === "object" ? body.fields : null;
@@ -178,7 +188,7 @@ export default async (request, context) => {
 
         const svg = renderFlyerSVG(template, values, images);
         return new Response(
-          JSON.stringify({ ok: true, templateId: "property-flyer-v1", fields: template.fields.map((f) => ({ key: f.key, role: f.role })), values: values, missing: missing, svg: svg }),
+          JSON.stringify({ ok: true, templateId: templateId, fields: template.fields.map((f) => ({ key: f.key, role: f.role })), values: values, missing: missing, svg: svg }),
           { headers: { "content-type": "application/json", ...cors } }
         );
       }
@@ -233,16 +243,15 @@ export default async (request, context) => {
         if (newHashtags) record.hashtags = newHashtags;
         else delete record.hashtags;
       }
-      // Which area/town/suburb the property in this hook is in — same
-      // field shape admin-api.js's setDefaultHook persists for the admin's
-      // own default hooks, accepted here too so an affiliate's own
-      // self-managed hook (hub.html's "Property location" picker) can tag
-      // one. Only one of zone/townId/(townId+suburbId) is ever sent by
-      // that UI, but nothing here enforces that — it just stores whatever
-      // arrives, same as booking/landing/caption above.
-      if (typeof body.zone === "string") record.zone = body.zone;
-      if (typeof body.townId === "string") record.townId = body.townId;
-      if (typeof body.suburbId === "string") record.suburbId = body.suburbId;
+      // Where this hook's property (or campaign selection) is — a plain
+      // human-readable string now, computed client-side from the
+      // Browse-by-location tree's ticked properties/suburbs/towns
+      // whenever Auto-build runs (see lib/hook-draft.js's locationLabel).
+      // There's no separate "pick a location" field any more (the old
+      // dropdown is gone — the tree is the only source of location), so
+      // this is only ever sent right after a fresh Auto-build draft; any
+      // other save just keeps whatever was last set. zone/townId/suburbId
+      // may still linger on older records; nothing reads them any more.
       if (typeof body.locationLabel === "string") record.locationLabel = body.locationLabel;
       // Flyer-template-only fields (see lib/hook-templates.js) — price and
       // the promo banner/date range. StockNetwork has no static rate field
@@ -253,6 +262,27 @@ export default async (request, context) => {
       if (typeof body.flyerPromoTag === "string") record.flyerPromoTag = body.flyerPromoTag.trim().slice(0, 200);
       if (typeof body.flyerPrice === "string") record.flyerPrice = body.flyerPrice.trim().slice(0, 200);
       if (typeof body.flyerDates === "string") record.flyerDates = body.flyerDates.trim().slice(0, 200);
+      // Which flyer template this hook uses — see admin-api.js's
+      // setDefaultHook for the same handling. Not currently exposed in
+      // hub.html's self-managed hook UI (Event hooks are admin-curated
+      // content for now), but accepted here too so a self-managed record
+      // never breaks if that changes.
+      if (body.category === "property" || body.category === "event") record.category = body.category;
+      const EVENT_TEXT_FIELDS = [
+        "eventNameLine1", "eventNameLine2", "eventSubtitle", "eventSectionHeading",
+        "eventHighlight1", "eventHighlight2", "eventHighlight3", "eventHighlight4",
+        "eventDate", "eventLocationName", "eventLocationDetail",
+      ];
+      for (const fkey of EVENT_TEXT_FIELDS) {
+        if (typeof body[fkey] === "string") record[fkey] = body[fkey].trim().slice(0, 400);
+      }
+      if (typeof body.eventTheme === "string") {
+        record.eventTheme = body.eventTheme.trim().slice(0, 80);
+        if (record.eventTheme) {
+          const eventThemeStore = getStore({ name: "event-themes", consistency: "strong" });
+          await rememberTheme(eventThemeStore, record.eventTheme);
+        }
+      }
       if (body.mode === "self" || body.mode === "admin") record.mode = body.mode;
       if (!record.mode) record.mode = "admin";
       record.savedAt = new Date().toISOString();
