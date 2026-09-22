@@ -12,6 +12,13 @@ import { resolveFlyerFields, defaultPhotoSlotOrder } from "./lib/hook-flyer.js";
 import { renderFlyerSVG } from "./lib/hook-flyer-svg.js";
 import { fetchFlyerImages } from "./lib/hook-flyer-images.js";
 import { listThemes, rememberTheme } from "./lib/event-themes.js";
+import { searchPlacePhotos } from "./lib/places-images.js";
+import { dataUriToBytes } from "./lib/data-uri.js";
+// Aliased — this file already has its own local sha256Hex(str) (a
+// string-hashing helper for password setup, unrelated) further down; this
+// one hashes image bytes, same as hook-image.js's own upload path.
+import { sha256Hex as sha256HexBytes } from "./lib/image-hash.js";
+import { mergeIntoRecord, AI_SCAN_CACHE_FIELDS_CLEARED } from "./lib/record-merge.js";
 import {
   parseStockNetworkCsv,
   normalizeStockNetworkStatus,
@@ -1110,6 +1117,70 @@ export default async (request, context) => {
       // theme; nothing pre-seeded.
       const themes = await listThemes(eventThemeStore);
       return json({ ok: true, themes: themes }, 200, cors);
+    }
+
+    if (action === "findPlaceImages") {
+      // Server-side search for real, place-tagged photos (Google Places
+      // API — see lib/places-images.js for why this exists and why it's
+      // Places rather than Pexels/Unsplash) — used by the Event hook
+      // form's "Find area photo" / "Find theme photo" buttons. Returns
+      // candidate photos as data: URIs, never a Google URL (those embed
+      // the API key) — see places-images.js's own header comment.
+      const query = typeof body.query === "string" ? body.query.trim().slice(0, 200) : "";
+      const apiKey = Deno.env.get("GOOGLE_PLACES_API_KEY") || "";
+      const result = await searchPlacePhotos(query, apiKey, body.limit);
+      // Always 200 — a "no results"/"no key" outcome is a normal, expected
+      // response shape the admin.html picker reads from `ok`/`reason`, not
+      // a server error.
+      return json(result, 200, cors);
+    }
+
+    if (action === "savePlacePhoto") {
+      // Saves one admin-picked Places photo (already fetched to a data:
+      // URI by findPlaceImages above, sent straight back rather than
+      // re-fetched) as a Default Hook's hero or secondary flyer photo —
+      // the same promo-hook-images store and cover/gallery-slot keying
+      // hook-image.js's own upload uses, so lib/hook-flyer-images.js picks
+      // it up exactly the same way. "hero" is the cover slot (aff:hook);
+      // "secondary" is gallery slot 1 (aff:hook:1) — matching
+      // event-flyer-v1's images order (heroImage first, secondaryImage
+      // second — see lib/hook-templates.js).
+      const n = Number(body.hook);
+      if (!isFinite(n) || n < 1 || n > DEFAULT_HOOK_COUNT) {
+        return json({ ok: false, error: "invalid hook number" }, 400, cors);
+      }
+      const slot = body.slot === "secondary" ? "secondary" : "hero";
+      const parsed = dataUriToBytes(body.dataUri);
+      if (!parsed) return json({ ok: false, error: "No image data received." }, 400, cors);
+      if (parsed.buf.byteLength > 5 * 1024 * 1024) {
+        return json({ ok: false, error: "Image too large (max 5MB)." }, 413, cors);
+      }
+
+      const key = "__admin__:" + n;
+      const imageKey = slot === "secondary" ? key + ":1" : key;
+      await imageStore.set(imageKey, parsed.buf, { metadata: { contentType: parsed.contentType, sourceUrl: "google_places" } });
+
+      if (slot === "hero") {
+        // Same cache-invalidation rule as hook-image.js's own cover
+        // upload: a genuinely new cover photo clears any cached AI
+        // caption/hashtags so hook-share-content.js re-scans instead of
+        // describing the old photo.
+        const existing = (await hookStore.get(key, { type: "json" })) || {};
+        const newHash = await sha256HexBytes(parsed.buf);
+        const fields = { imageHash: newHash, updatedAt: new Date().toISOString() };
+        if (newHash !== existing.imageHash) Object.assign(fields, AI_SCAN_CACHE_FIELDS_CLEARED);
+        await mergeIntoRecord(hookStore, key, fields);
+      } else {
+        // Ensures fetchFlyerImages (lib/hook-flyer-images.js) looks at the
+        // ":1" slot at all — never lowers an existing gallery count from
+        // Auto-build's own multi-photo picker, only ever raises it to at
+        // least 1.
+        const existing = (await hookStore.get(key, { type: "json" })) || {};
+        const galleryCount = Math.max(existing.galleryCount || 0, 1);
+        await mergeIntoRecord(hookStore, key, { galleryCount: galleryCount, updatedAt: new Date().toISOString() });
+      }
+
+      return json({ ok: true, slot: slot }, 200, cors);
     }
 
     if (action === "saveHookPhotos") {

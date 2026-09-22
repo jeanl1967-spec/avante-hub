@@ -10,6 +10,10 @@ import { resolveFlyerFields, defaultPhotoSlotOrder } from "./lib/hook-flyer.js";
 import { renderFlyerSVG } from "./lib/hook-flyer-svg.js";
 import { fetchFlyerImages } from "./lib/hook-flyer-images.js";
 import { rememberTheme } from "./lib/event-themes.js";
+import { searchPlacePhotos } from "./lib/places-images.js";
+import { dataUriToBytes } from "./lib/data-uri.js";
+import { sha256Hex } from "./lib/image-hash.js";
+import { mergeIntoRecord, AI_SCAN_CACHE_FIELDS_CLEARED } from "./lib/record-merge.js";
 
 // Special affiliate key reserved for admin-managed default hook content.
 // Chosen so it can never collide with a real affiliate ID (StockNetwork
@@ -191,6 +195,56 @@ export default async (request, context) => {
           JSON.stringify({ ok: true, templateId: templateId, fields: template.fields.map((f) => ({ key: f.key, role: f.role })), values: values, missing: missing, svg: svg }),
           { headers: { "content-type": "application/json", ...cors } }
         );
+      }
+
+      // Backend parity with admin-api.js's findPlaceImages — see
+      // lib/places-images.js for why this exists and never hands a raw
+      // Google Places URL to the caller. No hub.html UI calls this yet
+      // (Event hooks are admin-curated content for now, same note as the
+      // category/theme fields above), added here purely so a self-managed
+      // record never breaks if that changes.
+      if (body.action === "findPlaceImages") {
+        const query = typeof body.query === "string" ? body.query.trim().slice(0, 200) : "";
+        const apiKey = Deno.env.get("GOOGLE_PLACES_API_KEY") || "";
+        const result = await searchPlacePhotos(query, apiKey, body.limit);
+        return new Response(JSON.stringify(result), { headers: { "content-type": "application/json", ...cors } });
+      }
+
+      // Backend parity with admin-api.js's savePlacePhoto — same
+      // cover/gallery-slot keying and cache-invalidation rules, see there
+      // for the full reasoning.
+      if (body.action === "savePlacePhoto") {
+        const slot = body.slot === "secondary" ? "secondary" : "hero";
+        const parsed = dataUriToBytes(body.dataUri);
+        if (!parsed) {
+          return new Response(JSON.stringify({ ok: false, error: "No image data received." }), {
+            status: 400,
+            headers: { "content-type": "application/json", ...cors },
+          });
+        }
+        if (parsed.buf.byteLength > 5 * 1024 * 1024) {
+          return new Response(JSON.stringify({ ok: false, error: "Image too large (max 5MB)." }), {
+            status: 413,
+            headers: { "content-type": "application/json", ...cors },
+          });
+        }
+        const imageStore = getStore({ name: "promo-hook-images", consistency: "strong" });
+        const imageKey = slot === "secondary" ? key + ":1" : key;
+        await imageStore.set(imageKey, parsed.buf, { metadata: { contentType: parsed.contentType, sourceUrl: "google_places" } });
+
+        if (slot === "hero") {
+          const existingForPhoto = (await store.get(key, { type: "json" })) || {};
+          const newHash = await sha256Hex(parsed.buf);
+          const fields = { imageHash: newHash, updatedAt: new Date().toISOString() };
+          if (newHash !== existingForPhoto.imageHash) Object.assign(fields, AI_SCAN_CACHE_FIELDS_CLEARED);
+          await mergeIntoRecord(store, key, fields);
+        } else {
+          const existingForPhoto = (await store.get(key, { type: "json" })) || {};
+          const galleryCount = Math.max(existingForPhoto.galleryCount || 0, 1);
+          await mergeIntoRecord(store, key, { galleryCount: galleryCount, updatedAt: new Date().toISOString() });
+        }
+
+        return new Response(JSON.stringify({ ok: true, slot: slot }), { headers: { "content-type": "application/json", ...cors } });
       }
 
       const existing = (await store.get(key, { type: "json" })) || {};
