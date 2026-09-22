@@ -548,6 +548,48 @@
   .hook-row + .hook-row{ margin-top:14px; }
   .hook-card .caption-preview{ font-size:12.5px; color:var(--ink); line-height:1.5; white-space:pre-line; }
 
+  /* ---- Auto-build (draft a hook from a property or area) — same as admin.html's Default Hooks panel */
+  .autobuild-toggle{
+    width:100%; margin-top:10px; background:#fff; color:var(--teal-dark);
+    border:1.5px dashed var(--teal-dark);
+  }
+  .autobuild-box{
+    display:none; margin-top:12px; padding:14px; border-radius:10px;
+    background:var(--mint); border:1.5px solid #bfe6e2;
+  }
+  .autobuild-box.show{ display:block; }
+  .autobuild-box label{ margin-top:0; }
+  .autobuild-row{ display:flex; gap:8px; align-items:flex-start; }
+  .autobuild-row input{ flex:1; }
+  .autobuild-row button{ white-space:nowrap; padding:9px 14px; font-size:13px; }
+  .autobuild-status{ font-size:12px; color:var(--muted); margin-top:8px; min-height:16px; }
+  .autobuild-tree-box{
+    display:none; margin-top:8px; max-height:260px; overflow:auto;
+    background:#fff; border:1px solid #bfe6e2; border-radius:8px; padding:8px 10px;
+  }
+  .autobuild-tree-box.show{ display:block; }
+  .autobuild-tree-box summary{ list-style:revert; }
+  .autobuild-draft{ display:none; margin-top:12px; }
+  .autobuild-draft.show{ display:block; }
+  .autobuild-caption-preview{
+    font-size:12.5px; background:#fff; border:1px solid var(--line); border-radius:8px;
+    padding:10px; margin-top:6px; white-space:pre-wrap;
+  }
+  .autobuild-photo-grid{
+    display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin-top:8px;
+  }
+  .autobuild-photo{
+    position:relative; aspect-ratio:1; border-radius:6px; overflow:hidden;
+    cursor:pointer; border:2px solid transparent;
+  }
+  .autobuild-photo img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .autobuild-photo.picked{ border-color:var(--teal-dark); }
+  .autobuild-photo-check{
+    position:absolute; top:3px; right:3px; width:18px; height:18px; border-radius:100px;
+    background:rgba(255,255,255,0.85); display:flex; align-items:center; justify-content:center;
+    font-size:11px; color:var(--teal-dark); font-weight:700;
+  }
+
   /* ---- Share Kit (per-platform sized image + caption, ready to paste) ---- */
   .sharekit-btn{ width:100%; margin-top:14px; }
   .modal-card.sharekit-card{ max-width:660px; }
@@ -1177,6 +1219,10 @@
         </div>
         <div class="hint" id="embedHint" style="margin-top:10px; display:none;">Use this one inside an iframe on your own website (like avantetravel.co.za) — it shows just the promotions grid, with no Avante Travel header or navigation, so it won't duplicate your site's own header.</div>
       </div>
+      <!-- Shared across every hook card's Auto-build field — populated once
+           from /api/resorts with every resort name plus every unique
+           district, same as admin.html's Default Hooks panel. -->
+      <datalist id="hookSourceOptions"></datalist>
       <div class="hook-grid" id="hook-grid"></div>
     </section>
 
@@ -3036,6 +3082,24 @@
             '<label for="h' + i + '-locationSelect">Property location</label>' +
             '<select id="h' + i + '-locationSelect"><option value="">— None selected —</option></select>' +
             '<div class="hint">Tag which area, town/city, or suburb the property in this hook is in.</div>' +
+            '<button type="button" class="btn-outline autobuild-toggle" data-autobuild-toggle="' + i + '">✨ Auto-build from property or area</button>' +
+            '<div class="autobuild-box" id="h' + i + '-autobuildBox">' +
+              '<label for="h' + i + '-autobuildQuery">Property name or area</label>' +
+              '<div class="autobuild-row">' +
+                '<input id="h' + i + '-autobuildQuery" list="hookSourceOptions" placeholder="e.g. Knysna, or a specific resort name">' +
+                '<button type="button" class="btn-outline" data-autobuild-generate="' + i + '">Generate</button>' +
+              '</div>' +
+              '<button type="button" class="btn-outline" style="margin-top:6px; font-size:12px; padding:6px 10px;" data-autobuild-tree-toggle="' + i + '">🌳 Browse properties by location</button>' +
+              '<div class="autobuild-tree-box" id="h' + i + '-autobuildTree"></div>' +
+              '<div class="autobuild-status" id="h' + i + '-autobuildStatus"></div>' +
+              '<div class="autobuild-draft" id="h' + i + '-autobuildDraft">' +
+                '<label>Draft caption</label>' +
+                '<div class="autobuild-caption-preview" id="h' + i + '-autobuildCaption"></div>' +
+                '<label>Real photos found — pick up to 4 (first pick becomes the cover image)</label>' +
+                '<div class="autobuild-photo-grid" id="h' + i + '-autobuildPhotos"></div>' +
+                '<button type="button" class="primary autobuild-use-btn" data-autobuild-use="' + i + '">Use this draft</button>' +
+              '</div>' +
+            '</div>' +
             '<label for="h' + i + '-caption">Caption</label>' +
             '<textarea id="h' + i + '-caption" placeholder="Ready-to-paste caption for this promo"></textarea>' +
             '</div>' +
@@ -3687,6 +3751,330 @@
         if(sel.value !== value) sel.value = ''; // saved location no longer exists in the tree
       }
 
+      // ---- Auto-build (draft a hook from a property or area) ----
+      // The self-managed equivalent of admin.html's Default Hooks
+      // Auto-build panel — same "type or browse a property/area, get a
+      // real StockNetwork-sourced caption + booking link + photo picks"
+      // flow, backed by hook-api.js's new action:"draft"/"savePhotos"
+      // (shared with admin-api.js via lib/hook-draft.js and
+      // lib/hook-photos.js, so the two never drift apart). Every field
+      // this fills in comes from StockNetwork's own listing content or
+      // Claude's caption drafted directly from it — nothing invented.
+      var autobuildDrafts = {}; // last draft generated per hook, keyed by hook number — scratch state until "Use this draft"
+      var autobuildPicked = {}; // {resortId, siteId} stashed per hook when picked from the Browse tree, for an exact match
+
+      var autobuildResortsLoaded = false;
+      function loadAutobuildResorts(){
+        if(autobuildResortsLoaded) return Promise.resolve();
+        return fetch('/api/resorts').then(function(r){ return r.json(); }).then(function(data){
+          var resorts = (data && data.resorts) || [];
+          var seen = {};
+          var options = '';
+          resorts.forEach(function(r){
+            if(r.name && !seen[r.name]){ seen[r.name] = true; options += '<option value="' + escapeHtmlAutobuild(r.name) + '">'; }
+          });
+          var districts = {};
+          resorts.forEach(function(r){
+            if(r.district && !districts[r.district]){ districts[r.district] = true; options += '<option value="' + escapeHtmlAutobuild(r.district) + '">'; }
+          });
+          var list = document.getElementById('hookSourceOptions');
+          if(list) list.innerHTML = options;
+          autobuildResortsLoaded = true;
+        }).catch(function(){ /* best-effort — Auto-build still works by typed text alone */ });
+      }
+      function escapeHtmlAutobuild(s){
+        return String(s).replace(/[&<>"']/g, function(c){
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+
+      // Full property list, shared between the Browse tree and (were it
+      // ever needed here) any other per-property lookup — fetched once.
+      var allResortsCacheHub = null;
+      var allResortsPromiseHub = null;
+      function loadAllResortsHub(){
+        if(allResortsCacheHub) return Promise.resolve(allResortsCacheHub);
+        if(allResortsPromiseHub) return allResortsPromiseHub;
+        allResortsPromiseHub = fetch('/api/resorts').then(function(r){ return r.json(); }).then(function(data){
+          allResortsCacheHub = (data && Array.isArray(data.resorts)) ? data.resorts : [];
+          return allResortsCacheHub;
+        }).catch(function(){
+          allResortsPromiseHub = null;
+          return [];
+        });
+        return allResortsPromiseHub;
+      }
+
+      // The affiliate identity Auto-build saves under — same priority
+      // order saveHook() below already uses (AFF_ID from this affiliate's
+      // own personalized Hub link, falling back to whatever's typed in the
+      // booking field). Unlike a manual save, Auto-build usually needs
+      // this BEFORE any booking link exists (it's what fills that field
+      // in) — so with neither available yet, it can't identify whose
+      // photo store to save into and the caller shows a message instead
+      // of silently failing.
+      function autobuildAffId(n){
+        var bookingVal = document.getElementById('h' + n + '-booking').value.trim();
+        return AFF_ID || (bookingVal ? extractAffiliateId(bookingVal) : '');
+      }
+
+      function renderAutobuildDraft(n){
+        var draft = autobuildDrafts[n];
+        var draftBox = document.getElementById('h' + n + '-autobuildDraft');
+        var captionEl = document.getElementById('h' + n + '-autobuildCaption');
+        var photoGrid = document.getElementById('h' + n + '-autobuildPhotos');
+        if(!draft){ draftBox.classList.remove('show'); return; }
+
+        captionEl.textContent = draft.caption || '(no caption generated — you can still pick photos and write your own)';
+        photoGrid.innerHTML = draft.photos.map(function(url, idx){
+          var picked = draft.picked.indexOf(idx) !== -1;
+          return '<div class="autobuild-photo' + (picked ? ' picked' : '') + '" data-autobuild-photo="' + n + ':' + idx + '">' +
+            '<img src="' + url + '" loading="lazy" alt="Candidate photo ' + (idx + 1) + '">' +
+            '<div class="autobuild-photo-check">' + (picked ? (draft.picked.indexOf(idx) + 1) : '') + '</div>' +
+          '</div>';
+        }).join('');
+        draftBox.classList.add('show');
+      }
+
+      function toggleAutobuildPhoto(n, idx){
+        var draft = autobuildDrafts[n];
+        if(!draft) return;
+        var pos = draft.picked.indexOf(idx);
+        if(pos !== -1){
+          draft.picked.splice(pos, 1);
+        }else{
+          if(draft.picked.length >= 4) draft.picked.shift();
+          draft.picked.push(idx);
+        }
+        renderAutobuildDraft(n);
+      }
+
+      function generateAutobuildDraft(n){
+        var input = document.getElementById('h' + n + '-autobuildQuery');
+        var statusEl = document.getElementById('h' + n + '-autobuildStatus');
+        var query = input.value.trim();
+        if(!query){
+          statusEl.textContent = 'Type a property name or an area first.';
+          return;
+        }
+        var affId = autobuildAffId(n);
+        if(!affId){
+          statusEl.textContent = 'Open your Hub using your own personalized link (or fill in a booking link) first — Auto-build needs to know which affiliate this hook belongs to.';
+          return;
+        }
+        statusEl.textContent = 'Looking up "' + query + '" and drafting a caption…';
+        delete autobuildDrafts[n];
+        renderAutobuildDraft(n);
+
+        var picked = autobuildPicked[n];
+        var reqBody = { action: 'draft', query: query };
+        if(picked && picked.resortId){ reqBody.resortId = picked.resortId; reqBody.siteId = picked.siteId; }
+
+        fetch('/api/hook?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(reqBody)
+        }).then(function(r){ return r.json(); }).then(function(d){
+          if(!d || !d.ok){
+            statusEl.textContent = (d && d.error) || 'Could not build a draft for that.';
+            return;
+          }
+          statusEl.textContent = d.mode === 'area'
+            ? 'Built from ' + d.sourceCount + ' ' + d.label + ' propert' + (d.sourceCount === 1 ? 'y' : 'ies') + '.'
+            : 'Built from ' + d.label + '.';
+          if(!d.captionGenerated){
+            statusEl.textContent += ' (Caption drafting is unavailable right now — photos and booking link still generated; write your own caption below.)';
+          }
+          autobuildDrafts[n] = {
+            mode: d.mode,
+            label: d.label,
+            caption: d.caption || '',
+            hashtags: d.hashtags || null,
+            booking: d.booking || '',
+            photos: d.photos || [],
+            picked: (d.photos || []).slice(0, 4).map(function(_, idx){ return idx; }),
+            description: d.description || '',
+            attractions: d.attractions || '',
+            roomType: d.roomType || '',
+            sourceNames: d.sourceNames || []
+          };
+          renderAutobuildDraft(n);
+        }).catch(function(){
+          statusEl.textContent = 'Could not reach the server — please try again.';
+        });
+      }
+
+      function useAutobuildDraft(n){
+        var draft = autobuildDrafts[n];
+        if(!draft) return;
+        var statusEl = document.getElementById('h' + n + '-autobuildStatus');
+        var affId = autobuildAffId(n);
+
+        document.getElementById('h' + n + '-caption').value = draft.caption || '';
+        if(draft.booking) document.getElementById('h' + n + '-booking').value = draft.booking;
+
+        var source = {
+          mode: draft.mode,
+          label: draft.label,
+          description: draft.description || '',
+          attractions: draft.attractions || '',
+          roomType: draft.roomType || '',
+          names: draft.sourceNames || []
+        };
+
+        var pickedUrls = draft.picked.map(function(idx){ return draft.photos[idx]; });
+        if(!pickedUrls.length){
+          statusEl.textContent = 'Caption and booking link filled in — remember to click "Save hook" below. (No photos were picked, so they won\'t be saved this time.)';
+          return;
+        }
+        if(!affId){
+          statusEl.textContent = 'Caption and booking link filled in, but photos need your affiliate ID to save — open your Hub using your own personalized link, then try again.';
+          return;
+        }
+
+        statusEl.textContent = 'Saving ' + pickedUrls.length + ' photo' + (pickedUrls.length === 1 ? '' : 's') + '…';
+        fetch('/api/hook?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'savePhotos', urls: pickedUrls, source: source })
+        }).then(function(r){ return r.json(); }).then(function(res){
+          if(res && res.ok){
+            statusEl.textContent = 'Caption, booking link and ' + res.saved + ' photo' + (res.saved === 1 ? '' : 's') + ' filled in — click "Save hook" below to publish.';
+            setHookImageSrc(n, affId);
+          }else{
+            statusEl.textContent = 'Caption and booking link filled in, but photos could not be saved — try again, or upload one manually.';
+          }
+        }).catch(function(){
+          statusEl.textContent = 'Caption and booking link filled in, but photos could not be saved — try again, or upload one manually.';
+        });
+      }
+
+      // A read-only zone → town → suburb → property navigation tree for
+      // picking ONE property to auto-build this hook from — same grouping
+      // as the "Property location" tag select above, and as admin.html's
+      // own Browse tree, just rendered as a collapsible <details> list
+      // instead of a <select>, since only properties (not zones/towns/
+      // suburbs) are actually clickable here.
+      function renderPropertyPickerTree(containerEl, n){
+        containerEl.innerHTML = '<div style="font-size:12px; color:var(--muted); padding:4px 0;">Loading locations…</div>';
+        return Promise.all([fetch('/api/map').then(function(r){ return r.json(); }), loadAllResortsHub()]).then(function(results){
+          var towns = (results[0] && results[0].ok && results[0].towns) || [];
+          var resorts = results[1] || [];
+          containerEl.innerHTML = '';
+          if(!towns.length){
+            containerEl.innerHTML = '<div style="font-size:12px; color:var(--muted); padding:4px 0;">No locations on file yet.</div>';
+            return;
+          }
+
+          function propsFor(districtName, suburbName){
+            var dKey = (districtName || '').trim().toLowerCase();
+            var sKey = suburbName === undefined ? null : (suburbName || '').trim().toLowerCase();
+            return resorts.filter(function(r){
+              if((r.district || '').trim().toLowerCase() !== dKey) return false;
+              if(sKey === null) return true;
+              return (r.suburb || '').trim().toLowerCase() === sKey;
+            });
+          }
+          function appendPropertyLinks(parentEl, list){
+            if(!list.length){
+              var none = document.createElement('div');
+              none.style.cssText = 'font-size:12px; color:var(--muted); padding:2px 0 2px 16px;';
+              none.textContent = '(no properties on file here)';
+              parentEl.appendChild(none);
+              return;
+            }
+            list.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); }).forEach(function(r){
+              var link = document.createElement('div');
+              link.style.cssText = 'padding:3px 0 3px 16px; font-size:13px; cursor:pointer; color:#1a73e8;';
+              link.textContent = r.name;
+              link.addEventListener('click', function(){
+                var input = document.getElementById('h' + n + '-autobuildQuery');
+                input.value = r.name;
+                autobuildPicked[n] = { resortId: r.resortId || '', siteId: r.siteId || '' };
+                document.getElementById('h' + n + '-autobuildTree').classList.remove('show');
+                generateAutobuildDraft(n);
+              });
+              parentEl.appendChild(link);
+            });
+          }
+
+          var byZone = {};
+          towns.forEach(function(t){ var z = t.zone || ''; if(!byZone[z]) byZone[z] = []; byZone[z].push(t); });
+          var zoneKeys = HOOK_ZONE_ORDER.filter(function(z){ return byZone[z]; });
+          Object.keys(byZone).filter(function(z){ return z && HOOK_ZONE_ORDER.indexOf(z) === -1; }).sort().forEach(function(z){ zoneKeys.push(z); });
+          if(byZone['']) zoneKeys.push('');
+
+          zoneKeys.forEach(function(zoneKey){
+            var zoneDet = document.createElement('details');
+            zoneDet.style.cssText = 'margin:2px 0;';
+            var zoneSum = document.createElement('summary');
+            zoneSum.style.cssText = 'cursor:pointer; font-size:13px; font-weight:600;';
+            zoneSum.textContent = zoneKey || 'Other (no area set)';
+            zoneDet.appendChild(zoneSum);
+            var zoneBody = document.createElement('div');
+            zoneBody.style.cssText = 'margin-left:14px;';
+            zoneDet.appendChild(zoneBody);
+
+            byZone[zoneKey].slice().sort(function(a,b){ return a.name.localeCompare(b.name); }).forEach(function(t){
+              var subs = (t.suburbs || []).slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
+              var townDet = document.createElement('details');
+              townDet.style.cssText = 'margin:1px 0;';
+              var townSum = document.createElement('summary');
+              townSum.style.cssText = 'cursor:pointer; font-size:13px;';
+              townSum.textContent = t.name;
+              townDet.appendChild(townSum);
+              var townBody = document.createElement('div');
+              townBody.style.cssText = 'margin-left:14px;';
+              townDet.appendChild(townBody);
+
+              var townBuilt = false;
+              townDet.addEventListener('toggle', function(){
+                if(!townDet.open || townBuilt) return;
+                townBuilt = true;
+                if(subs.length){
+                  var suburbNamesLower = subs.map(function(s){ return (s.name || '').trim().toLowerCase(); });
+                  subs.forEach(function(s){
+                    var subDet = document.createElement('details');
+                    subDet.style.cssText = 'margin:1px 0;';
+                    var subSum = document.createElement('summary');
+                    subSum.style.cssText = 'cursor:pointer; font-size:13px; color:var(--muted);';
+                    subSum.textContent = s.name;
+                    subDet.appendChild(subSum);
+                    var subBody = document.createElement('div');
+                    subDet.appendChild(subBody);
+                    var subBuilt = false;
+                    subDet.addEventListener('toggle', function(){
+                      if(!subDet.open || subBuilt) return;
+                      subBuilt = true;
+                      appendPropertyLinks(subBody, propsFor(t.name, s.name));
+                    });
+                    townBody.appendChild(subDet);
+                  });
+                  var otherProps = propsFor(t.name).filter(function(r){
+                    return suburbNamesLower.indexOf((r.suburb || '').trim().toLowerCase()) === -1;
+                  });
+                  if(otherProps.length){
+                    var otherLabel = document.createElement('div');
+                    otherLabel.style.cssText = 'font-size:12px; color:var(--muted); padding:2px 0;';
+                    otherLabel.textContent = 'Other properties in ' + t.name + ':';
+                    townBody.appendChild(otherLabel);
+                    appendPropertyLinks(townBody, otherProps);
+                  }
+                } else {
+                  appendPropertyLinks(townBody, propsFor(t.name));
+                }
+              });
+
+              zoneBody.appendChild(townDet);
+            });
+
+            containerEl.appendChild(zoneDet);
+          });
+        }).catch(function(){
+          containerEl.innerHTML = '<div style="font-size:12px; color:var(--muted); padding:4px 0;">Could not load locations right now.</div>';
+        });
+      }
+
       function saveHook(n){
         var p = 'h' + n + '-';
         var booking = document.getElementById(p + 'booking').value.trim();
@@ -3836,6 +4224,43 @@
           return;
         }
 
+        var autobuildToggleN = e.target.getAttribute('data-autobuild-toggle');
+        if(autobuildToggleN){
+          loadAutobuildResorts();
+          document.getElementById('h' + autobuildToggleN + '-autobuildBox').classList.toggle('show');
+          return;
+        }
+
+        var genN = e.target.getAttribute('data-autobuild-generate');
+        if(genN){
+          generateAutobuildDraft(genN);
+          return;
+        }
+
+        var useN = e.target.getAttribute('data-autobuild-use');
+        if(useN){
+          useAutobuildDraft(useN);
+          return;
+        }
+
+        var treeToggleN = e.target.getAttribute('data-autobuild-tree-toggle');
+        if(treeToggleN){
+          var treeBox = document.getElementById('h' + treeToggleN + '-autobuildTree');
+          var showing = treeBox.classList.toggle('show');
+          if(showing && !treeBox.dataset.built){
+            treeBox.dataset.built = '1';
+            renderPropertyPickerTree(treeBox, treeToggleN);
+          }
+          return;
+        }
+
+        var photoEl = e.target.closest && e.target.closest('[data-autobuild-photo]');
+        if(photoEl){
+          var photoParts = photoEl.getAttribute('data-autobuild-photo').split(':');
+          toggleAutobuildPhoto(photoParts[0], Number(photoParts[1]));
+          return;
+        }
+
         var copyId = e.target.getAttribute('data-copy');
         if(copyId){
           var el = document.getElementById(copyId);
@@ -3882,6 +4307,22 @@
             shareContentUrl: imageAff ? ('/api/hook-share-content?aff=' + encodeURIComponent(imageAff) + '&hook=' + encodeURIComponent(shareN)) : ''
           });
         }
+      });
+
+      grid.addEventListener('keydown', function(e){
+        if(e.key !== 'Enter') return;
+        var m = e.target.id && e.target.id.match(/^h(\d+)-autobuildQuery$/);
+        if(m){
+          e.preventDefault();
+          generateAutobuildDraft(m[1]);
+        }
+      });
+
+      // Hand-editing the query field invalidates any exact resortId/siteId
+      // stashed from a tree pick (renderPropertyPickerTree above).
+      grid.addEventListener('input', function(e){
+        var m = e.target.id && e.target.id.match(/^h(\d+)-autobuildQuery$/);
+        if(m) delete autobuildPicked[m[1]];
       });
 
       grid.addEventListener('change', function(e){
