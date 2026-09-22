@@ -201,6 +201,15 @@ export default async (request, context) => {
       if (typeof body.townId === "string") record.townId = body.townId;
       if (typeof body.suburbId === "string") record.suburbId = body.suburbId;
       if (typeof body.locationLabel === "string") record.locationLabel = body.locationLabel;
+      // Flyer-template-only fields (see lib/hook-templates.js) — price and
+      // the promo banner/date range. StockNetwork has no static rate field
+      // (price is dates-dependent) and the banner/dates are campaign-
+      // specific, so both always have to be typed in here, same as admin's
+      // own Default Hooks form. Optional: left blank just leaves that box
+      // unfilled on the flyer, nothing invented to fill the gap.
+      if (typeof body.flyerPromoTag === "string") record.flyerPromoTag = body.flyerPromoTag.trim().slice(0, 200);
+      if (typeof body.flyerPrice === "string") record.flyerPrice = body.flyerPrice.trim().slice(0, 200);
+      if (typeof body.flyerDates === "string") record.flyerDates = body.flyerDates.trim().slice(0, 200);
       if (body.mode === "self" || body.mode === "admin") record.mode = body.mode;
       if (!record.mode) record.mode = "admin";
       record.savedAt = new Date().toISOString();
@@ -269,6 +278,9 @@ export default async (request, context) => {
             // future caller (e.g. hook-landing.html or the Hub's Explore
             // Map) can match or display it without a second lookup.
             location: { zone: adminRecord.zone || "", townId: adminRecord.townId || "", suburbId: adminRecord.suburbId || "", label: adminRecord.locationLabel || "" },
+            flyerPromoTag: adminRecord.flyerPromoTag || "",
+            flyerPrice: adminRecord.flyerPrice || "",
+            flyerDates: adminRecord.flyerDates || "",
             mode: mode,
             source: "admin",
             expired: expired,
@@ -295,6 +307,9 @@ export default async (request, context) => {
           galleryCount: affRecord.galleryCount || 0,
           details: affRecord.source || null,
           location: { zone: affRecord.zone || "", townId: affRecord.townId || "", suburbId: affRecord.suburbId || "", label: affRecord.locationLabel || "" },
+          flyerPromoTag: affRecord.flyerPromoTag || "",
+          flyerPrice: affRecord.flyerPrice || "",
+          flyerDates: affRecord.flyerDates || "",
           mode: mode,
           source: "self",
           expired: expired,
