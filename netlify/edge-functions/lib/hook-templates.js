@@ -69,7 +69,7 @@ export const HOOK_TEMPLATES = {
         type: "text",
         role: "Price badge — two lines: the headline rate, then a per-person/qualifier line.",
         matchText: "R3500 PER DAY\nUnder R600 p/p",
-        source: "stocknetwork", // real nightly/daily rate + occupancy math only, never invented.
+        source: "jean", // confirmed in automated-flyer-form-spec.md: StockNetwork's ResortInfo page carries no static rate — price is dates-dependent and lives in the booking/rate engine, not a resort field. Never invented; always typed in.
       },
       {
         key: "keyStat",
