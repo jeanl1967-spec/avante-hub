@@ -13,6 +13,7 @@ import { renderFlyerSVG } from "./lib/hook-flyer-svg.js";
 import { fetchFlyerImages } from "./lib/hook-flyer-images.js";
 import { listThemes, rememberTheme } from "./lib/event-themes.js";
 import { searchPlacePhotos } from "./lib/places-images.js";
+import { draftEventFromUrl, draftEventFromImage } from "./lib/event-source.js";
 import { dataUriToBytes } from "./lib/data-uri.js";
 // Aliased — this file already has its own local sha256Hex(str) (a
 // string-hashing helper for password setup, unrelated) further down; this
@@ -402,6 +403,7 @@ export default async (request, context) => {
             eventLocationName: (rec && rec.eventLocationName) || "",
             eventLocationDetail: (rec && rec.eventLocationDetail) || "",
             eventTheme: (rec && rec.eventTheme) || "",
+            eventSourceUrl: (rec && rec.eventSourceUrl) || "",
             updatedAt: (rec && rec.updatedAt) || null,
           });
         }
@@ -1092,6 +1094,11 @@ export default async (request, context) => {
         "eventNameLine1", "eventNameLine2", "eventSubtitle", "eventSectionHeading",
         "eventHighlight1", "eventHighlight2", "eventHighlight3", "eventHighlight4",
         "eventDate", "eventLocationName", "eventLocationDetail",
+        // The event's own website, if it has one — not a flyer field at all
+        // (no slot for it in the captured design), just remembered so
+        // "Draft from this page" has something to re-run and so the admin
+        // isn't retyping it after a refresh. See lib/event-source.js.
+        "eventSourceUrl",
       ];
       for (const key of EVENT_TEXT_FIELDS) {
         if (typeof body[key] === "string") record[key] = body[key].trim().slice(0, 400);
@@ -1117,6 +1124,37 @@ export default async (request, context) => {
       // theme; nothing pre-seeded.
       const themes = await listThemes(eventThemeStore);
       return json({ ok: true, themes: themes }, 200, cors);
+    }
+
+    if (action === "draftEventFromUrl") {
+      // Drafts an Event hook's fields from an external page Jean already
+      // has (the event's own website), instead of typing everything in by
+      // hand — see lib/event-source.js for the fetch/extraction itself.
+      // Nothing is saved here; this only returns a draft for the admin to
+      // review (and edit) before Save default, exactly like
+      // generateHookDraft's property/area drafts above.
+      const result = await draftEventFromUrl(body.url);
+      // Always 200 — a failure here (bad URL, page unreachable, nothing
+      // readable on it) is a normal, expected response shape the picker
+      // reads from `ok`/`reason`, not a server error, same convention as
+      // findPlaceImages below.
+      return json(result, 200, cors);
+    }
+
+    if (action === "draftEventFromImage") {
+      // Same drafting, from a photo of an existing flyer/poster instead of
+      // a web page — the browser already has the bytes (read locally via
+      // FileReader as a data: URI), so this sends them straight here
+      // rather than uploading through the hook-image.js path first, same
+      // "client already has the bytes, just send them" shape as
+      // savePlacePhoto below.
+      const parsed = dataUriToBytes(body.dataUri);
+      if (!parsed) return json({ ok: false, reason: "no_image", message: "No image data received." }, 200, cors);
+      if (parsed.buf.byteLength > 5 * 1024 * 1024) {
+        return json({ ok: false, reason: "too_large", message: "That image is too large (max 5MB)." }, 200, cors);
+      }
+      const result = await draftEventFromImage(parsed.buf, parsed.contentType);
+      return json(result, 200, cors);
     }
 
     if (action === "findPlaceImages") {
