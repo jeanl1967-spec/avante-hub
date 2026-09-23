@@ -4380,6 +4380,25 @@
         fieldsMeta.forEach(function(f){
           var val = (values && values[f.key]) || '';
           var isLong = f.key === 'description' || f.key === 'priceBadge';
+          // A "jean-settings" field (contactPhone/contactEmail) is shared
+          // across every flyer, admin- and self-managed alike, and is only
+          // ever set from admin.html's "Flyer contact info" box — never
+          // per hook, and not something this page can change at all. Shown
+          // read-only rather than as an editable override input that would
+          // never actually save (see admin-api.js's identical renderFlyer
+          // action / lib/hook-templates.js for the full reasoning).
+          if(f.source === 'jean-settings'){
+            html +=
+              '<label' + (missingSet[f.key] ? ' style="color:#c0453a;"' : '') + '>' +
+                flyerEscapeHtml(f.key) + (missingSet[f.key] ? ' — needs a value' : '') +
+              '</label>' +
+              '<div class="hint" style="margin-top:-2px;">' + flyerEscapeHtml(f.role) + '</div>' +
+              '<div style="padding:9px 12px; border-radius:8px; background:#f2f4f8; border:1px solid var(--line); font-size:13.5px;">' +
+                (val ? flyerEscapeHtml(val) : '<em style="color:var(--muted);">Not set yet</em>') +
+              '</div>' +
+              '<div class="hint" style="margin-top:2px;">Set by Avante Travel for every flyer — not something you can change here.</div>';
+            return;
+          }
           html +=
             '<label for="h' + n + '-ff-' + f.key + '"' + (missingSet[f.key] ? ' style="color:#c0453a;"' : '') + '>' +
               flyerEscapeHtml(f.key) + (missingSet[f.key] ? ' — needs a value' : '') +

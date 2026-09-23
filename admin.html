@@ -5495,6 +5495,30 @@
         fieldsMeta.forEach(function(f){
           var val = (values && values[f.key]) || '';
           var isLong = f.key === 'description' || f.key === 'priceBadge';
+          // A "jean-settings" field (contactPhone/contactEmail — see
+          // lib/hook-templates.js) is shared across every flyer and only
+          // ever set from the "Flyer contact info" box at the top of this
+          // page, never per hook — rendering it as an editable override
+          // input here was exactly the confusing part Jean hit ("contact
+          // details dont stay in place"): typing into it and clicking
+          // Update preview only affected that one live preview, never
+          // saved anywhere, so it always looked like it "didn't stick".
+          // Shown read-only instead, with a pointer to where it's actually
+          // saved — no input id is rendered for it, so
+          // collectFlyerOverrides simply won't send an override for this
+          // key, and the real shared value keeps being used.
+          if(f.source === 'jean-settings'){
+            html +=
+              '<label' + (missingSet[f.key] ? ' style="color:#c0453a;"' : '') + '>' +
+                escapeHtml(f.key) + (missingSet[f.key] ? ' — needs a value' : '') +
+              '</label>' +
+              '<div class="hint" style="margin-top:-2px;">' + escapeHtml(f.role) + '</div>' +
+              '<div style="padding:9px 12px; border-radius:8px; background:#f2f4f8; border:1px solid var(--line); font-size:13.5px;">' +
+                (val ? escapeHtml(val) : '<em style="color:var(--muted);">Not set yet</em>') +
+              '</div>' +
+              '<div class="hint" style="margin-top:2px;">Shared across every flyer — set it once in the "Flyer contact info" box at the very top of this page, not per hook.</div>';
+            return;
+          }
           html +=
             '<label for="dh' + n + '-ff-' + f.key + '"' + (missingSet[f.key] ? ' style="color:#c0453a;"' : '') + '>' +
               escapeHtml(f.key) + (missingSet[f.key] ? ' — needs a value' : '') +
