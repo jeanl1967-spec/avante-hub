@@ -4370,6 +4370,143 @@
         });
       }
 
+      // ---- Event hook: "Draft from this page" / "Draft from an existing
+      // photo" (see lib/event-source.js) ----
+      //
+      // Drafts the event's own fields (name, subtitle, highlights, date,
+      // location, theme) from a source Jean already has, instead of typing
+      // everything by hand — a URL to the event's own website, or a photo
+      // of an existing flyer/poster. Same "draft first, review, then use
+      // it" shape as generateAutobuildDraftFromSelection above: nothing
+      // here fills or saves a field until "Use this draft" is clicked, and
+      // even then it's only filled in on-screen — Save default still has to
+      // be clicked separately, same as every other Auto-build path in this
+      // app.
+      var eventDrafts = {}; // { [n]: { fields: {...} } }
+      var EVENT_DRAFT_FIELD_LABELS = {
+        eventNameLine1: 'Event name — line 1',
+        eventNameLine2: 'Event name — line 2',
+        eventSubtitle: 'Subtitle',
+        eventHighlight1: 'Highlight 1',
+        eventHighlight2: 'Highlight 2',
+        eventHighlight3: 'Highlight 3',
+        eventHighlight4: 'Highlight 4',
+        eventDate: 'Date(s)',
+        eventLocationName: 'Location name',
+        eventLocationDetail: 'Location detail',
+        eventTheme: 'Theme',
+      };
+
+      function eventDraftErrorMessage(data){
+        var reason = data && data.reason;
+        if(reason === 'empty_url') return 'Paste a link first.';
+        if(reason === 'bad_url') return (data && data.message) || 'That doesn\'t look like a valid web address.';
+        if(reason === 'timeout') return 'That page took too long to respond — please try again.';
+        if(reason === 'network') return 'Could not reach that page — please check the link and try again.';
+        if(reason === 'not_html') return (data && data.message) || 'That link isn\'t a normal web page.';
+        if(reason === 'no_text') return (data && data.message) || 'That page didn\'t have any readable text to draft from.';
+        if(reason === 'no_image') return 'No image received — please pick a file and try again.';
+        if(reason === 'too_large') return (data && data.message) || 'That image is too large (max 5MB).';
+        if(reason === 'unsupported_type') return (data && data.message) || 'That image format isn\'t supported — try a JPEG or PNG instead.';
+        if(reason === 'draft_unavailable') return (data && data.message) || 'Could not draft from that right now — please try again, or fill the fields in by hand.';
+        if(typeof reason === 'string' && reason.indexOf('http_') === 0) return (data && data.message) || 'That page returned an error.';
+        return 'Could not draft anything from that — please try again, or fill the fields in by hand.';
+      }
+
+      function renderEventDraftPreview(n){
+        var draft = eventDrafts[n];
+        var box = document.getElementById('dh' + n + '-eventDraftBox');
+        var preview = document.getElementById('dh' + n + '-eventDraftPreview');
+        if(!draft){ box.classList.remove('show'); return; }
+        var rows = [];
+        for(var key in EVENT_DRAFT_FIELD_LABELS){
+          var val = draft.fields[key];
+          if(val) rows.push('<div><strong>' + EVENT_DRAFT_FIELD_LABELS[key] + ':</strong> ' + escapeHtml(val) + '</div>');
+        }
+        preview.innerHTML = rows.length
+          ? rows.join('')
+          : '<div>Nothing usable was found there — none of the fields could be filled in from this source.</div>';
+        box.classList.add('show');
+      }
+
+      function draftEventFromUrl(n){
+        var url = document.getElementById('dh' + n + '-eventSourceUrl').value.trim();
+        var statusEl = document.getElementById('dh' + n + '-eventDraftStatus');
+        delete eventDrafts[n];
+        renderEventDraftPreview(n);
+        if(!url){
+          statusEl.textContent = 'Paste the event\'s website link above first.';
+          return;
+        }
+        statusEl.textContent = 'Reading that page…';
+        adminPost('draftEventFromUrl', { url: url }).then(function(res){
+          var data = res.data;
+          if(data && data.ok){
+            eventDrafts[n] = { fields: data.fields };
+            statusEl.textContent = 'Drafted from that page — review below, then click "Use this draft".';
+            renderEventDraftPreview(n);
+          }else{
+            statusEl.textContent = eventDraftErrorMessage(data);
+          }
+        }).catch(function(){
+          statusEl.textContent = 'Could not reach the server — please try again.';
+        });
+      }
+
+      function triggerEventDraftPhoto(n){
+        document.getElementById('dh' + n + '-eventDraftPhotoInput').click();
+      }
+
+      function draftEventFromPhotoFile(n, file){
+        var statusEl = document.getElementById('dh' + n + '-eventDraftStatus');
+        if(!file) return;
+        delete eventDrafts[n];
+        renderEventDraftPreview(n);
+        statusEl.textContent = 'Reading that photo…';
+        var reader = new FileReader();
+        reader.onload = function(){
+          adminPost('draftEventFromImage', { dataUri: reader.result }).then(function(res){
+            var data = res.data;
+            if(data && data.ok){
+              eventDrafts[n] = { fields: data.fields };
+              statusEl.textContent = 'Drafted from that photo — review below, then click "Use this draft".';
+              renderEventDraftPreview(n);
+            }else{
+              statusEl.textContent = eventDraftErrorMessage(data);
+            }
+          }).catch(function(){
+            statusEl.textContent = 'Could not reach the server — please try again.';
+          });
+        };
+        reader.onerror = function(){
+          statusEl.textContent = 'Could not read that file — please try again.';
+        };
+        reader.readAsDataURL(file);
+      }
+
+      // Fills the visible Event fields from the last draft — same
+      // "review before it's real" rule as useAutobuildDraft's property
+      // fields: this only sets what's on screen, Save default still has to
+      // be clicked separately to actually persist it. A field the source
+      // didn't state is left exactly as it was (never blanked out), so
+      // drafting from a second source (or a page that's missing one field)
+      // can't silently erase something already typed in.
+      function useEventDraft(n){
+        var draft = eventDrafts[n];
+        if(!draft) return;
+        var statusEl = document.getElementById('dh' + n + '-eventDraftStatus');
+        var filled = 0;
+        for(var key in draft.fields){
+          var val = draft.fields[key];
+          if(!val) continue;
+          var el = document.getElementById('dh' + n + '-' + key);
+          if(el){ el.value = val; filled++; }
+        }
+        statusEl.textContent = filled
+          ? 'Filled in ' + filled + ' field' + (filled === 1 ? '' : 's') + ' — remember to click "Save default" below.'
+          : 'Nothing to fill in from that draft.';
+      }
+
       // Exact {resortId, siteId} stashed per hook number when the admin
       // picks a property from the Browse tree (renderPropertyPickerTree,
       // below) instead of typing — lets generateAutobuildDraft send an
@@ -4986,6 +5123,21 @@
             '<input id="dh' + i + '-flyerDates" placeholder="e.g. 18 December to 1 January – Peak Season Stay (14 Days)">' +
             '</div>' +
             '<div id="dh' + i + '-eventOnlyFields" style="display:none;">' +
+              '<label for="dh' + i + '-eventSourceUrl">Event website (optional)</label>' +
+              '<div class="hint" style="margin-top:-2px;">If this event already has its own website, paste the link below — "Draft from this page" reads it and offers to fill the fields underneath from whatever it actually says. Nothing is saved or invented; you review the draft first.</div>' +
+              '<input id="dh' + i + '-eventSourceUrl" placeholder="https://…">' +
+              '<div class="btn-row" style="margin-top:0;">' +
+                '<button type="button" class="btn-outline" data-event-draft-url="' + i + '">🌐 Draft from this page</button>' +
+                '<button type="button" class="btn-outline" data-event-draft-photo="' + i + '">🖼️ Draft from an existing photo</button>' +
+              '</div>' +
+              '<input type="file" accept="image/jpeg,image/png,image/gif,image/webp" id="dh' + i + '-eventDraftPhotoInput" style="display:none;">' +
+              '<div class="hint" style="margin-top:4px;">The photo option is for an existing flyer/poster/announcement you already have for this event — it reads the text on it the same way, not a photo to use as one of the flyer\'s own images (see Find area/theme photo below for that).</div>' +
+              '<div class="autobuild-status" id="dh' + i + '-eventDraftStatus"></div>' +
+              '<div class="autobuild-box" id="dh' + i + '-eventDraftBox">' +
+                '<label>Draft — review, then use it</label>' +
+                '<div id="dh' + i + '-eventDraftPreview" style="font-size:13px; line-height:1.6; color:#333;"></div>' +
+                '<button type="button" class="primary" style="margin-top:8px;" data-event-draft-use="' + i + '">Use this draft</button>' +
+              '</div>' +
               '<label for="dh' + i + '-eventNameLine1" style="margin-top:16px;">Event name — line 1</label>' +
               '<input id="dh' + i + '-eventNameLine1" placeholder="e.g. Hermanus">' +
               '<label for="dh' + i + '-eventNameLine2">Event name — line 2 / tagline</label>' +
@@ -5402,6 +5554,7 @@
           eventLocationName: document.getElementById(p + 'eventLocationName').value.trim(),
           eventLocationDetail: document.getElementById(p + 'eventLocationDetail').value.trim(),
           eventTheme: document.getElementById(p + 'eventTheme').value.trim(),
+          eventSourceUrl: document.getElementById(p + 'eventSourceUrl').value.trim(),
         };
         var errorEl = document.getElementById(p + 'errorStatus');
         errorEl.className = 'status';
@@ -5490,6 +5643,7 @@
             document.getElementById('dh' + h.hook + '-eventLocationName').value = h.eventLocationName || '';
             document.getElementById('dh' + h.hook + '-eventLocationDetail').value = h.eventLocationDetail || '';
             document.getElementById('dh' + h.hook + '-eventTheme').value = h.eventTheme || '';
+            document.getElementById('dh' + h.hook + '-eventSourceUrl').value = h.eventSourceUrl || '';
             applyHookCategoryVisibility(h.hook);
             document.getElementById('dh' + h.hook + '-updated').textContent = fmtDate(h.updatedAt);
             defaultHookHashtags[h.hook] = h.hashtags || null;
@@ -5903,6 +6057,13 @@
           pickPlacePhoto(ppParts[0], ppParts[1], Number(ppParts[2]));
           return;
         }
+
+        var eventDraftUrlN = e.target.getAttribute('data-event-draft-url');
+        if(eventDraftUrlN){ draftEventFromUrl(eventDraftUrlN); return; }
+        var eventDraftPhotoN = e.target.getAttribute('data-event-draft-photo');
+        if(eventDraftPhotoN){ triggerEventDraftPhoto(eventDraftPhotoN); return; }
+        var eventDraftUseN = e.target.getAttribute('data-event-draft-use');
+        if(eventDraftUseN){ useEventDraft(eventDraftUseN); return; }
       });
 
       grid.addEventListener('keydown', function(e){
@@ -5930,6 +6091,14 @@
         if(pm && e.target.files && e.target.files[0]){
           uploadDefaultHookPdf(pm[1], e.target.files[0]);
           e.target.value = '';
+          return;
+        }
+        var edm = e.target.id && e.target.id.match(/^dh(\d+)-eventDraftPhotoInput$/);
+        if(edm){
+          var draftFile = e.target.files && e.target.files[0];
+          draftEventFromPhotoFile(edm[1], draftFile);
+          e.target.value = '';
+          return;
         }
         var cm = e.target.dataset && e.target.dataset.categorySelect;
         if(cm){
