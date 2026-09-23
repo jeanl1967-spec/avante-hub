@@ -1117,6 +1117,39 @@ export default async (request, context) => {
       return json({ ok: true, hook: n, record: record }, 200, cors);
     }
 
+    if (action === "clearDefaultHook") {
+      // Resets a Default Hook slot back to empty (2026-09-23, per Jean: "a
+      // button to clear a hook") — deletes its saved promo-hooks record
+      // (booking/landing/caption, every property- and event-only field,
+      // theme, locationLabel, hashtags, source, cached AI scan) AND its
+      // stored photos, cover plus every gallery slot, so re-using this slot
+      // for a different property or event later never shows stale content
+      // or a stale "+N more photos" count left over from before.
+      //
+      // Deletes a generous fixed range of gallery slots (1-20) rather than
+      // trusting the record's own galleryCount — imageStore.delete on a
+      // slot that was never written is a harmless no-op (caught below), and
+      // this way a slot left over from an older bug or a count that never
+      // got updated right still gets cleaned up.
+      //
+      // Does NOT touch an uploaded PDF — that lives in a separate store
+      // keyed by hook-pdf.js, not promo-hooks/promo-hook-images, and a PDF
+      // can deliberately be shared across more than one hook's Landing page
+      // link (see parseOwnHookPdfUrl in admin.html). admin.html clears this
+      // hook's own PDF itself, via the same DELETE /api/hook-pdf call
+      // "Remove PDF" already uses, before calling this action.
+      const n = Number(body.hook);
+      if (!isFinite(n) || n < 1 || n > DEFAULT_HOOK_COUNT) {
+        return json({ ok: false, error: "invalid hook number" }, 400, cors);
+      }
+      const key = "__admin__:" + n;
+      await hookStore.delete(key);
+      const slots = [key];
+      for (let slot = 1; slot <= 20; slot++) slots.push(key + ":" + slot);
+      await mapWithConcurrency(slots, (imgKey) => imageStore.delete(imgKey).catch(() => {}));
+      return json({ ok: true, hook: n }, 200, cors);
+    }
+
     if (action === "listEventThemes") {
       // Every distinct Theme value typed into an Event hook so far,
       // alphabetically — powers the Theme field's dropdown on the Event
