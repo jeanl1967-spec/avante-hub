@@ -154,6 +154,23 @@ export default async (request, context) => {
         });
       }
 
+      // Persists a per-hook override of contactPhone/contactEmail — backend
+      // parity with admin-api.js's identical saveFlyerContact action, keyed
+      // by this exact hook's own aff:hook key so an affiliate managing
+      // their own self-managed hook can set their own contact details on
+      // it, distinct from the shared account-wide default (or from any
+      // other hook). Saving an empty string clears the override.
+      if (body.action === "saveFlyerContact") {
+        const existingForContact = (await store.get(key, { type: "json" })) || {};
+        const flyerContactPhone = typeof body.contactPhone === "string" ? body.contactPhone.trim().slice(0, 60) : "";
+        const flyerContactEmail = typeof body.contactEmail === "string" ? body.contactEmail.trim().slice(0, 200) : "";
+        const record = { ...existingForContact, flyerContactPhone: flyerContactPhone, flyerContactEmail: flyerContactEmail, savedAt: new Date().toISOString() };
+        await store.setJSON(key, record);
+        return new Response(JSON.stringify({ ok: true, flyerContactPhone: flyerContactPhone, flyerContactEmail: flyerContactEmail }), {
+          headers: { "content-type": "application/json", ...cors },
+        });
+      }
+
       // Builds a finished flyer SVG for THIS hook (admin's or an
       // affiliate's own self-managed one) — same "nothing invented"
       // resolution + rendering admin-api.js's renderFlyer action uses for

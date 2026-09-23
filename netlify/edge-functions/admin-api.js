@@ -1215,6 +1215,28 @@ export default async (request, context) => {
       return json({ ok: true, contactPhone: contactPhone, contactEmail: contactEmail }, 200, cors);
     }
 
+    if (action === "saveFlyerContact") {
+      // Persists a per-hook override of contactPhone/contactEmail (see
+      // lib/hook-templates.js's "jean-settings-override" source and
+      // lib/hook-flyer.js's resolvePropertyFlyerFields for how this is
+      // resolved against the shared default). Different hooks can be
+      // serviced by different people, so this hook's own value — not just
+      // the account-wide "Flyer contact info" setting — needs somewhere to
+      // live. Saving an empty string clears the override, so the hook goes
+      // back to using the shared default.
+      const n = Number(body.hook);
+      if (!isFinite(n) || n < 1 || n > DEFAULT_HOOK_COUNT) {
+        return json({ ok: false, error: "invalid hook number" }, 400, cors);
+      }
+      const key = "__admin__:" + n;
+      const existing = (await hookStore.get(key, { type: "json" })) || {};
+      const flyerContactPhone = typeof body.contactPhone === "string" ? body.contactPhone.trim().slice(0, 60) : "";
+      const flyerContactEmail = typeof body.contactEmail === "string" ? body.contactEmail.trim().slice(0, 200) : "";
+      const record = { ...existing, flyerContactPhone: flyerContactPhone, flyerContactEmail: flyerContactEmail, updatedAt: new Date().toISOString() };
+      await hookStore.setJSON(key, record);
+      return json({ ok: true, flyerContactPhone: flyerContactPhone, flyerContactEmail: flyerContactEmail }, 200, cors);
+    }
+
     if (action === "renderFlyer") {
       // Builds a finished flyer SVG for a Default Hook, entirely from data
       // already saved on it (Auto-build's scraped source, the flyer-only
