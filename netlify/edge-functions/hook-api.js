@@ -192,7 +192,11 @@ export default async (request, context) => {
 
         const svg = renderFlyerSVG(template, values, images);
         return new Response(
-          JSON.stringify({ ok: true, templateId: templateId, fields: template.fields.map((f) => ({ key: f.key, role: f.role })), values: values, missing: missing, svg: svg }),
+          // `source` included alongside key/role — see admin-api.js's
+          // identical renderFlyer action for why (lets admin.html/hub.html
+          // point a "jean-settings" field like contactPhone/contactEmail at
+          // the shared Flyer contact info box instead of a per-hook input).
+          JSON.stringify({ ok: true, templateId: templateId, fields: template.fields.map((f) => ({ key: f.key, role: f.role, source: f.source })), values: values, missing: missing, svg: svg }),
           { headers: { "content-type": "application/json", ...cors } }
         );
       }
@@ -446,7 +450,18 @@ export default async (request, context) => {
       headers: { "content-type": "application/json", ...cors },
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: String((err && err.message) || err) }), {
+    // Same fix as admin-api.js's identical catch-all — see there for the
+    // full reasoning: a raw platform error (e.g. Netlify's own
+    // "usage_exceeded" wording for a plan/usage limit) must never reach
+    // the screen as-is. `error` is the friendly message a UI should show;
+    // `detail` carries the real string for anyone checking logs.
+    const detail = String((err && err.message) || err);
+    console.error("hook-api.js: unhandled error —", detail);
+    const looksLikeUsageLimit = /usage[_ ]?exceeded|quota|rate[_ ]?limit|too many requests/i.test(detail);
+    const error = looksLikeUsageLimit
+      ? "This is temporarily unavailable — it looks like a usage or plan limit was hit on the server (check your Netlify account's Usage/Billing page). Please try again shortly."
+      : "Something went wrong on our end — please try again in a moment.";
+    return new Response(JSON.stringify({ ok: false, error: error, detail: detail }), {
       status: 500,
       headers: { "content-type": "application/json", ...cors },
     });

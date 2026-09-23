@@ -1244,7 +1244,13 @@ export default async (request, context) => {
       const images = await fetchFlyerImages(imageStore, key, record.galleryCount || 0, slotKeys);
 
       const svg = renderFlyerSVG(template, values, images);
-      return json({ ok: true, templateId: templateId, fields: template.fields.map((f) => ({ key: f.key, role: f.role })), values: values, missing: missing, svg: svg }, 200, cors);
+      // `source` is included here (not just key/role) so admin.html can
+      // tell a "jean-settings" field (contactPhone/contactEmail — set once
+      // in the shared Flyer contact info box above, never per-hook) apart
+      // from a normal per-hook override field, and show a pointer to that
+      // box instead of an editable input a value would only ever vanish
+      // from — see renderFlyerFieldsForm.
+      return json({ ok: true, templateId: templateId, fields: template.fields.map((f) => ({ key: f.key, role: f.role, source: f.source })), values: values, missing: missing, svg: svg }, 200, cors);
     }
 
     if (action === "setResortAffId") {
@@ -1724,7 +1730,30 @@ export default async (request, context) => {
 
     return json({ ok: false, error: "unknown action" }, 400, cors);
   } catch (err) {
-    return json({ error: String((err && err.message) || err) }, 500, cors);
+    // Catch-all for anything not already handled by a specific action's own
+    // try/catch above (most actions that touch an external API already
+    // fail soft to a friendly message of their own — see e.g.
+    // lib/hook-source.js's draftHookCaption, lib/anthropic-tool-call.js's
+    // callClaudeTool). What lands here is almost always something lower-
+    // level — a Netlify Blobs call, or anything else that can throw — and
+    // its raw message is a platform/technical string never meant for an
+    // end user (e.g. "usage_exceeded", which is Netlify's own wording for
+    // a plan/usage limit, not anything this app produces). Previously that
+    // raw string was sent straight through as `error` and shown as-is in
+    // admin.html's status text (see e.g. runGenerateDraft) — confusing and
+    // unhelpful on its own. Now: a plain-English message goes in `error`
+    // (what the UI shows), the real detail goes in `detail` (for anyone
+    // checking Netlify's function logs / this response's raw JSON), and a
+    // usage/quota-shaped message gets a more specific hint since that's
+    // the single most likely real cause and the one thing an admin can
+    // actually go act on (their Netlify account's Usage page).
+    const detail = String((err && err.message) || err);
+    console.error("admin-api.js: unhandled error —", detail);
+    const looksLikeUsageLimit = /usage[_ ]?exceeded|quota|rate[_ ]?limit|too many requests/i.test(detail);
+    const error = looksLikeUsageLimit
+      ? "This is temporarily unavailable — it looks like a usage or plan limit was hit on the server (check your Netlify account's Usage/Billing page). Please try again shortly."
+      : "Something went wrong on our end — please try again in a moment.";
+    return json({ ok: false, error: error, detail: detail }, 500, cors);
   }
 };
 
