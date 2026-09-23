@@ -1,6 +1,14 @@
 import { getStore } from "https://esm.sh/@netlify/blobs@8?bundle";
 import { ZONES, LEGACY_ZONES, provinceToZone, districtToZone, normalizeZone, isValidZone, locateZone, zoneShapes } from "./lib/zones.js";
 import { reverseGeocode } from "./lib/geocode.js";
+// Same Google Places photo search admin-api.js's Event hook "Find area
+// photo"/"Find theme photo" pickers use (see lib/places-images.js) — reused
+// here for the Map & Activities form's own "Find photo" button, so Jean
+// doesn't have to source/upload an activity photo by hand when Google
+// already has one on file for that place.
+import { searchPlacePhotos } from "./lib/places-images.js";
+import { dataUriToBytes } from "./lib/data-uri.js";
+import { nearestByDistance } from "./lib/geo-distance.js";
 
 // Backs the new "Map & Activities" admin tab and the new "Explore Map" hub
 // tab. Two data sources feed one shared response:
@@ -1200,6 +1208,11 @@ export default async (request, context) => {
   // Raw Google reverse-geocode answers, one blob per (4-decimal) coordinate,
   // so a coordinate is only ever paid for once — see cachedReverseGeocode.
   const geoCacheStore = getStore({ name: "map-geocache", consistency: "strong" });
+  // Same store + key shape as property-file-api.js's own upload — a
+  // Places-picked activity photo has to show up in exactly the same place
+  // a manually-uploaded one does, since toActivityPin() reads both kinds
+  // of photoKeys identically via /api/property-file?key=...
+  const activityPhotoFilesStore = getStore({ name: "property-listing-files", consistency: "strong" });
 
   try {
     if (request.method === "GET") {
@@ -2404,6 +2417,25 @@ export default async (request, context) => {
       return json({ ok: true, town });
     }
 
+    if (action === "nearbyActivities") {
+      // Real geometry, not typing: given a property's own coordinates
+      // (already on file from onboarding/geocoding), returns visible
+      // activities sorted nearest-first with a real distanceKm/
+      // distanceLabel attached (see lib/geo-distance.js) — feeds the
+      // landing page builder's automatic "nearby activities" suggestions
+      // (Jean can still adjust the picks; nothing here saves anything).
+      const lat = body.latitude;
+      const lng = body.longitude;
+      if (!isFinite(parseFloat(lat)) || !isFinite(parseFloat(lng))) {
+        return json({ ok: false, error: "missing or invalid latitude/longitude" }, 400);
+      }
+      const all = (await loadActivities(activitiesStore)).filter((r) => r && r.visible !== false);
+      const limit = isFinite(Number(body.limit)) ? Math.max(1, Math.min(50, Number(body.limit))) : 10;
+      const maxKm = isFinite(Number(body.maxKm)) ? Number(body.maxKm) : undefined;
+      const nearby = nearestByDistance(lat, lng, all, { limit, maxKm });
+      return json({ ok: true, activities: nearby });
+    }
+
     if (action === "addActivity") {
       const all = await loadActivities(activitiesStore);
       const id = genUniqueActivityId(new Set(all.map((r) => r.id)));
@@ -2475,6 +2507,54 @@ export default async (request, context) => {
       const existing = all[idx];
       const keys = Array.isArray(existing.photoKeys) ? existing.photoKeys.slice() : existing.photoKey ? [existing.photoKey] : [];
       existing.photoKeys = keys.filter((k) => k !== photoKey);
+      delete existing.photoKey;
+      existing.updatedAt = new Date().toISOString();
+      all[idx] = existing;
+      await saveActivities(activitiesStore, all);
+      return json({ ok: true, activity: existing });
+    }
+
+    if (action === "findPlaceImages") {
+      // Identical to admin-api.js's action of the same name (see there for
+      // the full reasoning) — kept as its own small copy rather than a
+      // shared import of the action itself, same as every other file that
+      // wraps lib/places-images.js, since each caller's around-code
+      // (auth, cors, response shape) is already file-local.
+      const query = typeof body.query === "string" ? body.query.trim().slice(0, 200) : "";
+      const apiKey = Deno.env.get("GOOGLE_PLACES_API_KEY") || "";
+      const result = await searchPlacePhotos(query, apiKey, body.limit);
+      return json(result, 200);
+    }
+
+    if (action === "saveActivityPlacePhoto") {
+      // Saves one admin-picked Places photo (already fetched to a data:
+      // URI by findPlaceImages above, sent straight back rather than
+      // re-fetched — same "client already has the bytes" shape as
+      // admin-api.js's savePlacePhoto) as one more photo on this activity,
+      // through the exact same property-listing-files store + photoKeys
+      // array that manual uploads use, so it appears identically in
+      // toActivityPin()'s photos list and counts against the same 12-photo
+      // cap as addActivityPhoto above.
+      const id = clean(body.id, 20);
+      if (!id) return json({ ok: false, error: "missing id" }, 400);
+      const all = await loadActivities(activitiesStore);
+      const idx = all.findIndex((r) => r.id === id);
+      if (idx === -1) return json({ ok: false, error: "not found" }, 404);
+      const existing = all[idx];
+      const keys = Array.isArray(existing.photoKeys) ? existing.photoKeys.slice() : existing.photoKey ? [existing.photoKey] : [];
+      if (keys.length >= 12) return json({ ok: false, error: "Maximum 12 photos per activity." }, 400);
+
+      const parsed = dataUriToBytes(body.dataUri);
+      if (!parsed) return json({ ok: false, error: "No image data received." }, 400);
+      if (parsed.buf.byteLength > 5 * 1024 * 1024) return json({ ok: false, error: "Image too large (max 5MB)." }, 413);
+
+      const photoKey = "activity-" + id + "/image/" + Date.now() + "-google-places";
+      await activityPhotoFilesStore.set(photoKey, parsed.buf, {
+        metadata: { contentType: parsed.contentType, fileName: "google-places", listingId: "activity-" + id, kind: "image", label: "activity", sourceUrl: "google_places" },
+      });
+
+      keys.push(photoKey);
+      existing.photoKeys = keys;
       delete existing.photoKey;
       existing.updatedAt = new Date().toISOString();
       all[idx] = existing;
