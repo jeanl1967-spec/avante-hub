@@ -2896,17 +2896,21 @@
         // is ~5,900 rows — filtering it per node is cheap, but building
         // every property's checkbox row up front for every town/suburb
         // would not be.
-        function resortsMatchingTown(townName){
-          var key = (townName || '').trim().toLowerCase();
-          if(!key) return [];
-          return affModalResortsSnapshot.filter(function(r){ return (r.district || '').trim().toLowerCase() === key; });
+        // Matches by townId/suburbId — same geocoded id map-api.js's
+        // zone/geocoding pass writes onto each resort-list row, same fix
+        // and same reason as renderPropertyPickerTree's propsFor above:
+        // this used to match on raw StockNetwork district/suburb TEXT,
+        // which stopped lining up once geocoded town names took over as
+        // the canonical spelling. Fixed 2026-09-22 alongside the Auto-build
+        // tree fix, same root cause.
+        function resortsMatchingTown(townId){
+          if(!townId) return [];
+          return affModalResortsSnapshot.filter(function(r){ return (r.townId || '') === townId; });
         }
-        function resortsMatchingSuburb(townName, suburbName){
-          var tKey = (townName || '').trim().toLowerCase();
-          var sKey = (suburbName || '').trim().toLowerCase();
-          if(!tKey || !sKey) return [];
+        function resortsMatchingSuburb(townId, suburbId){
+          if(!townId || !suburbId) return [];
           return affModalResortsSnapshot.filter(function(r){
-            return (r.district || '').trim().toLowerCase() === tKey && (r.suburb || '').trim().toLowerCase() === sKey;
+            return (r.townId || '') === townId && (r.suburbId || '') === suburbId;
           });
         }
         // Appends a collapsed "Properties (N)" row to parentWrap; its own
@@ -3040,7 +3044,7 @@
             if(hasSuburbs){
               suburbsWrap = document.createElement('div');
               suburbsWrap.style.cssText = 'margin-left:20px; display:none; flex-direction:column; gap:2px;';
-              var suburbNamesLower = t.suburbs.map(function(s){ return (s.name || '').trim().toLowerCase(); });
+              var subIds = t.suburbs.map(function(s){ return s.id; });
               t.suburbs.slice().sort(function(a,b){ return a.name.localeCompare(b.name); }).forEach(function(s){
                 var subNode = document.createElement('div');
                 var subLabel = document.createElement('label');
@@ -3058,15 +3062,15 @@
                 subText.textContent = s.name;
                 subLabel.appendChild(subText);
                 subNode.appendChild(subLabel);
-                appendPropertiesNode(subNode, resortsMatchingSuburb(t.name, s.name));
+                appendPropertiesNode(subNode, resortsMatchingSuburb(t.id, s.id));
                 suburbsWrap.appendChild(subNode);
               });
-              // Properties whose StockNetwork district matches this town but
-              // whose suburb text doesn't match any of this town's known
-              // suburbs (blank, or spelled differently on that row) — listed
+              // Properties geocoded to this town whose own suburbId isn't
+              // one of this town's known suburbs (not yet assigned one, or
+              // assigned one that's since been removed/merged) — listed
               // once directly under the town rather than silently dropped.
-              var otherTownResorts = resortsMatchingTown(t.name).filter(function(r){
-                return suburbNamesLower.indexOf((r.suburb || '').trim().toLowerCase()) === -1;
+              var otherTownResorts = resortsMatchingTown(t.id).filter(function(r){
+                return subIds.indexOf(r.suburbId || '') === -1;
               });
               appendPropertiesNode(suburbsWrap, otherTownResorts, 'Other properties in ' + t.name + ' (' + otherTownResorts.length + ')');
               townWrap.appendChild(suburbsWrap);
@@ -3098,7 +3102,7 @@
                 updateZoneAggregate(zoneCb, townsWrap);
                 updateAffLocationsToggleLabel();
               });
-              appendPropertiesNode(townWrap, resortsMatchingTown(t.name));
+              appendPropertiesNode(townWrap, resortsMatchingTown(t.id));
             }
 
             townsWrap.appendChild(townWrap);
@@ -4318,15 +4322,26 @@
         });
       }
 
+      // Note: this never falls back to showing data.message raw for an
+      // unmapped/unexpected reason — a Google or platform error string
+      // isn't something Jean should have to decode (same "friendly error,
+      // detail stays server-side" rule as admin-api.js's outer catch-all).
+      // "no_photos"/"photo_fetch_failed" are the two exceptions: their
+      // message is authored here in this app (see lib/places-images.js),
+      // not raw Google text, and is more specific (names the matched
+      // place) than the generic fallback below.
       function placePhotoErrorMessage(data){
-        if(data && data.message) return data.message;
         var reason = data && data.reason;
         if(reason === 'no_api_key') return 'Places image search isn\'t set up yet — add GOOGLE_PLACES_API_KEY in Netlify.';
         if(reason === 'empty_query') return 'Type something to search for first.';
         if(reason === 'ZERO_RESULTS') return 'No matching place found on Google — try a more specific or different search.';
-        if(reason === 'no_photos') return 'Google found a match but it has no photos on file — try a different search.';
-        if(reason === 'photo_fetch_failed') return 'Found matching photos but couldn\'t download them — please try again.';
-        return 'Could not find any photos for that search.';
+        if(reason === 'no_photos') return (data && data.message) || 'Google found a match but it has no photos on file — try a different search.';
+        if(reason === 'photo_fetch_failed') return (data && data.message) || 'Found matching photos but couldn\'t download them — please try again.';
+        if(reason === 'PERMISSION_DENIED') return 'Google rejected this search — check that "Places API (New)" is enabled for your key\'s project in Google Cloud Console (a separate toggle from the old "Places API").';
+        if(reason === 'RESOURCE_EXHAUSTED') return 'Google\'s usage limit for Places searches was hit — check your Google Cloud billing/quota, then try again shortly.';
+        if(reason === 'timeout') return 'Google took too long to respond — please try again.';
+        if(reason === 'network') return 'Could not reach Google — please check your connection and try again.';
+        return 'Could not find any photos for that search — please try again in a moment.';
       }
 
       function pickPlacePhoto(kind, n, idx){
@@ -4426,13 +4441,26 @@
             updateSummary();
           }
 
-          function propsFor(districtName, suburbName){
-            var dKey = (districtName || '').trim().toLowerCase();
-            var sKey = suburbName === undefined ? null : (suburbName || '').trim().toLowerCase();
+          // Matches properties to a town/suburb by townId/suburbId — the
+          // same geocoded id links map-api.js's zone/geocoding pass writes
+          // onto each resort-list row (rec.townId/rec.suburbId — see
+          // map-api.js's applyLocationTag) and createLocationBrowseTree
+          // already keys off elsewhere. Originally this matched on the raw
+          // StockNetwork district/suburb TEXT instead, which is how this
+          // tree looked before the zone/geocoding rework — that stopped
+          // working once geocoded town names (Google's canonical spelling)
+          // no longer line up 1:1 with whatever district/suburb text
+          // happened to be in the StockNetwork CSV, so towns kept showing
+          // in the tree (that list comes from adminList, untouched) while
+          // every property underneath them silently matched nothing. Fixed
+          // 2026-09-22 per Jean's "the properties are not coming up in the
+          // tree" report.
+          function propsFor(townId, suburbId){
+            if(!townId) return [];
             return resorts.filter(function(r){
-              if((r.district || '').trim().toLowerCase() !== dKey) return false;
-              if(sKey === null) return true;
-              return (r.suburb || '').trim().toLowerCase() === sKey;
+              if((r.townId || '') !== townId) return false;
+              if(suburbId === undefined) return true;
+              return (r.suburbId || '') === suburbId;
             });
           }
           function keysFor(list){
@@ -4498,14 +4526,14 @@
               var subs = t.suburbs || [];
               if(subs.length){
                 subs.forEach(function(s){
-                  var ks = keysFor(propsFor(t.name, s.name));
+                  var ks = keysFor(propsFor(t.id, s.id));
                   if(ks.length && ks.every(function(k){ return selected.has(k); })){
                     wholeAreas.push(s.name);
                     ks.forEach(function(k){ usedKeys.add(k); });
                   }
                 });
               } else {
-                var ks2 = keysFor(propsFor(t.name));
+                var ks2 = keysFor(propsFor(t.id));
                 if(ks2.length && ks2.every(function(k){ return selected.has(k); })){
                   wholeAreas.push(t.name);
                   ks2.forEach(function(k){ usedKeys.add(k); });
@@ -4566,7 +4594,7 @@
             var zoneTowns = byZone[zoneKey];
             function zoneKeysList(){
               var out = [];
-              zoneTowns.forEach(function(t){ out = out.concat(keysFor(propsFor(t.name))); });
+              zoneTowns.forEach(function(t){ out = out.concat(keysFor(propsFor(t.id))); });
               return out;
             }
 
@@ -4609,7 +4637,7 @@
                 var flatCb = document.createElement('input');
                 flatCb.type = 'checkbox';
                 flatCb.style.cssText = 'width:auto; flex:none;';
-                function townKeysList(){ return keysFor(propsFor(t.name)); }
+                function townKeysList(){ return keysFor(propsFor(t.id)); }
                 flatCb.addEventListener('click', function(e){
                   e.stopPropagation();
                   var keys = townKeysList();
@@ -4633,7 +4661,7 @@
               var townCb = document.createElement('input');
               townCb.type = 'checkbox';
               townCb.style.cssText = 'width:auto; flex:none;';
-              function townKeysList2(){ return keysFor(propsFor(t.name)); }
+              function townKeysList2(){ return keysFor(propsFor(t.id)); }
               townCb.addEventListener('click', function(e){
                 e.stopPropagation();
                 var keys = townKeysList2();
@@ -4658,14 +4686,14 @@
               townDet.addEventListener('toggle', function(){
                 if(!townDet.open || townBuilt) return;
                 townBuilt = true;
-                var suburbNamesLower = subs.map(function(s){ return (s.name || '').trim().toLowerCase(); });
+                var subIds = subs.map(function(s){ return s.id; });
                 subs.forEach(function(s){
                   var subRow = document.createElement('label');
                   subRow.className = 'loc-tree-flatrow';
                   var subCb = document.createElement('input');
                   subCb.type = 'checkbox';
                   subCb.style.cssText = 'width:auto; flex:none;';
-                  function subKeysList(){ return keysFor(propsFor(t.name, s.name)); }
+                  function subKeysList(){ return keysFor(propsFor(t.id, s.id)); }
                   subCb.addEventListener('change', function(){
                     var keys = subKeysList();
                     toggleKeys(keys, subCb.checked);
@@ -4681,11 +4709,11 @@
 
                   var subPropsWrap = document.createElement('div');
                   subPropsWrap.style.cssText = 'margin-left:16px;';
-                  appendPropertyCheckboxes(subPropsWrap, propsFor(t.name, s.name));
+                  appendPropertyCheckboxes(subPropsWrap, propsFor(t.id, s.id));
                   townBody.appendChild(subPropsWrap);
                 });
-                var otherProps = propsFor(t.name).filter(function(r){
-                  return suburbNamesLower.indexOf((r.suburb || '').trim().toLowerCase()) === -1;
+                var otherProps = propsFor(t.id).filter(function(r){
+                  return subIds.indexOf(r.suburbId || '') === -1;
                 });
                 if(otherProps.length){
                   var otherLabel = document.createElement('div');
@@ -5492,31 +5520,29 @@
         var missingSet = {};
         (missing || []).forEach(function(k){ missingSet[k] = true; });
         var html = '';
+        var hasContactFields = false;
         fieldsMeta.forEach(function(f){
           var val = (values && values[f.key]) || '';
           var isLong = f.key === 'description' || f.key === 'priceBadge';
-          // A "jean-settings" field (contactPhone/contactEmail — see
-          // lib/hook-templates.js) is shared across every flyer and only
-          // ever set from the "Flyer contact info" box at the top of this
-          // page, never per hook — rendering it as an editable override
-          // input here was exactly the confusing part Jean hit ("contact
-          // details dont stay in place"): typing into it and clicking
-          // Update preview only affected that one live preview, never
-          // saved anywhere, so it always looked like it "didn't stick".
-          // Shown read-only instead, with a pointer to where it's actually
-          // saved — no input id is rendered for it, so
-          // collectFlyerOverrides simply won't send an override for this
-          // key, and the real shared value keeps being used.
-          if(f.source === 'jean-settings'){
+          // A "jean-settings-override" field (contactPhone/contactEmail —
+          // see lib/hook-templates.js) has a shared account-wide default
+          // (the "Flyer contact info" box at the top of this page) but can
+          // also be set specifically for THIS hook — different hooks are
+          // sometimes serviced by different people, and whoever manages
+          // this one needs their own number/email on it. Editable here like
+          // any other field for previewing (Update preview), but only the
+          // dedicated "Save contact details for this hook" button below
+          // actually persists it — see saveFlyerContact. Saving it blank
+          // clears the override and falls back to the shared default again.
+          if(f.source === 'jean-settings-override'){
+            hasContactFields = true;
             html +=
-              '<label' + (missingSet[f.key] ? ' style="color:#c0453a;"' : '') + '>' +
+              '<label for="dh' + n + '-ff-' + f.key + '"' + (missingSet[f.key] ? ' style="color:#c0453a;"' : '') + '>' +
                 escapeHtml(f.key) + (missingSet[f.key] ? ' — needs a value' : '') +
               '</label>' +
               '<div class="hint" style="margin-top:-2px;">' + escapeHtml(f.role) + '</div>' +
-              '<div style="padding:9px 12px; border-radius:8px; background:#f2f4f8; border:1px solid var(--line); font-size:13.5px;">' +
-                (val ? escapeHtml(val) : '<em style="color:var(--muted);">Not set yet</em>') +
-              '</div>' +
-              '<div class="hint" style="margin-top:2px;">Shared across every flyer — set it once in the "Flyer contact info" box at the very top of this page, not per hook.</div>';
+              '<input id="dh' + n + '-ff-' + f.key + '" value="' + escapeHtml(val) + '">' +
+              '<div class="hint" style="margin-top:2px;">Specific to this hook — leave blank to use the shared default from the "Flyer contact info" box at the top of this page instead.</div>';
             return;
           }
           html +=
@@ -5528,7 +5554,39 @@
               ? '<textarea id="dh' + n + '-ff-' + f.key + '" rows="' + (f.key === 'description' ? 4 : 2) + '">' + escapeHtml(val) + '</textarea>'
               : '<input id="dh' + n + '-ff-' + f.key + '" value="' + escapeHtml(val) + '">');
         });
+        if(hasContactFields){
+          html +=
+            '<div class="btn-row" style="margin-top:6px;">' +
+              '<button type="button" class="btn-outline" data-flyer-save-contact="' + n + '">Save contact details for this hook</button>' +
+            '</div>' +
+            '<div class="status" id="dh' + n + '-flyerContactStatus" style="margin-top:4px;"></div>';
+        }
         el.innerHTML = html;
+      }
+
+      function saveFlyerContact(n){
+        var phoneInput = document.getElementById('dh' + n + '-ff-contactPhone');
+        var emailInput = document.getElementById('dh' + n + '-ff-contactEmail');
+        var statusEl = document.getElementById('dh' + n + '-flyerContactStatus');
+        if(!statusEl) return;
+        statusEl.textContent = 'Saving…';
+        statusEl.className = 'status show';
+        adminPost('saveFlyerContact', {
+          hook: n,
+          contactPhone: phoneInput ? phoneInput.value : '',
+          contactEmail: emailInput ? emailInput.value : ''
+        }).then(function(res){
+          if(res.data && res.data.ok){
+            statusEl.textContent = 'Saved — this hook now uses these contact details.';
+            statusEl.className = 'status show';
+          }else{
+            statusEl.textContent = (res.data && res.data.error) || 'Could not save.';
+            statusEl.className = 'status show';
+          }
+        }).catch(function(){
+          statusEl.textContent = 'Could not reach the server — please try again.';
+          statusEl.className = 'status show';
+        });
       }
 
       function collectFlyerOverrides(n, fieldsMeta){
@@ -5711,6 +5769,8 @@
         if(flyerUpdateN){ updateFlyerPreview(flyerUpdateN); return; }
         var flyerUseN = e.target.getAttribute('data-flyer-use');
         if(flyerUseN){ useFlyerAsHookPhoto(flyerUseN); return; }
+        var flyerSaveContactN = e.target.getAttribute('data-flyer-save-contact');
+        if(flyerSaveContactN){ saveFlyerContact(flyerSaveContactN); return; }
         var flyerSvgN = e.target.getAttribute('data-flyer-download-svg');
         if(flyerSvgN){ downloadFlyerSvg(flyerSvgN); return; }
         var flyerPngN = e.target.getAttribute('data-flyer-download-png');

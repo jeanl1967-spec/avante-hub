@@ -3962,13 +3962,18 @@
             updateSummary();
           }
 
-          function propsFor(districtName, suburbName){
-            var dKey = (districtName || '').trim().toLowerCase();
-            var sKey = suburbName === undefined ? null : (suburbName || '').trim().toLowerCase();
+          // Matches by townId/suburbId — see admin.html's identical
+          // renderPropertyPickerTree fix for the full reasoning (2026-09-22):
+          // this used to match on raw StockNetwork district/suburb TEXT,
+          // which stopped lining up once geocoded town names took over as
+          // the canonical spelling, so towns kept showing (from adminList,
+          // untouched) while every property underneath matched nothing.
+          function propsFor(townId, suburbId){
+            if(!townId) return [];
             return resorts.filter(function(r){
-              if((r.district || '').trim().toLowerCase() !== dKey) return false;
-              if(sKey === null) return true;
-              return (r.suburb || '').trim().toLowerCase() === sKey;
+              if((r.townId || '') !== townId) return false;
+              if(suburbId === undefined) return true;
+              return (r.suburbId || '') === suburbId;
             });
           }
           function keysFor(list){
@@ -4026,14 +4031,14 @@
               var subs = t.suburbs || [];
               if(subs.length){
                 subs.forEach(function(s){
-                  var ks = keysFor(propsFor(t.name, s.name));
+                  var ks = keysFor(propsFor(t.id, s.id));
                   if(ks.length && ks.every(function(k){ return selected.has(k); })){
                     wholeAreas.push(s.name);
                     ks.forEach(function(k){ usedKeys.add(k); });
                   }
                 });
               } else {
-                var ks2 = keysFor(propsFor(t.name));
+                var ks2 = keysFor(propsFor(t.id));
                 if(ks2.length && ks2.every(function(k){ return selected.has(k); })){
                   wholeAreas.push(t.name);
                   ks2.forEach(function(k){ usedKeys.add(k); });
@@ -4095,7 +4100,7 @@
             var zoneTowns = byZone[zoneKey];
             function zoneKeysList(){
               var out = [];
-              zoneTowns.forEach(function(t){ out = out.concat(keysFor(propsFor(t.name))); });
+              zoneTowns.forEach(function(t){ out = out.concat(keysFor(propsFor(t.id))); });
               return out;
             }
 
@@ -4135,7 +4140,7 @@
                 var flatCb = document.createElement('input');
                 flatCb.type = 'checkbox';
                 flatCb.style.cssText = 'width:auto; flex:none;';
-                function townKeysList(){ return keysFor(propsFor(t.name)); }
+                function townKeysList(){ return keysFor(propsFor(t.id)); }
                 flatCb.addEventListener('click', function(e){
                   e.stopPropagation();
                   var keys = townKeysList();
@@ -4159,7 +4164,7 @@
               var townCb = document.createElement('input');
               townCb.type = 'checkbox';
               townCb.style.cssText = 'width:auto; flex:none;';
-              function townKeysList2(){ return keysFor(propsFor(t.name)); }
+              function townKeysList2(){ return keysFor(propsFor(t.id)); }
               townCb.addEventListener('click', function(e){
                 e.stopPropagation();
                 var keys = townKeysList2();
@@ -4184,14 +4189,14 @@
               townDet.addEventListener('toggle', function(){
                 if(!townDet.open || townBuilt) return;
                 townBuilt = true;
-                var suburbNamesLower = subs.map(function(s){ return (s.name || '').trim().toLowerCase(); });
+                var subIds = subs.map(function(s){ return s.id; });
                 subs.forEach(function(s){
                   var subRow = document.createElement('label');
                   subRow.className = 'loc-tree-flatrow';
                   var subCb = document.createElement('input');
                   subCb.type = 'checkbox';
                   subCb.style.cssText = 'width:auto; flex:none;';
-                  function subKeysList(){ return keysFor(propsFor(t.name, s.name)); }
+                  function subKeysList(){ return keysFor(propsFor(t.id, s.id)); }
                   subCb.addEventListener('change', function(){
                     var keys = subKeysList();
                     toggleKeys(keys, subCb.checked);
@@ -4207,11 +4212,11 @@
 
                   var subPropsWrap = document.createElement('div');
                   subPropsWrap.style.cssText = 'margin-left:16px;';
-                  appendPropertyCheckboxes(subPropsWrap, propsFor(t.name, s.name));
+                  appendPropertyCheckboxes(subPropsWrap, propsFor(t.id, s.id));
                   townBody.appendChild(subPropsWrap);
                 });
-                var otherProps = propsFor(t.name).filter(function(r){
-                  return suburbNamesLower.indexOf((r.suburb || '').trim().toLowerCase()) === -1;
+                var otherProps = propsFor(t.id).filter(function(r){
+                  return subIds.indexOf(r.suburbId || '') === -1;
                 });
                 if(otherProps.length){
                   var otherLabel = document.createElement('div');
@@ -4377,26 +4382,28 @@
         var missingSet = {};
         (missing || []).forEach(function(k){ missingSet[k] = true; });
         var html = '';
+        var hasContactFields = false;
         fieldsMeta.forEach(function(f){
           var val = (values && values[f.key]) || '';
           var isLong = f.key === 'description' || f.key === 'priceBadge';
-          // A "jean-settings" field (contactPhone/contactEmail) is shared
-          // across every flyer, admin- and self-managed alike, and is only
-          // ever set from admin.html's "Flyer contact info" box — never
-          // per hook, and not something this page can change at all. Shown
-          // read-only rather than as an editable override input that would
-          // never actually save (see admin-api.js's identical renderFlyer
-          // action / lib/hook-templates.js for the full reasoning).
-          if(f.source === 'jean-settings'){
+          // A "jean-settings-override" field (contactPhone/contactEmail)
+          // has a shared account-wide default (set from admin.html's
+          // "Flyer contact info" box) but can also be set specifically for
+          // THIS hook — useful when an affiliate manages their own hook and
+          // wants their own number/email on it instead of Avante's. Editable
+          // here like any other field for previewing (Update preview), but
+          // only the dedicated "Save contact details for this hook" button
+          // below actually persists it — see saveFlyerContact. Saving it
+          // blank clears the override and falls back to the shared default.
+          if(f.source === 'jean-settings-override'){
+            hasContactFields = true;
             html +=
-              '<label' + (missingSet[f.key] ? ' style="color:#c0453a;"' : '') + '>' +
+              '<label for="h' + n + '-ff-' + f.key + '"' + (missingSet[f.key] ? ' style="color:#c0453a;"' : '') + '>' +
                 flyerEscapeHtml(f.key) + (missingSet[f.key] ? ' — needs a value' : '') +
               '</label>' +
               '<div class="hint" style="margin-top:-2px;">' + flyerEscapeHtml(f.role) + '</div>' +
-              '<div style="padding:9px 12px; border-radius:8px; background:#f2f4f8; border:1px solid var(--line); font-size:13.5px;">' +
-                (val ? flyerEscapeHtml(val) : '<em style="color:var(--muted);">Not set yet</em>') +
-              '</div>' +
-              '<div class="hint" style="margin-top:2px;">Set by Avante Travel for every flyer — not something you can change here.</div>';
+              '<input id="h' + n + '-ff-' + f.key + '" value="' + flyerEscapeHtml(val) + '">' +
+              '<div class="hint" style="margin-top:2px;">Specific to this hook — leave blank to use Avante’s shared contact details instead.</div>';
             return;
           }
           html +=
@@ -4408,7 +4415,49 @@
               ? '<textarea id="h' + n + '-ff-' + f.key + '" rows="' + (f.key === 'description' ? 4 : 2) + '">' + flyerEscapeHtml(val) + '</textarea>'
               : '<input id="h' + n + '-ff-' + f.key + '" value="' + flyerEscapeHtml(val) + '">');
         });
+        if(hasContactFields){
+          html +=
+            '<div class="btn-row" style="margin-top:6px;">' +
+              '<button type="button" class="btn-outline" data-flyer-save-contact="' + n + '">Save contact details for this hook</button>' +
+            '</div>' +
+            '<div class="status" id="h' + n + '-flyerContactStatus" style="margin-top:4px;"></div>';
+        }
         el.innerHTML = html;
+      }
+
+      function saveFlyerContact(n){
+        var affId = flyerAffId();
+        var statusEl = document.getElementById('h' + n + '-flyerContactStatus');
+        if(!statusEl) return;
+        if(!affId){
+          statusEl.textContent = 'Save this hook with a booking link first.';
+          statusEl.className = 'status show';
+          return;
+        }
+        var phoneInput = document.getElementById('h' + n + '-ff-contactPhone');
+        var emailInput = document.getElementById('h' + n + '-ff-contactEmail');
+        statusEl.textContent = 'Saving…';
+        statusEl.className = 'status show';
+        fetch('/api/hook?aff=' + encodeURIComponent(affId) + '&hook=' + encodeURIComponent(n), {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            action: 'saveFlyerContact',
+            contactPhone: phoneInput ? phoneInput.value : '',
+            contactEmail: emailInput ? emailInput.value : ''
+          })
+        }).then(function(r){ return r.json(); }).then(function(data){
+          if(data && data.ok){
+            statusEl.textContent = 'Saved — this hook now uses these contact details.';
+            statusEl.className = 'status show';
+          }else{
+            statusEl.textContent = (data && data.error) || 'Could not save.';
+            statusEl.className = 'status show';
+          }
+        }).catch(function(){
+          statusEl.textContent = 'Could not reach the server — please try again.';
+          statusEl.className = 'status show';
+        });
       }
 
       function collectFlyerOverrides(n, fieldsMeta){
@@ -4571,6 +4620,8 @@
         if(flyerUpdateN){ updateFlyerPreview(flyerUpdateN); return; }
         var flyerUseN = e.target.getAttribute('data-flyer-use');
         if(flyerUseN){ useFlyerAsHookPhoto(flyerUseN); return; }
+        var flyerSaveContactN = e.target.getAttribute('data-flyer-save-contact');
+        if(flyerSaveContactN){ saveFlyerContact(flyerSaveContactN); return; }
         var flyerSvgN = e.target.getAttribute('data-flyer-download-svg');
         if(flyerSvgN){ downloadFlyerSvg(flyerSvgN); return; }
         var flyerPngN = e.target.getAttribute('data-flyer-download-png');
