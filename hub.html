@@ -3896,7 +3896,11 @@
           description: draft.description || '',
           attractions: draft.attractions || '',
           roomType: draft.roomType || '',
-          names: draft.sourceNames || []
+          names: draft.sourceNames || [],
+          // Same real-coordinates pass-through as admin.html's identical
+          // draft-to-source mapping — see lib/hook-draft.js's withCoords.
+          latitude: draft.latitude || '',
+          longitude: draft.longitude || ''
         };
 
         var pickedUrls = draft.picked.map(function(idx){ return draft.photos[idx]; });

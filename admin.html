@@ -1337,6 +1337,17 @@
         <div id="activityFormPhotos" style="display:flex; flex-wrap:wrap; gap:8px; margin:6px 0;"></div>
         <input type="file" id="activityPhotoInput" accept="image/*" multiple style="display:block;">
         <p id="activityPhotoHint" style="margin:6px 0 0; font-size:12px; color:var(--muted);">For a new activity, save it first — photos then upload automatically right after.</p>
+        <button type="button" class="btn-outline autobuild-toggle" style="border-color:var(--navy); color:var(--navy); margin-top:8px;" id="activityFindPhotoToggle">🖼️ Find photo</button>
+        <div class="autobuild-box" id="activityFindPhotoBox">
+          <label>Search Google for a photo of this activity/place</label>
+          <div class="autobuild-row">
+            <input id="activityPhotoQuery" placeholder="e.g. Bloukrans Bungy, South Africa">
+            <button type="button" class="btn-outline" id="activityPhotoSearchBtn">Search</button>
+          </div>
+          <div class="hint" style="margin-top:4px;">Save the activity first — a picked photo is added to its photo list above.</div>
+          <div class="autobuild-status" id="activityPhotoStatus"></div>
+          <div class="autobuild-photo-grid" id="activityPhotoGrid"></div>
+        </div>
         <div class="btn-row" style="margin-top:10px;">
           <button class="primary" id="saveActivityBtn">Save activity</button>
           <button class="btn-outline" id="cancelActivityEditBtn" style="display:none;">Cancel edit</button>
@@ -4985,7 +4996,13 @@
           description: draft.description || '',
           attractions: draft.attractions || '',
           roomType: draft.roomType || '',
-          names: draft.sourceNames || []
+          names: draft.sourceNames || [],
+          // The matched property's real coordinates (see lib/hook-draft.js's
+          // withCoords) — feeds the landing page feature's distance-
+          // matching to Map & Activities. Blank when the resort-list row
+          // has none on file, same as every other field here.
+          latitude: draft.latitude || '',
+          longitude: draft.longitude || ''
         };
 
         // draft.picked is already in click order (toggleAutobuildPhoto
@@ -6930,6 +6947,91 @@
           renderFormPhotoThumbs();
         }
         photoInput.value = '';
+      });
+
+      // ---- Activity "Find photo" (Google Places, see lib/places-images.js
+      // and map-api.js's findPlaceImages/saveActivityPlacePhoto) — same
+      // pattern as the Event hook's "Find area photo"/"Find theme photo"
+      // pickers, adapted to activities: results add to the 12-photo list
+      // above instead of filling a fixed hero/secondary flyer slot. ----
+      var activityFindPhotoToggle = document.getElementById('activityFindPhotoToggle');
+      var activityFindPhotoBox = document.getElementById('activityFindPhotoBox');
+      var activityPhotoQueryEl = document.getElementById('activityPhotoQuery');
+      var activityPhotoSearchBtn = document.getElementById('activityPhotoSearchBtn');
+      var activityPhotoStatusEl = document.getElementById('activityPhotoStatus');
+      var activityPhotoGridEl = document.getElementById('activityPhotoGrid');
+      var activityPlacePhotoResults = [];
+
+      activityFindPhotoToggle.addEventListener('click', function(){
+        var willShow = !activityFindPhotoBox.classList.contains('show');
+        activityFindPhotoBox.classList.toggle('show', willShow);
+        if(willShow && !activityPhotoQueryEl.value.trim()){
+          var seed = (nameInput.value.trim() + (areaInput.value.trim() ? ', ' + areaInput.value.trim() : '')).trim();
+          activityPhotoQueryEl.value = seed;
+        }
+      });
+
+      function searchActivityPlacePhotos(){
+        var query = activityPhotoQueryEl.value.trim();
+        activityPhotoGridEl.innerHTML = '';
+        if(!query){
+          activityPhotoStatusEl.textContent = 'Type something to search for first.';
+          return;
+        }
+        activityPhotoStatusEl.textContent = 'Searching…';
+        mapAdminPost('findPlaceImages', { query: query, limit: 6 }).then(function(res){
+          var data = res.data;
+          if(data && data.ok && data.images && data.images.length){
+            activityPlacePhotoResults = data.images;
+            var matched = data.place && data.place.name ? (' — matched "' + data.place.name + '"') : '';
+            activityPhotoStatusEl.textContent = data.images.length + ' photo' + (data.images.length === 1 ? '' : 's') + ' found' + matched + '. Click one to use it.';
+            activityPhotoGridEl.innerHTML = data.images.map(function(img, idx){
+              return '<div class="autobuild-photo" data-activity-photo-pick="' + idx + '" title="' + escapeHtml(img.attribution || '') + '">' +
+                '<img src="' + img.dataUri + '" loading="lazy" alt="Candidate photo ' + (idx + 1) + '">' +
+              '</div>';
+            }).join('');
+          }else{
+            activityPlacePhotoResults = [];
+            activityPhotoStatusEl.textContent = placePhotoErrorMessage(data);
+          }
+        }).catch(function(){
+          activityPhotoStatusEl.textContent = 'Could not reach the server — please try again.';
+        });
+      }
+      activityPhotoSearchBtn.addEventListener('click', searchActivityPlacePhotos);
+
+      function pickActivityPlacePhoto(idx){
+        var img = activityPlacePhotoResults[idx];
+        if(!img) return;
+        var id = idInput.value.trim();
+        if(!id){
+          activityPhotoStatusEl.textContent = 'Save this activity first, then pick a photo.';
+          return;
+        }
+        if(currentFormPhotoKeys.length >= 12){
+          activityPhotoStatusEl.textContent = 'Maximum 12 photos per activity.';
+          return;
+        }
+        Array.prototype.forEach.call(activityPhotoGridEl.children, function(el, i){ el.classList.toggle('picked', i === idx); });
+        activityPhotoStatusEl.textContent = 'Saving…';
+        mapAdminPost('saveActivityPlacePhoto', { id: id, dataUri: img.dataUri }).then(function(res){
+          if(res.data && res.data.ok){
+            activityPhotoStatusEl.textContent = 'Photo added.';
+            showToast('Photo added to activity');
+            currentFormPhotoKeys = res.data.activity.photoKeys || [];
+            renderFormPhotoThumbs();
+            loadActivities();
+          }else{
+            activityPhotoStatusEl.textContent = (res.data && res.data.error) || 'Could not save this photo — please try again.';
+          }
+        }).catch(function(){
+          activityPhotoStatusEl.textContent = 'Could not reach the server — please try again.';
+        });
+      }
+      activityPhotoGridEl.addEventListener('click', function(e){
+        var el = e.target.closest && e.target.closest('[data-activity-photo-pick]');
+        if(!el) return;
+        pickActivityPlacePhoto(Number(el.getAttribute('data-activity-photo-pick')));
       });
 
       var townTableBody = document.getElementById('townsTableBody');
