@@ -1,7 +1,7 @@
-// Fetches real, place-tagged photos from Google's Places API (legacy Text
-// Search + Place Photo endpoints) for the two things Event hooks need: a
-// location/area photo (query = the event's location name) and a "theme"
-// photo (query = the event's theme, e.g. "whale watching") — see
+// Fetches real, place-tagged photos from Google's Places API (New) — Text
+// Search + Place Photo media endpoints — for the two things Event hooks
+// need: a location/area photo (query = the event's location name) and a
+// "theme" photo (query = the event's theme, e.g. "whale watching") — see
 // admin-api.js's findPlaceImages action, which is the only caller.
 //
 // Jean explicitly chose Google Places API for both of these over
@@ -13,6 +13,18 @@
 // generic themed scenery — the admin can always retype a more specific
 // query; see admin.html's picker). That's a settled decision, not a bug
 // to fix here.
+//
+// Originally built against the legacy Text Search + Place Photo endpoints
+// (maps.googleapis.com/maps/api/place/...). Switched to Places API (New)
+// (places.googleapis.com/v1/...) after Jean hit "You're calling a legacy
+// API, which is not enabled for your project" in production — new Google
+// Cloud projects generally don't have the legacy Places API enabled by
+// default any more, only Places API (New), and Google's own error message
+// points at this replacement. IMPORTANT for Jean: this needs "Places API
+// (New)" specifically enabled for her key's project in Google Cloud
+// Console (Enabled APIs & services) — a key that only has the old "Places
+// API" enabled will need that flipped on too, it's a separate API from
+// Google's side even though the product name is nearly identical.
 //
 // This module NEVER returns a Google Places photo URL to the caller —
 // those embed the API key as a query param, which would otherwise leak
@@ -29,11 +41,11 @@ import { mapWithConcurrency } from "./booking-stats.js";
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
-async function fetchWithTimeout(url) {
+async function fetchWithTimeout(url, init) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    return await fetch(url, { signal: controller.signal });
+    return await fetch(url, { ...(init || {}), signal: controller.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -43,8 +55,11 @@ async function fetchWithTimeout(url) {
 //   { ok: true, place: { name, formattedAddress }, images: [{ dataUri, width, height, attribution }] }
 // On failure:
 //   { ok: false, reason, message }
-// `reason` is Google's own status string (e.g. "ZERO_RESULTS",
-// "REQUEST_DENIED", "OVER_QUERY_LIMIT") when Google actually responded, or
+// `reason` is Google's own error status string (e.g. "NOT_FOUND",
+// "PERMISSION_DENIED", "RESOURCE_EXHAUSTED") when Google actually
+// responded, "ZERO_RESULTS" for a search that came back empty (Places API
+// (New) reports this as a plain empty result, not an error — normalized
+// here to keep the same reason admin.html already knows how to show), or
 // one of "no_api_key" / "empty_query" / "network" / "timeout" /
 // "bad_response" / "no_photos" / "photo_fetch_failed" otherwise — same
 // shape as lib/geocode.js's reverseGeocode, for the same reason: "every
@@ -57,18 +72,24 @@ export async function searchPlacePhotos(query, apiKey, limit) {
   if (!apiKey) return { ok: false, reason: "no_api_key", message: "" };
   if (!q) return { ok: false, reason: "empty_query", message: "" };
 
-  const searchUrl =
-    "https://maps.googleapis.com/maps/api/place/textsearch/json?query=" +
-    encodeURIComponent(q) + "&key=" + encodeURIComponent(apiKey);
-
   let searchRes;
   try {
-    searchRes = await fetchWithTimeout(searchUrl);
+    searchRes = await fetchWithTimeout("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "X-Goog-Api-Key": apiKey,
+        // Places API (New) charges/returns nothing without an explicit
+        // field mask — this is the minimum needed to match a place, show
+        // it, and fetch its photos.
+        "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.photos",
+      },
+      body: JSON.stringify({ textQuery: q }),
+    });
   } catch (e) {
     const timedOut = e && e.name === "AbortError";
     return { ok: false, reason: timedOut ? "timeout" : "network", message: String((e && e.message) || e) };
   }
-  if (!searchRes.ok) return { ok: false, reason: "bad_response", message: "HTTP " + searchRes.status };
 
   let searchData;
   try {
@@ -76,35 +97,45 @@ export async function searchPlacePhotos(query, apiKey, limit) {
   } catch (e) {
     return { ok: false, reason: "bad_response", message: "Response wasn't valid JSON" };
   }
-  if (!searchData || searchData.status !== "OK" || !Array.isArray(searchData.results) || !searchData.results.length) {
-    return {
-      ok: false,
-      reason: (searchData && searchData.status) || "unknown",
-      message: (searchData && searchData.error_message) || "",
-    };
+
+  if (!searchRes.ok) {
+    // Places API (New) reports failures as { error: { code, message,
+    // status } } rather than embedding a status string in a 200 body —
+    // `status` here (PERMISSION_DENIED, RESOURCE_EXHAUSTED, INVALID_ARGUMENT,
+    // ...) is the closest equivalent to the legacy API's status field.
+    const err = searchData && searchData.error;
+    return { ok: false, reason: (err && err.status) || "bad_response", message: (err && err.message) || "HTTP " + searchRes.status };
+  }
+
+  if (!searchData || !Array.isArray(searchData.places) || !searchData.places.length) {
+    return { ok: false, reason: "ZERO_RESULTS", message: "" };
   }
 
   // Only the top match's own photos — same "results[0] carries what we
   // need, no merging across candidates" approach geocode.js takes, and
   // keeps the picker showing photos of one real place rather than a
   // grab-bag of unrelated ones sharing the search text.
-  const place = searchData.results[0];
+  const place = searchData.places[0];
+  const placeName = (place.displayName && place.displayName.text) || "";
   const photos = Array.isArray(place.photos) ? place.photos.slice(0, cap) : [];
   if (!photos.length) {
     return {
       ok: false,
       reason: "no_photos",
-      message: "Google found \"" + (place.name || q) + "\" but it has no photos on file.",
+      message: "Google found \"" + (placeName || q) + "\" but it has no photos on file.",
     };
   }
 
   const fetched = await mapWithConcurrency(
     photos,
     async (photo) => {
-      if (!photo || !photo.photo_reference) return null;
+      // `photo.name` is a resource path like
+      // "places/PLACE_ID/photos/PHOTO_ID" — the media endpoint below
+      // redirects (default fetch() behavior follows this) to the actual
+      // image bytes.
+      if (!photo || !photo.name) return null;
       const photoUrl =
-        "https://maps.googleapis.com/maps/api/place/photo?maxwidth=900&photoreference=" +
-        encodeURIComponent(photo.photo_reference) + "&key=" + encodeURIComponent(apiKey);
+        "https://places.googleapis.com/v1/" + photo.name + "/media?maxWidthPx=900&key=" + encodeURIComponent(apiKey);
       try {
         const res = await fetchWithTimeout(photoUrl);
         if (!res.ok) return null;
@@ -113,13 +144,13 @@ export async function searchPlacePhotos(query, apiKey, limit) {
         const buf = await res.arrayBuffer();
         if (buf.byteLength < 1 || buf.byteLength > MAX_PHOTO_BYTES) return null;
         const attribution =
-          Array.isArray(photo.html_attributions) && photo.html_attributions.length
-            ? String(photo.html_attributions[0]).replace(/<[^>]+>/g, "")
+          Array.isArray(photo.authorAttributions) && photo.authorAttributions.length && photo.authorAttributions[0].displayName
+            ? String(photo.authorAttributions[0].displayName)
             : "Photo via Google";
         return {
           dataUri: bytesToDataUri(buf, contentType),
-          width: photo.width || null,
-          height: photo.height || null,
+          width: photo.widthPx || null,
+          height: photo.heightPx || null,
           attribution: attribution,
         };
       } catch (e) {
@@ -140,7 +171,7 @@ export async function searchPlacePhotos(query, apiKey, limit) {
 
   return {
     ok: true,
-    place: { name: place.name || "", formattedAddress: place.formatted_address || "" },
+    place: { name: placeName, formattedAddress: place.formattedAddress || "" },
     images: images,
   };
 }

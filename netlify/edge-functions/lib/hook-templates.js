@@ -174,7 +174,16 @@ export const HOOK_TEMPLATES = {
         type: "text",
         role: "Contact phone number.",
         matchText: "071 605 0055",
-        source: "jean-settings", // shared "Flyer contact info" setting (admin-managed), same on every flyer — not typed per-hook.
+        // Has an account-wide default (the shared "Flyer contact info" box,
+        // admin-managed) but CAN be overridden per hook — different hooks
+        // are sometimes serviced by different people, and whoever actually
+        // manages a given hook (admin, or the affiliate on their own Hub
+        // page) needs to be able to put their own number/email on it. See
+        // lib/hook-flyer.js's resolvePropertyFlyerFields for the fallback
+        // (hook's own flyerContactPhone/flyerContactEmail, else the shared
+        // setting) and admin-api.js/hook-api.js's saveFlyerContact action
+        // for where a per-hook override is actually persisted.
+        source: "jean-settings-override",
         geometry: { top: 1244.55, left: 191.61, width: 260.74, height: 37.73 },
         style: { fontSize: 28, fontWeight: "bold", color: "#ffffff", textAlign: "start", font: "body" },
       },
@@ -183,7 +192,7 @@ export const HOOK_TEMPLATES = {
         type: "text",
         role: "Contact email address.",
         matchText: "marketing@avantehospitality.co.za",
-        source: "jean-settings",
+        source: "jean-settings-override",
         geometry: { top: 1290, left: 191, width: 290, height: 18.8 },
         style: { fontSize: 14, fontWeight: "normal", color: "#ffffff", textAlign: "start", font: "body" },
       },

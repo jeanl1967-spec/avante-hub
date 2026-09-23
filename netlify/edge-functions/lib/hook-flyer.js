@@ -46,7 +46,21 @@ function resolvePropertyFlyerFields(template, hookRecord, contactSettings, overr
   const settings = contactSettings && typeof contactSettings === "object" ? contactSettings : {};
 
   const name = typeof src.label === "string" ? src.label.trim() : "";
-  const area = typeof record.locationLabel === "string" ? record.locationLabel.trim() : "";
+  const rawArea = typeof record.locationLabel === "string" ? record.locationLabel.trim() : "";
+  // locationLabel is meant to name the AREA a property is in (a town or
+  // suburb, e.g. "Hermanus") — but when a hook was auto-built from a
+  // single, individually-picked property (rather than a whole ticked
+  // suburb/town), there's no separate area name to fall back on, so
+  // buildHookDraft (lib/hook-draft.js) and the tree's own selection-label
+  // computation (admin.html/hub.html's computeSelectionLabel) both end up
+  // reusing the property's own name as its "location" too. Left as-is that
+  // produces "Lions Rock Rapids Camp • Lions Rock Rapids Camp" and "In
+  // Lions Rock Rapids Camp!" on the flyer — a visibly broken duplicate
+  // Jean flagged directly (screenshot, 2026-09-23). Guarding against it
+  // here, at the one place every hook's flyer fields are resolved, fixes
+  // every hook built this way (already-saved ones included) without
+  // needing to touch how locationLabel gets set upstream.
+  const area = rawArea && rawArea.toLowerCase() !== name.toLowerCase() ? rawArea : "";
   const description = typeof src.description === "string" ? src.description.trim() : "";
   const attractions = typeof src.attractions === "string" ? src.attractions.trim() : "";
   const roomType = typeof src.roomType === "string" ? src.roomType.trim() : "";
@@ -70,8 +84,12 @@ function resolvePropertyFlyerFields(template, hookRecord, contactSettings, overr
     amenity2: amenities[1] || "",
     amenity3: amenities[2] || "",
     contactLabel: "Contact us",
-    contactPhone: (settings.contactPhone || "").trim(),
-    contactEmail: (settings.contactEmail || "").trim(),
+    // This hook's own contact override wins if it's set anything (saved via
+    // the saveFlyerContact action — see admin-api.js/hook-api.js), else
+    // fall back to the shared account-wide default. Lets different hooks,
+    // serviced by different people, show different contact details.
+    contactPhone: (record.flyerContactPhone || settings.contactPhone || "").trim(),
+    contactEmail: (record.flyerContactEmail || settings.contactEmail || "").trim(),
   };
 
   if (overrides && typeof overrides === "object") {
@@ -92,8 +110,37 @@ function resolvePropertyFlyerFields(template, hookRecord, contactSettings, overr
 // source text.
 function splitIntoBullets(text, max) {
   if (!text) return [];
-  const parts = text
-    .split(/[.;|•\n]+|,\s+(?=[A-Z])/)
+  // StockNetwork's scraped "attractions" text is often a single run-on
+  // sentence that OPENS with a generic throat-clearing clause — "Nearby
+  // attractions / activities can include day trips into the Cederberg,
+  // whale watching, ..." — before it ever gets to a real, nameable
+  // amenity. Splitting on punctuation alone (below) made that whole
+  // intro the first "bullet", which is long, isn't really an amenity,
+  // and got hard-truncated mid-word with an ellipsis — exactly the
+  // garbled "Nearby attractions / activities can include day trips
+  // int…" bullet Jean flagged (screenshot, 2026-09-23). Stripping a
+  // single leading "...can include/includes/included:" clause (bounded
+  // to 100 chars so it can never eat a real, longer sentence) before
+  // splitting means the first bullet starts at the first real list item
+  // ("day trips into the Cederberg") instead of the throat-clearing
+  // intro. Only the first such clause is stripped — real content later
+  // in the text that happens to contain "include" is left untouched.
+  const withoutIntro = text.replace(/^.{0,100}?\binclude[sd]?\b:?\s*/i, "");
+  // Was: only split on a comma when it's directly followed by a capital
+  // letter, to avoid chopping up a genuine sentence. But a comma-separated
+  // *list* of attractions ("day trips into the Cederberg, whale watching
+  // in season, and local wine tasting") is normal, lowercase, StockNetwork
+  // text — under the old rule that whole list stayed as one bullet and
+  // still got hard-truncated with an ellipsis, just starting one clause
+  // later than before. Splitting on every comma (optionally followed by a
+  // connecting "and"/"or", which is stripped so the bullet doesn't start
+  // with it) turns that into three real, short bullets instead of one
+  // long truncated one — matching what Jean's screenshot showed was
+  // needed. This function is only ever fed the `attractions` field (a
+  // list of real scraped items), never free-form prose, so splitting on
+  // every comma is safe here.
+  const parts = withoutIntro
+    .split(/[.;|•\n]+|,\s*(?:and\s+|or\s+)?/i)
     .map((s) => s.trim())
     .filter(Boolean);
   return parts.slice(0, max).map((s) => (s.length > 60 ? s.slice(0, 57).trim() + "…" : s));
