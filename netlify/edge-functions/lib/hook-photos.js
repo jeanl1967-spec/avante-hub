@@ -67,6 +67,14 @@ export async function saveHookPhotoUrls(hookStore, imageStore, key, urls, source
       fields.imageHash = newImageHash;
     }
     if (source && typeof source === "object") {
+      // latitude/longitude: the matched property's real coordinates (see
+      // lib/hook-draft.js's withCoords), added 2026-09-23 for the landing
+      // page feature's distance-matching to Map & Activities
+      // (lib/geo-distance.js). Validated as finite numbers before storing
+      // — anything else (missing, malformed) is left blank, same
+      // nothing-invented rule as every other field here.
+      const lat = parseFloat(source.latitude);
+      const lng = parseFloat(source.longitude);
       fields.source = {
         mode: source.mode === "area" ? "area" : "property",
         label: typeof source.label === "string" ? source.label.trim().slice(0, 200) : "",
@@ -74,6 +82,8 @@ export async function saveHookPhotoUrls(hookStore, imageStore, key, urls, source
         attractions: typeof source.attractions === "string" ? source.attractions.trim().slice(0, 2000) : "",
         roomType: typeof source.roomType === "string" ? source.roomType.trim().slice(0, 100) : "",
         names: Array.isArray(source.names) ? source.names.filter((x) => typeof x === "string").slice(0, 10) : [],
+        latitude: isFinite(lat) ? String(lat) : "",
+        longitude: isFinite(lng) ? String(lng) : "",
       };
     }
     await mergeIntoRecord(hookStore, key, fields);

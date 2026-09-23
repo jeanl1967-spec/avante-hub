@@ -24,6 +24,22 @@ import { resortKey } from "./resort-key.js";
 // sizes, this just stops a mis-click from firing 200 scrape requests.
 const MAX_SELECTION_PROPERTIES = 24;
 
+// Attaches a resort-list row's own real latitude/longitude (Jean's CSV
+// import, geocoded the same way every property/activity coordinate in this
+// app is — see map-api.js) onto a fetchResortInfo() scrape result, which
+// carries no location data of its own (StockNetwork's ResortInfo page has
+// no lat/long field, same story as it having no static rate field). Added
+// 2026-09-23 for the landing-page feature's distance-matching to Map &
+// Activities (lib/geo-distance.js) — real coordinates, never guessed, left
+// off entirely when the resort-list row itself has none on file.
+function withCoords(info, row) {
+  if (!info || !row) return info;
+  const lat = parseFloat(row.latitude);
+  const lng = parseFloat(row.longitude);
+  if (!isFinite(lat) || !isFinite(lng)) return info;
+  return { ...info, latitude: String(lat), longitude: String(lng) };
+}
+
 // resortStore: the "resort-list" Netlify Blobs store (read-only here).
 // input: { resortId?, siteId?, query?, resortKeys?, label?, bookingSiteGuid? }
 // — bookingSiteGuid is the placeholder StockNetwork site GUID to build the
@@ -76,7 +92,7 @@ export async function buildHookDraft(resortStore, input) {
       return { ok: false, error: "None of the selected properties could be found — try re-picking from the tree.", status: 404 };
     }
     const fetched = await Promise.all(matches.map((r) => fetchResortInfo(r.resortId, r.siteId)));
-    sources = fetched.filter(Boolean);
+    sources = fetched.map((info, i) => withCoords(info, matches[i])).filter(Boolean);
     if (!sources.length) {
       return { ok: false, error: "Couldn't load info for the selected properties right now. Try again shortly.", status: 502 };
     }
@@ -88,7 +104,13 @@ export async function buildHookDraft(resortStore, input) {
     if (!info) {
       return { ok: false, error: "Couldn't load that property's info page. Try again, or pick a different one.", status: 502 };
     }
-    sources = [info];
+    // This path is an already-known resortId+siteId (no search needed), so
+    // the resort-list row is only looked up for its own coordinates, same
+    // withCoords helper as every other path.
+    const listRecordForId = await resortStore.get("current", { type: "json" });
+    const allResortsForId = listRecordForId && Array.isArray(listRecordForId.resorts) ? listRecordForId.resorts : [];
+    const rowForId = allResortsForId.find((r) => r.resortId === bodyResortId && (!bodySiteId || r.siteId === bodySiteId));
+    sources = [withCoords(info, rowForId)];
     label = info.name || label;
   } else {
     const listRecord = await resortStore.get("current", { type: "json" });
@@ -113,7 +135,7 @@ export async function buildHookDraft(resortStore, input) {
       if (!info) {
         return { ok: false, error: "Couldn't load that property's info page. Try again, or pick a different one.", status: 502 };
       }
-      sources = [info];
+      sources = [withCoords(info, propertyMatch)];
     } else {
       mode = "area";
       let matches = allResorts.filter((r) => r.district && r.district.toLowerCase() === queryLower);
@@ -137,7 +159,7 @@ export async function buildHookDraft(resortStore, input) {
       }
 
       const fetched = await Promise.all(distinct.map((r) => fetchResortInfo(r.resortId, r.siteId)));
-      sources = fetched.filter(Boolean);
+      sources = fetched.map((info, i) => withCoords(info, distinct[i])).filter(Boolean);
       if (!sources.length) {
         return { ok: false, error: "Couldn't load property info for that area right now. Try again shortly.", status: 502 };
       }
@@ -181,10 +203,20 @@ export async function buildHookDraft(resortStore, input) {
   const attractions = sources.map((s) => s.attractions).filter(Boolean).join(" ");
   const roomType = sources.length === 1 ? sources[0].roomType || "" : "";
   const sourceNames = sources.map((s) => s.name).filter(Boolean);
+  // The first source with real coordinates on file — a single-property
+  // draft always has at most one, an area/selection draft picks whichever
+  // matched property happened to have coordinates first. Used for the
+  // landing page feature's distance-matching to Map & Activities; left
+  // blank (never guessed) when nothing in `sources` has coordinates.
+  const withCoordsSource = sources.find((s) => s && s.latitude && s.longitude);
+  const latitude = withCoordsSource ? withCoordsSource.latitude : "";
+  const longitude = withCoordsSource ? withCoordsSource.longitude : "";
 
   return {
     ok: true,
     mode: mode,
+    latitude: latitude,
+    longitude: longitude,
     label: label,
     locationLabel: locationLabel,
     caption: caption || "",

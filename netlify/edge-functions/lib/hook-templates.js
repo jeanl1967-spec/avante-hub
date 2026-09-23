@@ -491,6 +491,370 @@ export const EVENT_TEMPLATE_V1 = {
 // table used everywhere else in this file.
 HOOK_TEMPLATES["event-flyer-v1"] = EVENT_TEMPLATE_V1;
 
+// -----------------------------------------------------------------------
+// Templates: place-guide-v1 / town-region-v1
+// -----------------------------------------------------------------------
+// Source design: the same 3-page Canva template Jean linked for the new
+// landing-page feature (2026-09-23) — "AVANTE 3-PAGE FLYER — BLANK
+// TEMPLATE", design id DAHWA3gbEGo (https://canva.link/3qtbmt7ijkc2sv3).
+// Page 1 of that design is (near-exactly) property-flyer-v1 above, already
+// built — these are pages 2 ("Place!") and 3 ("Town! & Region"), captured
+// the same way (an editing-transaction read of the real design's own
+// element geometry), registered here for the landing page builder Jean
+// asked for, NOT yet wired into any renderer.
+//
+// Two things are deliberately left open pending Jean's confirmation before
+// any UI is built on top of these (see the project doc this round's work
+// was written up in):
+//
+// 1. Whether the landing page renders these as a fixed-size graphic (the
+//    same SVG approach hook-flyer-svg.js uses for the existing flyers) or
+//    as flowing, responsive HTML (the way hook-landing.html works today).
+//    This registry's geometry supports either — it's just captured
+//    positions/sizes — but only the SVG path would use it directly.
+// 2. The `heading`/`headingLine2` fields below (the design's floating
+//    "HEADING" text sitting above the fixed "PLACE!"/"TOWN!" page label)
+//    have no filled real-world example to check against — only Jean's own
+//    blank/labeled template. matchText below is the literal placeholder
+//    text captured from the design; `role` documents my best reading of
+//    what each field is for, not a confirmed answer.
+//
+// `nearby`/`dayTrip` one-line fields and the `attraction`/`adventure`
+// name+description+photo blocks are sourced from Map & Activities entries
+// matched by real distance (lib/geo-distance.js's nearestByDistance) —
+// never typed or invented. Page 2 is meant for the closest matches, page 3
+// for the next-closest ("day trips") — see the project doc for the
+// near/far split this assumes, pending Jean's confirmation.
+const PLACE_GUIDE_TEMPLATE_V1 = {
+  category: "place-guide",
+  label: "Landing page — Place! (nearby activities)",
+  masterDesignId: "DAHWA3gbEGo",
+  masterDesignPage: 2,
+  canvasSize: { width: 1080, height: 1350 },
+  fields: [
+    {
+      key: "sectionBanner",
+      type: "text",
+      role: "Small pill banner above the heading — short label/promo text, same slot as property-flyer-v1's promoTag.",
+      matchText: "SECTION BANNER",
+      source: "jean",
+      geometry: { top: 22, left: 82, width: 480, height: 33.4 },
+      style: { fontSize: 28, fontWeight: "bold", color: "#ffffff", textAlign: "center", font: "heading" },
+    },
+    {
+      key: "heading",
+      type: "text",
+      role: "Large heading above the fixed \"PLACE!\" label — reading (best guess, unconfirmed) as the area/town name, e.g. \"KEURBOOMS\".",
+      matchText: "HEADING",
+      source: "stocknetwork+jean",
+      geometry: { top: 65, left: 200, width: 380, height: 81.4 },
+      style: { fontSize: 68, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "subheading",
+      type: "text",
+      role: "Italic subheading below \"PLACE!\" — a short tagline for the area.",
+      matchText: "SUBHEADING",
+      source: "jean",
+      geometry: { top: 250, left: 82, width: 450, height: 40.2 },
+      style: { fontSize: 34, fontWeight: "bold", fontStyle: "italic", color: "#0e2f44", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "nearbyActivity1",
+      type: "text",
+      role: "Nearby-activity one-liner 1 (name + at-a-glance detail).",
+      matchText: "NEARBY ACTIVITY 1 – one short line",
+      source: "map-activities-nearest",
+      geometry: { top: 318, left: 122, width: 410, height: 27.4 },
+      style: { fontSize: 23, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "nearbyActivity2",
+      type: "text",
+      role: "Nearby-activity one-liner 2.",
+      matchText: "NEARBY ACTIVITY 2 – one short line",
+      source: "map-activities-nearest",
+      geometry: { top: 388, left: 122, width: 410, height: 27.4 },
+      style: { fontSize: 23, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "nearbyActivity3",
+      type: "text",
+      role: "Nearby-activity one-liner 3.",
+      matchText: "NEARBY ACTIVITY 3 – one short line",
+      source: "map-activities-nearest",
+      geometry: { top: 458, left: 122, width: 410, height: 27.4 },
+      style: { fontSize: 23, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "resortLine",
+      type: "text",
+      role: "\"RESORT NAME • AREA\" line — same locationLabel construction as property-flyer-v1's headlineLine2.",
+      matchText: "RESORT NAME • AREA",
+      source: "stocknetwork+jean",
+      geometry: { top: 560, left: 82, width: 450, height: 21.4 },
+      style: { fontSize: 18, fontWeight: "normal", color: "#0e2f44", textAlign: "start", font: "body" },
+    },
+    {
+      key: "attraction1Name",
+      type: "text",
+      role: "Attraction 1 name.",
+      matchText: "ATTRACTION 1 NAME",
+      source: "map-activities-nearest",
+      geometry: { top: 955, left: 82, width: 440, height: 36 },
+      style: { fontSize: 30, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "attraction1Description",
+      type: "text",
+      role: "Attraction 1 — one sentence: what it is, why guests will love it, how far from the property (distance comes from lib/geo-distance.js, never typed).",
+      matchText: "One sentence: what it is, why guests will love it, and how far it is from the property.",
+      source: "map-activities-nearest",
+      geometry: { top: 1000, left: 82, width: 440, height: 55.6 },
+      style: { fontSize: 22, fontWeight: "normal", color: "#0e2f44", textAlign: "start", font: "body" },
+    },
+    {
+      key: "attraction2Name",
+      type: "text",
+      role: "Attraction 2 name.",
+      matchText: "ATTRACTION 2 NAME",
+      source: "map-activities-nearest",
+      geometry: { top: 955, left: 558, width: 440, height: 36 },
+      style: { fontSize: 30, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "attraction2Description",
+      type: "text",
+      role: "Attraction 2 — same one-sentence shape as attraction1Description.",
+      matchText: "One sentence: what it is, why guests will love it, and how far it is from the property.",
+      source: "map-activities-nearest",
+      geometry: { top: 1000, left: 558, width: 440, height: 55.6 },
+      style: { fontSize: 22, fontWeight: "normal", color: "#0e2f44", textAlign: "start", font: "body" },
+    },
+    {
+      key: "contactLabel",
+      type: "text",
+      role: "Fixed \"Contact us\" label, same as property-flyer-v1.",
+      matchText: "LABEL",
+      source: "fixed",
+      geometry: { top: 1217, left: 120, width: 340, height: 27.4 },
+      style: { fontSize: 23, fontWeight: "normal", color: "#ffffff", textAlign: "start", font: "body" },
+    },
+    {
+      key: "contactPhone",
+      type: "text",
+      role: "Contact phone — same shared/override source as property-flyer-v1.",
+      matchText: "PHONE NUMBER",
+      source: "jean-settings-override",
+      geometry: { top: 1245, left: 120, width: 340, height: 37.6 },
+      style: { fontSize: 32, fontWeight: "bold", color: "#ffffff", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "contactEmail",
+      type: "text",
+      role: "Contact email — same shared/override source as property-flyer-v1.",
+      matchText: "EMAIL ADDRESS",
+      source: "jean-settings-override",
+      geometry: { top: 1290, left: 120, width: 340, height: 18.8 },
+      style: { fontSize: 16, fontWeight: "normal", color: "#ffffff", textAlign: "start", font: "body" },
+    },
+    {
+      key: "ctaDates",
+      type: "text",
+      role: "Call to action + dates banner — same typed flyerDates/CTA source as the existing flyers.",
+      matchText: "CALL TO ACTION + DATES",
+      source: "jean",
+      geometry: { top: 1245, left: 558, width: 440, height: 36 },
+      style: { fontSize: 30, fontWeight: "bold", color: "#ffffff", textAlign: "center", font: "heading" },
+    },
+  ],
+  images: [
+    { key: "areaImage", role: "Area/coastline photo, upper right.", shape: "circle", geometry: { top: 100, left: 610, width: 420, height: 420 } },
+    { key: "attraction1Image", role: "Attraction 1 photo.", shape: "rect", geometry: { top: 680, left: 82, width: 440, height: 250 } },
+    { key: "attraction2Image", role: "Attraction 2 photo.", shape: "rect", geometry: { top: 680, left: 558, width: 440, height: 250 } },
+  ],
+  chrome: {
+    backdropCircles: [
+      { geometry: { top: -110, left: 540, width: 763, height: 763 }, color: "#0e2f44" },
+      { geometry: { top: -110, left: 574, width: 763, height: 763 }, color: "#0dcdc2" },
+    ],
+    sectionBannerPill: { geometry: { top: 6, left: 82, width: 480, height: 72 }, color: "#0dcdc2", rx: 24 },
+    contactBlock: { geometry: { top: 1196, left: 82, width: 415, height: 150 }, color: "#0e2f44", rx: 24 },
+    ctaPill: { geometry: { top: 1215, left: 558, width: 440, height: 100 }, color: "#0dcdc2", rx: 32 },
+    dividerBars: [
+      { geometry: { top: 930, left: 82, width: 440, height: 8 }, color: "#0dcdc2" },
+      { geometry: { top: 930, left: 558, width: 440, height: 8 }, color: "#0dcdc2" },
+    ],
+    // Fixed page label — "PLACE!" — part of the design's own section
+    // branding, not per-hook content. Rendered exactly as captured.
+    pageLabel: { text: "PLACE!", geometry: { top: 149, left: 200, width: 380, height: 66.8 }, style: { fontSize: 56, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" } },
+    logo: { geometry: { top: 65, left: 36, width: 128, height: 84 }, textFallback: { line1: "AVANTE", line2: "TRAVEL", color: "#0dcdc2" } },
+  },
+  notEditable: ["brand logo", "backdrop circles", "divider bars", "\"PLACE!\" page label"],
+};
+HOOK_TEMPLATES["place-guide-v1"] = PLACE_GUIDE_TEMPLATE_V1;
+
+const TOWN_REGION_TEMPLATE_V1 = {
+  category: "town-region",
+  label: "Landing page — Town! & Region (day trips)",
+  masterDesignId: "DAHWA3gbEGo",
+  masterDesignPage: 3,
+  canvasSize: { width: 1080, height: 1350 },
+  fields: [
+    {
+      key: "sectionBanner",
+      type: "text",
+      role: "Small pill banner above the heading — same slot as place-guide-v1's sectionBanner.",
+      matchText: "SECTION BANNER",
+      source: "jean",
+      geometry: { top: 22, left: 82, width: 480, height: 33.4 },
+      style: { fontSize: 28, fontWeight: "bold", color: "#ffffff", textAlign: "center", font: "heading" },
+    },
+    {
+      key: "heading",
+      type: "text",
+      role: "Large heading above the fixed \"TOWN!\" / \"& REGION\" labels — reading (best guess, unconfirmed) as the wider region name, e.g. \"GARDEN ROUTE\".",
+      matchText: "HEADING",
+      source: "stocknetwork+jean",
+      geometry: { top: 65, left: 200, width: 380, height: 81.4 },
+      style: { fontSize: 68, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "dayTrip1",
+      type: "text",
+      role: "Day trip 1 — name + drive time (distance comes from lib/geo-distance.js's straight-line estimate, never a real drive time — see that file's own note on the distinction).",
+      matchText: "DAY TRIP 1 – name + drive time",
+      source: "map-activities-farther",
+      geometry: { top: 318, left: 122, width: 410, height: 27.4 },
+      style: { fontSize: 23, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "dayTrip2",
+      type: "text",
+      role: "Day trip 2.",
+      matchText: "DAY TRIP 2 – name + drive time",
+      source: "map-activities-farther",
+      geometry: { top: 388, left: 122, width: 410, height: 27.4 },
+      style: { fontSize: 23, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "dayTrip3",
+      type: "text",
+      role: "Day trip 3.",
+      matchText: "DAY TRIP 3 – name + drive time",
+      source: "map-activities-farther",
+      geometry: { top: 458, left: 122, width: 410, height: 27.4 },
+      style: { fontSize: 23, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "distanceNote",
+      type: "text",
+      role: "Short reassurance line, e.g. \"All an easy drive from [area]\".",
+      matchText: "DISTANCE NOTE – e.g. All an easy drive from [area]",
+      source: "jean",
+      geometry: { top: 560, left: 82, width: 450, height: 21.4 },
+      style: { fontSize: 18, fontWeight: "normal", color: "#0e2f44", textAlign: "start", font: "body" },
+    },
+    {
+      key: "adventure1Name",
+      type: "text",
+      role: "Adventure 1 name.",
+      matchText: "ADVENTURE 1 NAME",
+      source: "map-activities-farther",
+      geometry: { top: 955, left: 82, width: 440, height: 36 },
+      style: { fontSize: 30, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "adventure1Description",
+      type: "text",
+      role: "Adventure 1 — one sentence: the experience, where it leaves from, roughly how far away.",
+      matchText: "One sentence: the experience, where it leaves from, and roughly how far away.",
+      source: "map-activities-farther",
+      geometry: { top: 1000, left: 82, width: 440, height: 55.6 },
+      style: { fontSize: 22, fontWeight: "normal", color: "#0e2f44", textAlign: "start", font: "body" },
+    },
+    {
+      key: "adventure2Name",
+      type: "text",
+      role: "Adventure 2 name.",
+      matchText: "ADVENTURE 2 NAME",
+      source: "map-activities-farther",
+      geometry: { top: 955, left: 558, width: 440, height: 36 },
+      style: { fontSize: 30, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "adventure2Description",
+      type: "text",
+      role: "Adventure 2 — same one-sentence shape as adventure1Description.",
+      matchText: "One sentence: the experience, where it leaves from, and roughly how far away.",
+      source: "map-activities-farther",
+      geometry: { top: 1000, left: 558, width: 440, height: 55.6 },
+      style: { fontSize: 22, fontWeight: "normal", color: "#0e2f44", textAlign: "start", font: "body" },
+    },
+    {
+      key: "contactLabel",
+      type: "text",
+      role: "Fixed \"Contact us\" label.",
+      matchText: "LABEL",
+      source: "fixed",
+      geometry: { top: 1217, left: 120, width: 340, height: 27.4 },
+      style: { fontSize: 23, fontWeight: "normal", color: "#ffffff", textAlign: "start", font: "body" },
+    },
+    {
+      key: "contactPhone",
+      type: "text",
+      role: "Contact phone — shared/override source, same as everywhere else.",
+      matchText: "PHONE NUMBER",
+      source: "jean-settings-override",
+      geometry: { top: 1245, left: 120, width: 340, height: 37.6 },
+      style: { fontSize: 32, fontWeight: "bold", color: "#ffffff", textAlign: "start", font: "heading" },
+    },
+    {
+      key: "contactEmail",
+      type: "text",
+      role: "Contact email — shared/override source, same as everywhere else.",
+      matchText: "EMAIL ADDRESS",
+      source: "jean-settings-override",
+      geometry: { top: 1290, left: 120, width: 340, height: 18.8 },
+      style: { fontSize: 16, fontWeight: "normal", color: "#ffffff", textAlign: "start", font: "body" },
+    },
+    {
+      key: "ctaDates",
+      type: "text",
+      role: "Call to action + dates banner.",
+      matchText: "CALL TO ACTION + DATES",
+      source: "jean",
+      geometry: { top: 1245, left: 558, width: 440, height: 36 },
+      style: { fontSize: 30, fontWeight: "bold", color: "#ffffff", textAlign: "center", font: "heading" },
+    },
+  ],
+  images: [
+    { key: "townImage", role: "Town/aerial photo, upper right.", shape: "circle", geometry: { top: 100, left: 610, width: 420, height: 420 } },
+    { key: "adventure1Image", role: "Adventure 1 photo.", shape: "rect", geometry: { top: 680, left: 82, width: 440, height: 250 } },
+    { key: "adventure2Image", role: "Adventure 2 photo.", shape: "rect", geometry: { top: 680, left: 558, width: 440, height: 250 } },
+  ],
+  chrome: {
+    backdropCircles: [
+      { geometry: { top: -110, left: 540, width: 763, height: 763 }, color: "#0e2f44" },
+      { geometry: { top: -110, left: 574, width: 763, height: 763 }, color: "#0dcdc2" },
+    ],
+    sectionBannerPill: { geometry: { top: 6, left: 82, width: 480, height: 72 }, color: "#0dcdc2", rx: 24 },
+    contactBlock: { geometry: { top: 1196, left: 82, width: 415, height: 150 }, color: "#0e2f44", rx: 24 },
+    ctaPill: { geometry: { top: 1215, left: 558, width: 440, height: 100 }, color: "#0dcdc2", rx: 32 },
+    dividerBars: [
+      { geometry: { top: 930, left: 82, width: 440, height: 8 }, color: "#0dcdc2" },
+      { geometry: { top: 930, left: 558, width: 440, height: 8 }, color: "#0dcdc2" },
+    ],
+    // Fixed page labels — "TOWN!" and "& REGION" — part of the design's own
+    // section branding, not per-hook content.
+    pageLabel: { text: "TOWN!", geometry: { top: 149, left: 200, width: 380, height: 66.8 }, style: { fontSize: 56, fontWeight: "bold", color: "#0e2f44", textAlign: "start", font: "heading" } },
+    pageLabel2: { text: "& REGION", geometry: { top: 250, left: 82, width: 450, height: 40.2 }, style: { fontSize: 34, fontWeight: "bold", fontStyle: "italic", color: "#0e2f44", textAlign: "start", font: "heading" } },
+    logo: { geometry: { top: 65, left: 36, width: 128, height: 84 }, textFallback: { line1: "AVANTE", line2: "TRAVEL", color: "#0dcdc2" } },
+  },
+  notEditable: ["brand logo", "backdrop circles", "divider bars", "\"TOWN!\"/\"& REGION\" page labels"],
+};
+HOOK_TEMPLATES["town-region-v1"] = TOWN_REGION_TEMPLATE_V1;
+
 // Look up a template by id. Returns undefined if unknown.
 export function getHookTemplate(templateId) {
   return HOOK_TEMPLATES[templateId];
