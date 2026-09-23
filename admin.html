@@ -5038,7 +5038,10 @@
       for(var i = 1; i <= HOOK_COUNT; i++){
         html +=
           '<div class="hook-card">' +
-            '<div class="hook-badge">Hook ' + i + '</div>' +
+            '<div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">' +
+              '<div class="hook-badge" style="margin-bottom:0;">Hook ' + i + '</div>' +
+              '<button type="button" class="btn-danger btn-small" data-clear-hook="' + i + '">Clear hook</button>' +
+            '</div>' +
             '<label for="dh' + i + '-category" style="margin-top:0;">Hook type</label>' +
             '<select id="dh' + i + '-category" data-category-select="' + i + '">' +
               '<option value="property">Property / resort stay</option>' +
@@ -5386,6 +5389,111 @@
         }).catch(function(){
           statusEl.textContent = 'Could not remove that PDF — please try again.';
           statusEl.className = 'status show';
+        });
+      }
+
+      // Resets a Default Hook slot's form back to its just-created, never-
+      // configured state (2026-09-23, per Jean: "a button to clear a hook")
+      // — mirrors exactly the fields loadDefaultHooks fills in, just with
+      // every one set back to blank/default instead of a saved value, plus
+      // clearing the draft/preview boxes and cached per-hook JS state
+      // (hashtags, locationLabel, autobuild/event drafts, flyer preview) so
+      // nothing from before the clear lingers on screen. Called only after
+      // the server confirms clearDefaultHook actually succeeded — never
+      // optimistically, so a failed clear leaves the form showing exactly
+      // what's still really saved.
+      function resetHookFormFields(n){
+        document.getElementById('dh' + n + '-booking').value = '';
+        document.getElementById('dh' + n + '-landing').value = '';
+        document.getElementById('dh' + n + '-caption').value = '';
+        document.getElementById('dh' + n + '-flyerPromoTag').value = '';
+        document.getElementById('dh' + n + '-flyerPrice').value = '';
+        document.getElementById('dh' + n + '-flyerDates').value = '';
+        document.getElementById('dh' + n + '-category').value = 'property';
+        document.getElementById('dh' + n + '-eventNameLine1').value = '';
+        document.getElementById('dh' + n + '-eventNameLine2').value = '';
+        document.getElementById('dh' + n + '-eventSubtitle').value = '';
+        document.getElementById('dh' + n + '-eventSectionHeading').value = '';
+        document.getElementById('dh' + n + '-eventHighlight1').value = '';
+        document.getElementById('dh' + n + '-eventHighlight2').value = '';
+        document.getElementById('dh' + n + '-eventHighlight3').value = '';
+        document.getElementById('dh' + n + '-eventHighlight4').value = '';
+        document.getElementById('dh' + n + '-eventDate').value = '';
+        document.getElementById('dh' + n + '-eventLocationName').value = '';
+        document.getElementById('dh' + n + '-eventLocationDetail').value = '';
+        document.getElementById('dh' + n + '-eventTheme').value = '';
+        document.getElementById('dh' + n + '-eventSourceUrl').value = '';
+        applyHookCategoryVisibility(n);
+        document.getElementById('dh' + n + '-updated').textContent = 'Never updated';
+        defaultHookHashtags[n] = null;
+        defaultHookLocationLabel[n] = '';
+        showHookLocationNote(n, '');
+        setImageSrc(n); // re-fetches /api/hook-image, which now 404s -> placeholder shown
+        var galleryNote = document.getElementById('dh' + n + '-galleryNote');
+        galleryNote.style.display = 'none';
+        updateSourceNote(n, null);
+
+        delete autobuildDrafts[n];
+        renderAutobuildDraft(n);
+        delete eventDrafts[n];
+        renderEventDraftPreview(n);
+        var eventDraftStatus = document.getElementById('dh' + n + '-eventDraftStatus');
+        if(eventDraftStatus) eventDraftStatus.textContent = '';
+
+        var pdfStatus = document.getElementById('dh' + n + '-pdfStatus');
+        if(pdfStatus){ pdfStatus.textContent = ''; pdfStatus.className = 'status'; }
+        var imageStatus = document.getElementById('dh' + n + '-imageStatus');
+        if(imageStatus){ imageStatus.textContent = ''; imageStatus.className = 'status'; }
+
+        flyerState[n] = null;
+        var flyerPanel = document.getElementById('dh' + n + '-flyerPanel');
+        if(flyerPanel) flyerPanel.style.display = 'none';
+        var flyerPreview = document.getElementById('dh' + n + '-flyerPreview');
+        if(flyerPreview) flyerPreview.innerHTML = '';
+        var flyerFields = document.getElementById('dh' + n + '-flyerFields');
+        if(flyerFields) flyerFields.innerHTML = '';
+        var flyerStatus = document.getElementById('dh' + n + '-flyerStatus');
+        if(flyerStatus){ flyerStatus.textContent = ''; flyerStatus.className = 'status'; }
+      }
+
+      // Clears Hook n entirely — its saved fields/links/caption, its photos
+      // (cover + every gallery slot), and any PDF its own Landing page link
+      // currently points to — resetting the slot back to empty so it can be
+      // reused for a different property or event without any stale content
+      // left behind. Confirms once before touching anything; the PDF (if
+      // any) is removed the same way "Remove PDF" removes it, just without
+      // its own separate confirm since this one already covers it.
+      function clearHook(n){
+        var errEl = document.getElementById('dh' + n + '-errorStatus');
+        errEl.className = 'status';
+        errEl.textContent = '';
+
+        if(!window.confirm('Clear Hook ' + n + '? This removes its saved fields, photos and PDF, and resets it back to empty. This cannot be undone.')) return;
+
+        errEl.textContent = 'Clearing…';
+        errEl.className = 'status show';
+
+        var landingEl = document.getElementById('dh' + n + '-landing');
+        var pdfParsed = parseOwnHookPdfUrl(landingEl.value.trim());
+        var pdfCleanup = pdfParsed
+          ? fetch('/api/hook-pdf?aff=' + ADMIN_AFF + '&hook=' + encodeURIComponent(pdfParsed.hook), { method: 'DELETE' }).catch(function(){})
+          : Promise.resolve();
+
+        pdfCleanup.then(function(){
+          return adminPost('clearDefaultHook', { hook: n });
+        }).then(function(res){
+          if(!res.data || !res.data.ok){
+            errEl.textContent = 'Could not clear this hook — please try again.';
+            errEl.className = 'status show';
+            return;
+          }
+          resetHookFormFields(n);
+          errEl.textContent = '';
+          errEl.className = 'status';
+          showToast('Hook ' + n + ' cleared');
+        }).catch(function(){
+          errEl.textContent = 'Could not reach the server — please try again.';
+          errEl.className = 'status show';
         });
       }
 
@@ -5933,6 +6041,11 @@
         var saveN = e.target.getAttribute('data-hook-save');
         if(saveN){
           saveHook(saveN);
+          return;
+        }
+        var clearN = e.target.getAttribute('data-clear-hook');
+        if(clearN){
+          clearHook(clearN);
           return;
         }
         var uploadN = e.target.getAttribute('data-upload-image');
